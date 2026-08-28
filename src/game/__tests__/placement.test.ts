@@ -10,6 +10,7 @@ import {
   describePlay,
   GAP_FT,
   AT_HIM_FT,
+  TRIPLE_GAP_FT,
 } from '../placement.ts';
 import { directionFor, applyFoul, resolveSwing, type SwingInput } from '../../core/hit.ts';
 import { OUTCOME_TABLES, isHit, type Outcome } from '../../core/hitTables.ts';
@@ -181,8 +182,43 @@ describe('the stretch', () => {
   });
 
   it('a triple is held to a double unless it is genuinely in space', () => {
-    expect(stretch('triple', { ...inSpace, gapFt: GAP_FT - 1, inTheGap: false })).toBe('double');
+    expect(stretch('triple', { ...inSpace, gapFt: TRIPLE_GAP_FT - 1, inTheGap: false })).toBe('double');
     expect(stretch('triple', inSpace)).toBe('triple');
+  });
+
+  /**
+   * ⚠️ THE REGRESSION THIS FILE DID NOT HAVE, and the reason the game had no
+   * triples at all for weeks. Every test above builds a Placement by hand, so
+   * all of them passed while the bar sat at a gap distance no real batted ball
+   * could reach: the triple branch asked for 128ft and the balls the table
+   * calls a triple top out at 128.3ft, so three in 4,706 survived.
+   *
+   * The fix is not a number, it is testing the two halves TOGETHER. Nothing
+   * that hand-builds a Placement can catch a bar the geometry cannot clear.
+   */
+  it('⚠️ triples SURVIVE the geometry — the bar has to be reachable', () => {
+    const rng = makeRng(20260828);
+    const stats = { power: 1.0, contact: 1.0, vision: 1.0, clutch: 1.0, bunt: 1.0, speed: 1.0 };
+    let hits = 0;
+    let triples = 0;
+    for (let i = 0; i < 30000; i++) {
+      const res = resolveSwing(
+        {
+          offsetMs: rng.range(-60, 60),
+          pitchType: 'fastball',
+          stats,
+        } as SwingInput,
+        rng,
+      );
+      if (!res.isHit) continue;
+      hits++;
+      if (stretch(res.outcome, place(res)) === 'triple') triples++;
+    }
+    // A triple is ~1.7% of hits in real baseball. The point of the assertion is
+    // the lower bound: it must not be zero.
+    expect(triples).toBeGreaterThan(0);
+    expect(triples / hits).toBeGreaterThan(0.005);
+    expect(triples / hits).toBeLessThan(0.04);
   });
 
   it('never touches a home run or an out', () => {

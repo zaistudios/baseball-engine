@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { LEAGUE, club } from '../teams.ts';
 import { armValue, byStrength, clubValue, playerValue, showScale, strengthLabel, strengthRank } from '../value.ts';
-import { newSeason, playDay, standings, REGULAR_DAYS, BLOWOUT } from '../franchise.ts';
+import { newSeason, playDay, standings, yourGame, REGULAR_DAYS, BLOWOUT, YOUR_STORY } from '../franchise.ts';
 
 /** Nobody's club, so playDay() simulates all four games instead of skipping one. */
 const NOBODY = '---';
@@ -96,6 +96,62 @@ describe('a season keeps its own record', () => {
       const [, w, l] = item.text.match(/(\d+)-(\d+)/)!;
       expect(Math.abs(Number(w) - Number(l))).toBeGreaterThanOrEqual(BLOWOUT);
     }
+  });
+
+  /**
+   * ⚠️ THE WIRE USED TO BE A HUMILIATION FEED. It picked one game out of
+   * fifteen with no preference for the club you run, and the only games that
+   * qualified were routs and shutouts — so your club appeared only on the days
+   * somebody hung a touchdown on you. A measured season: Albany's three
+   * mentions were "MIN rout ALB", "MIN shut out ALB" and "FLA rout ALB", and
+   * the 10-6 win, the eleven-inning loss and the 7-2 finale went unwritten.
+   *
+   * ⚠️ THE SEASON HAS TO BE DRIVEN THE WAY main.ts DRIVES IT. playDay() with no
+   * Result of your own does not play your game AT ALL — gamesOn() hands back
+   * the other fourteen and yours is simply skipped. A test that loops bare
+   * playDay() over a season you own is testing a league you are not in.
+   */
+  const seasonWhereYouWinBy = (you: string, margin: number, seed = 20260828) => {
+    let s = newSeason(you, seed);
+    for (let d = 0; d < REGULAR_DAYS; d++) {
+      const m = yourGame(s);
+      if (!m) {
+        s = playDay(s);
+        continue;
+      }
+      const win = m.home === you ? { hr: 2 + margin, ar: 2 } : { hr: 2, ar: 2 + margin };
+      s = playDay(s, { ...m, day: s.day, hh: 9, ah: 6, ...win });
+    }
+    return s;
+  };
+
+  it('⚠️ your club makes the wire for winning, not only for losing', () => {
+    const s = seasonWhereYouWinBy('ALB', YOUR_STORY);
+    const mine = s.news!.filter((n) => n.kind === 'game' && n.text.includes('ALB'));
+
+    // Every one of those days was a win by exactly the story margin, so your
+    // club takes the slot every day it plays — and is always named first.
+    expect(mine.length).toBeGreaterThan(2);
+    expect(mine.every((n) => n.text.startsWith('ALB'))).toBe(true);
+  });
+
+  it("...and only says 'beat' about the club you run", () => {
+    const s = seasonWhereYouWinBy('ALB', YOUR_STORY);
+    for (const item of s.news!.filter((n) => n.kind === 'game' && n.text.includes('beat'))) {
+      expect(item.text).toContain('ALB');
+      const [, w, l] = item.text.match(/(\d+)-(\d+)/)!;
+      const margin = Math.abs(Number(w) - Number(l));
+      expect(margin).toBeGreaterThanOrEqual(YOUR_STORY);
+      expect(margin).toBeLessThan(BLOWOUT);
+    }
+  });
+
+  it('a one-run afternoon of yours does not push the league off the page', () => {
+    // Below the bar, so the wire goes back to reporting somebody's rout.
+    const s = seasonWhereYouWinBy('ALB', YOUR_STORY - 1);
+    const games = s.news!.filter((n) => n.kind === 'game');
+    expect(games.length).toBeGreaterThan(0);
+    expect(games.every((n) => /rout|shut out/.test(n.text))).toBe(true);
   });
 
   it('announces the bracket exactly once, on the day it exists', () => {

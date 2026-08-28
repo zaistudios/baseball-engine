@@ -74,6 +74,36 @@ export const GAP_FT = 128;
  */
 export const AT_HIM_FT = 74;
 
+/**
+ * The bar a table-triple has to clear to stay a triple.
+ *
+ * ⚠️ IT IS NOT `GAP_FT`, AND USING `GAP_FT` HERE KILLED EVERY TRIPLE IN THE
+ * GAME. Measured 2026-08-28 after a season came back 2,676 singles, 742
+ * doubles, 558 home runs and **zero** three-baggers: the triple branch below
+ * asked for `gapFt >= 128`, and across 4,706 balls the table called a triple
+ * the gap to the nearest fielder tops out at **128.3ft**. Three of them
+ * cleared it. The bar was sitting on the ceiling of the distribution.
+ *
+ * The 128 above is not wrong for what it measures — p90 of gap distance over
+ * ALL HITS really is 145ft. It is the wrong population. The far-from-anybody
+ * balls are bloopers and stuff down the line; a ball the table calls a triple
+ * carries 183-392ft into the deep outfield, where the fielders are, and its
+ * own distribution is p25 52ft, p50 74ft, p75 80ft, p90 93ft, max 128ft.
+ *
+ * So the bar is set against the triples themselves. A triple is ~1.7% of hits
+ * in real baseball and 4.3% of them before placement, so roughly a third
+ * survive:
+ *
+ *   bar 70ft -> 2.43% of hits    bar 78ft -> 1.32%
+ *   bar 74ft -> 2.14%            bar 82ft -> 0.87%
+ *   bar 76ft -> ~1.8%
+ *
+ * ⚠️ THE CURVE IS STEEP RIGHT HERE — p60 is 75.3ft and p70 is 78.2ft — so this
+ * is the calibration knob for the triple rate and a few feet is a big move.
+ * Re-measure with scripts/place.ts against TRIPLES, not against all hits.
+ */
+export const TRIPLE_GAP_FT = 76;
+
 const feetXY = (distFt: number, dirDeg: number) => {
   const rad = (dirDeg * Math.PI) / 180;
   return { x: Math.sin(rad) * distFt, y: Math.cos(rad) * distFt };
@@ -149,10 +179,14 @@ export function stretch(outcome: Outcome, p: Placement): Outcome {
     return 'double';
   }
   if (outcome === 'triple') {
-    // THE MAIN JOB OF THIS FUNCTION. The ported tables give ~5.5% triples
-    // against a real ~2%, so most of them are held to two bases because
+    // THE MAIN JOB OF THIS FUNCTION. The ported tables give ~4.3% triples
+    // against a real ~1.7%, so most of them are held to two bases because
     // somebody was in position to cut the ball off.
-    if (p.gapFt < GAP_FT) return 'double';
+    //
+    // ⚠️ THE BAR IS TRIPLE_GAP_FT, NOT GAP_FT. See the header on that constant:
+    // GAP_FT is measured over all hits and no table-triple can reach it, so
+    // this line used to hold ALL of them and the game had no triples at all.
+    if (p.gapFt < TRIPLE_GAP_FT) return 'double';
     return 'triple';
   }
   return outcome;

@@ -576,6 +576,63 @@ const CHASE: Record<string, number> = {
 };
 
 /**
+ * WHOSE EYE IT IS. The tables above are the same for every hitter in the
+ * league; this is the only thing that makes one of them harder to fool.
+ *
+ * ⚠️ WITHOUT IT, WALKS RAN BACKWARDS. Measured over a full season (16,479 PA)
+ * on 2026-08-28: correlation between walk rate and `vision` was **-0.697**,
+ * and between walk rate and `power` **+0.747**. Sluggers walked 19.4% of the
+ * time and the best-eye quartile walked 2.3%; a fifth of all regulars finished
+ * the year with ZERO walks in 40+ plate appearances. The league total was
+ * 9.4%, which is right, which is why nothing ever caught it.
+ *
+ * The cause was that take-or-swing read the count and nothing else, so a walk
+ * was a byproduct of AT-BAT LENGTH: `vision` widens the whiff boundary in
+ * grade(), so a good eye put the ball in play early and never reached ball
+ * four, while a slugger fouled and whiffed his way to 3-2 and got walked. The
+ * rating that is supposed to mean "he is hard to fool" was making him easier.
+ *
+ * ⚠️ IT SCALES THE CHASE ONLY, NEVER THE ZONE. Real plate discipline is almost
+ * entirely about the pitch off the plate — good and bad hitters swing at
+ * strikes at similar rates. Putting it on ZONE_SWING as well would make a good
+ * eye take strikes, which is not discipline, it is a slump.
+ *
+ * ⚠️ IT IS CENTRED, NOT SCALED FROM 1.0, and the centre is SOLVED rather than
+ * eyeballed. The fix has to redistribute discipline without handing the league
+ * more or fewer walks than it was measured to have, so `EYE_CENTER` is the c
+ * that makes the mean of `(c / vision)^k` come out to exactly 1.0 across all
+ * 270 hitters. It is NOT the mean vision (1.058) — (c/v)^k is convex, so
+ * centring on the mean quietly raises the average chase. Doing exactly that
+ * cost the league 21% of its walks on the first attempt.
+ *
+ * ⚠️ SO THE TWO CONSTANTS MOVE TOGETHER. Changing the exponent without
+ * re-solving the centre changes the league's walk rate as a side effect. The
+ * solved pairs, and what they buy the extremes:
+ *
+ *   k=1  centre 1.0449   best eye 0.79x chase .. worst 1.32x
+ *   k=2  centre 1.0384   0.62x .. 1.73x
+ *   k=3  centre 1.0317   0.48x .. 2.23x
+ *   k=4  centre 1.0251   0.36x .. 2.84x   <- shipped
+ *
+ * k=4 because vision only spans 0.79-1.32 and the at-bat-length effect above
+ * is strong — k=1 is invisible on a stat line. It lands the chase rates where
+ * a real league has them: 10% for the best eye in the game, 48% for the worst,
+ * against a real major-league range of about 18% to 45%.
+ *
+ * ⚠️ IT DOES NOT FULLY UNDO THE BACKWARDS CORRELATION, and the rest is not in
+ * this file. Two things outside it still push walks toward the sluggers, both
+ * on purpose: teams.ts is built with corr(vision, power) = -0.81, so a good
+ * eye and real power almost never share a card, and DANGEROUS_POWER in
+ * pitcher.ts has the arm pitch around a big bat, which is real baseball. The
+ * third is not on purpose — a high-contact hitter ends 88% of his plate
+ * appearances with a ball in play against a real ~68%, so he never sees enough
+ * pitches to walk. That one is the foul/contact model, not the swing decision,
+ * and it is the next thing to look at if the walk column still reads thin.
+ */
+export const EYE_CENTER = 1.0251;
+export const CHASE_BY_EYE = 4;
+
+/**
  * The computer's hitter decides what to do with the pitch you just called.
  *
  * THE GUESS IS THE ADAPTATION. If you call the same pitch in the same spot
@@ -603,6 +660,13 @@ export function aiSwing(
   let swingChance: number;
   if (twoStrikes) swingChance = pitch.inZone ? 0.95 : 0.45;
   else swingChance = (pitch.inZone ? ZONE_SWING[key] : CHASE[key]) ?? (pitch.inZone ? 0.82 : 0.22);
+  // ...and then whose eye it is. Off the plate only, and it applies to the
+  // two-strike chase above as well — protecting the plate is still a decision
+  // a man with a good eye makes better. See CHASE_BY_EYE.
+  if (!pitch.inZone) {
+    const eye = ctx.stats.vision > 0 ? ctx.stats.vision : 1;
+    swingChance *= (EYE_CENTER / eye) ** CHASE_BY_EYE;
+  }
   // A hitter who has guessed right goes after it.
   if (guess && guess === pitch.type) swingChance = Math.min(1, swingChance * 1.25);
   swingChance = Math.min(1, swingChance * aggression);

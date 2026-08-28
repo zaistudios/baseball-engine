@@ -216,6 +216,36 @@ describe('the computer hitting', () => {
     expect(rate(false)).toBeLessThan(rate(true));
   });
 
+  /**
+   * ⚠️ THE ONE THAT WAS MISSING. Take-or-swing read the count and nothing else,
+   * so every hitter in the league had the same eye and a walk was a byproduct
+   * of how long his at-bat ran. Measured over a season: walk rate correlated
+   * -0.70 with `vision` and +0.75 with `power`, and a fifth of all regulars
+   * finished with zero walks. The league total was right, which is why no test
+   * and no leaderboard ever showed it.
+   */
+  it('⚠️ a good eye chases less than a bad one — off the plate only', () => {
+    const r = newRead();
+    const chase = (vision: number, inZone: boolean) => {
+      let swings = 0;
+      for (let i = 0; i < 2000; i++) {
+        if (
+          aiSwing(pitch({ inZone }), { count: { balls: 1, strikes: 1 }, stats: { ...stats, vision } }, r, makeRng(i))
+            .swing
+        )
+          swings++;
+      }
+      return swings / 2000;
+    };
+    // The whole range the league's rating cards actually use.
+    expect(chase(1.32, false)).toBeLessThan(chase(1.0, false));
+    expect(chase(1.0, false)).toBeLessThan(chase(0.79, false));
+    // ...and it has to be worth something, not a rounding difference.
+    expect(chase(0.79, false)).toBeGreaterThan(chase(1.32, false) * 2);
+    // Discipline is about the pitch off the plate. Taking strikes is a slump.
+    expect(chase(1.32, true)).toBeCloseTo(chase(0.79, true), 2);
+  });
+
   it('protects with two strikes', () => {
     const r = newRead();
     const rate = (strikes: number) => {

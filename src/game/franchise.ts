@@ -468,6 +468,13 @@ export function playDay(s: Season, yours?: Result, book?: StatBook): Season {
 export const BLOWOUT = 7;
 
 /**
+ * ...and the margin at which YOUR club's result becomes one. Lower, because
+ * you played it. See headlines() — a stranger needs a rout, you need an
+ * afternoon worth reading about.
+ */
+export const YOUR_STORY = 4;
+
+/**
  * What was worth saying about today.
  *
  * ponytail: at most three lines a day — one story game, one table note, one
@@ -485,15 +492,37 @@ function headlines(before: Season, after: Season, played: readonly Result[]): Ne
   // 1. The one game anybody would mention. A shutout outranks a blowout — it is
   //    rarer, and it is about a pitcher, which is the half of the league the
   //    standings table says least about.
+  //
+  // ⚠️ YOUR CLUB GETS THE SLOT FIRST, AND AT A LOWER BAR. Without both halves
+  // of that the wire was a humiliation feed: it picked one game out of fifteen
+  // with no preference at all, so your club appeared only by accident, and the
+  // only accidents that qualified were the days somebody hung a touchdown on
+  // you. Measured over a full season 2026-08-28 — Albany's three mentions were
+  // "MIN rout ALB", "MIN shut out ALB", "FLA rout ALB", and the 10-6 win, the
+  // eleven-inning loss and the 7-2 finale went unwritten.
+  //
+  // A stranger's game has to be a rout or a shutout to be news. Yours only has
+  // to be a good afternoon, because it is your newspaper.
+  const margin = (r: Result): number => Math.abs(r.hr - r.ar);
+  const shutout = (r: Result): boolean => Math.min(r.hr, r.ar) === 0;
+  const mine = (r: Result): boolean => r.home === after.you || r.away === after.you;
   const story =
-    played.find((r) => Math.min(r.hr, r.ar) === 0 && Math.max(r.hr, r.ar) >= 3) ??
-    played.find((r) => Math.abs(r.hr - r.ar) >= BLOWOUT);
+    played.find((r) => mine(r) && (shutout(r) || margin(r) >= YOUR_STORY)) ??
+    played.find((r) => shutout(r) && Math.max(r.hr, r.ar) >= 3) ??
+    played.find((r) => margin(r) >= BLOWOUT);
   if (story) {
     const [w, l, wr, lr] =
       story.hr > story.ar
         ? [story.home, story.away, story.hr, story.ar]
         : [story.away, story.home, story.ar, story.hr];
-    note('game', lr === 0 ? `${w} shut out ${l}, ${wr}-0.` : `${w} rout ${l}, ${wr}-${lr}.`);
+    note(
+      'game',
+      lr === 0
+        ? `${w} shut out ${l}, ${wr}-0.`
+        : margin(story) >= BLOWOUT
+          ? `${w} rout ${l}, ${wr}-${lr}.`
+          : `${w} beat ${l}, ${wr}-${lr}.`,
+    );
   }
 
   // 2. A change at the top. Regular season only — the bracket is seeded off
