@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Baseball — Full Game</title>
+    <style>
+      /* Same split as the roguelike screen: canvas for the pitch, DOM for
+         everything that is text. Text in a canvas is a thing you regret. */
+      :root {
+        --ink: #e8e8d8;
+        --dim: #7a8a6a;
+        --line: #2f3a2a;
+        --bg: #0d1210;
+        --panel: #141b16;
+        --hot: #d8b44a;
+        --good: #6fbf62;
+        --bad: #c4574a;
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 14px;
+        min-height: 100vh;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      .wrap { width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 10px; }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        padding: 10px 12px;
+      }
+
+      /* ---- scoreboard */
+      table.line { width: 100%; border-collapse: collapse; font-size: 12px; }
+      table.line th, table.line td {
+        padding: 2px 6px; text-align: center; border-bottom: 1px solid var(--line);
+      }
+      table.line th { color: var(--dim); font-weight: 400; }
+      table.line td.team { text-align: left; white-space: nowrap; }
+      table.line td.tot { color: var(--hot); font-weight: 700; }
+      tr.batting td.team::before { content: "\25B8 "; color: var(--hot); }
+
+      /* ---- the strip under the scoreboard */
+      .strip { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+      .strip b { color: var(--hot); }
+      .dim { color: var(--dim); }
+
+      /* ---- field + side column */
+      .stage { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+      canvas {
+        image-rendering: pixelated;
+        border: 1px solid var(--line);
+        background: #0a0f0c;
+        flex: 1 1 420px;
+        max-width: 100%;
+        height: auto;
+        cursor: pointer;
+      }
+      .side { flex: 1 1 240px; display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+
+      /* ---- controls */
+      .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+      /* The spot picker is the strike zone, so it is always three by three —
+         never auto-fit, or the grid reflows and stops matching the zone. */
+      .zone { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+      /* ---- the bullpen, set apart from the pitch call on purpose. It is the
+         one control on this screen that cannot be taken back, so it does not
+         sit in the row your hand is already in — see penArmed in main.ts. */
+      .pen { margin-top: 14px; border-top: 1px solid #253026; padding-top: 10px; }
+      .penhead { font-size: 10px; letter-spacing: 2px; margin-bottom: 6px; }
+      .penrow {
+        display: grid; grid-template-columns: 84px 1fr auto auto;
+        gap: 8px; align-items: baseline; font-size: 11px; padding: 3px 0;
+      }
+      .penrow > span:first-child { color: var(--dim); font-size: 10px; letter-spacing: 1px; }
+      .penrow b { font-weight: 400; }
+      .pengo {
+        margin-top: 8px; width: auto; padding: 6px 14px; font-size: 11px;
+        letter-spacing: 1px; color: var(--dim);
+      }
+      .pengo.on { color: var(--bad); border-color: var(--bad); }
+      /* ---- the selected arm, in the pen panel and in the rotation picker.
+         One rule for both: they are the same widget asking the same question
+         about two different lists. */
+      .penrow.picked { background: #1b241d; }
+      .penrow.picked b { color: var(--hot); }
+      /* ---- the bench, in the side column while you are hitting. Stacked
+         rather than columned: it carries a hand and three ratings, which is one
+         more than the pen's grid can fit in 240px without wrapping every name
+         onto three lines. Same picked highlight, so it reads as the same widget. */
+      .benchrow { font-size: 11px; padding: 4px 0; line-height: 1.5; }
+      .benchrow b { font-weight: 400; }
+      .benchrow.picked { background: #1b241d; }
+      .benchrow.picked b { color: var(--hot); }
+      .benchname { display: flex; justify-content: space-between; gap: 8px; }
+      #pre .rotation .penrow { grid-template-columns: 80px 1fr auto auto; padding: 5px 0; }
+      /* The batting order is the same widget again — a list of your own men
+         with one of them picked up. Wider first column than the rotation's
+         because it holds a slot number and the word "moving". */
+      #pre .lineup .penrow { grid-template-columns: 72px 1fr auto auto; padding: 5px 0; }
+      button {
+        font: inherit;
+        color: var(--ink);
+        background: #1b241d;
+        border: 1px solid var(--line);
+        padding: 7px 6px;
+        cursor: pointer;
+        text-align: left;
+      }
+      button:hover:not(:disabled) { border-color: var(--hot); }
+      button:disabled { opacity: 0.35; cursor: default; }
+      button.on { border-color: var(--hot); color: var(--hot); }
+      button kbd { color: var(--dim); font-size: 11px; }
+
+      /* ---- log */
+      #log { height: 150px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px; }
+      #log div { border-bottom: 1px solid #1a221c; padding: 2px 0; }
+      #log .big { color: var(--hot); }
+      #log .out { color: var(--dim); }
+      #log .half { color: var(--good); margin-top: 4px; }
+
+      #banner { font-size: 15px; min-height: 24px; color: var(--hot); }
+      h1 { font-size: 13px; letter-spacing: 2px; color: var(--dim); font-weight: 400; }
+      .book { font-size: 11px; color: var(--dim); line-height: 1.7; }
+      .book b { color: var(--ink); font-weight: 400; }
+
+      /* ---- the two full-screen overlays: pick a mode, then look at the card.
+         One rule for both — they are the same object at different moments, and
+         a second copy of this block is how they drift apart. BOTH scroll: #pre
+         carries a standings table, and #start carries thirty clubs, which is
+         six rows of buttons on a laptop and more than that on a phone.
+         `safe center` is the centring that gives up rather than clipping the
+         top of a list too tall for the screen — plain `center` would put the
+         first row of clubs above the scroll and out of reach. */
+      #start, #pre {
+        position: fixed; inset: 0; z-index: 5; background: var(--bg);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 14px; padding: 20px;
+      }
+      #start, #pre { overflow-y: auto; }
+      #start { justify-content: safe center; }
+      #pre { justify-content: flex-start; gap: 10px; }
+      #pre .wrap { max-width: 720px; gap: 10px; }
+      #pre h2 { font-size: 13px; letter-spacing: 2px; color: var(--hot); font-weight: 400; }
+      #pre .vs { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+      #pre .vs .panel { flex: 1 1 260px; }
+      #pre .club { font-size: 15px; color: var(--hot); letter-spacing: 1px; }
+      #pre table.line td.team { text-align: left; }
+      #pre tr.you td { color: var(--hot); }
+      #pre .wire div { padding: 2px 0; border-bottom: 1px solid #1a221c; }
+      #pre .wire .roster { color: var(--good); }
+      #pre .go { width: 100%; text-align: center; padding: 12px; font-size: 14px; }
+      /* ---- a franchise moment. Same overlay, so the only new rule is that the
+         choices stack full-width and read as paragraphs rather than as the
+         grid of club buttons on the start screen. */
+      #pre .choices { display: flex; flex-direction: column; gap: 8px; }
+      #pre .choice { padding: 12px; line-height: 1.6; }
+      #pre .choice b { color: var(--hot); font-weight: 400; letter-spacing: 1px; }
+      #start h2 { font-size: 13px; letter-spacing: 2px; color: var(--hot); font-weight: 400; }
+      #start .keys { width: 100%; max-width: 820px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      #start button { text-align: center; padding: 12px 8px; }
+      #start button b { color: var(--hot); font-weight: 400; letter-spacing: 1px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>ALL-STAR BASEBALL — EXHIBITION</h1>
+
+      <div class="panel" id="scoreboard"></div>
+
+      <div class="panel strip" id="situation"></div>
+
+      <div class="panel strip" id="meta"></div>
+
+      <div id="banner"></div>
+
+      <div class="stage">
+        <canvas id="field" width="420" height="340"></canvas>
+        <div class="side">
+          <div class="panel" id="controls"></div>
+          <div class="panel" id="log"></div>
+          <div class="panel book" id="book"></div>
+        </div>
+      </div>
+    </div>
+    <div id="start">
+      <h1>ALL-STAR BASEBALL</h1>
+      <h2></h2>
+      <div class="keys"></div>
+      <!-- How hard the swing is. Drawn on the mode screen only, and answerable
+           again all game from the strip under the scoreboard. -->
+      <div class="keys levels"></div>
+    </div>
+    <!-- Filled and shown by showPregame() before every franchise game. Empty
+         and hidden in an exhibition, which has no standings to stand on. -->
+    <div id="pre" style="display:none"></div>
+    <script type="module" src="/src/game/main.ts"></script>
+  </body>
+</html>

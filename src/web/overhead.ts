@@ -1,0 +1,630 @@
+/**
+ * THE OVERHEAD REPLAY — the camera that cuts to the field when a ball is hit.
+ *
+ * This was inside the roguelike screen until both screens wanted it. It is a
+ * REPLAY, not a simulation, and that distinction is load-bearing: the outcome
+ * was decided by hitTables.ts before contact was even drawn. Nothing here can
+ * change it and nothing here is allowed to try — see the scope note in plot.ts.
+ * Fielders converging and the throw-versus-runner race are choreography over a
+ * result already in the book.
+ *
+ * Everything that used to be a module global in the caller is a parameter now:
+ * the canvas, the camera, the two field colours and the sound bank. That is the
+ * whole of the extraction — no behaviour moved, so the roguelike screen draws
+ * exactly what it drew before.
+ */
+
+import type { RunnerMove } from '../core/inning.ts';
+import type { Outcome } from '../core/hitTables.ts';
+import {
+  WALL_FT,
+  BASE_FT,
+  plotBatted,
+  overheadPoint,
+  nearestFielder,
+  chaseReach,
+  hasPlayAtFirst,
+  raceTiming,
+  playCues,
+  roleFor,
+  FIELDERS,
+  REACTION_MS,
+  SHADE,
+  type Plot,
+  type Fielder,
+  type Race,
+} from './plot.ts';
+import { drawSprite } from './sprites.ts';
+
+// ------------------------------------------------------------- the camera
+
+/**
+ * Home plate near the bottom, the wall arc near the top.
+ *
+ * `pxPerFt` defaults to whatever fits the canvas. Straightaway centre is the
+ * tightest direction — down the line only needs 400·sin45 = 283ft of width and
+ * there is usually more width than height to spend.
+ */
+export interface Cam {
+  w: number;
+  h: number;
+  home: { x: number; y: number };
+  pxPerFt: number;
+  /** Centre of the diamond to a bag, so first sits 90ft down the line. */
+  baseR: number;
+  centre: { x: number; y: number };
+}
+
+export function makeCam(w: number, h: number, pxPerFt?: number): Cam {
+  const px =
+    pxPerFt ?? Math.min((h - 60) / WALL_FT, (w / 2 - 14) / (WALL_FT * Math.SQRT1_2));
+  const home = { x: w / 2, y: h - 44 * (px / 0.92) };
+  const baseR = (BASE_FT * px) / Math.SQRT2;
+  return { w, h, home, pxPerFt: px, baseR, centre: { x: home.x, y: home.y - baseR } };
+}
+
+/** The foul lines, and the wall, both run to ±45°. */
+const FOUL_DEG = 45;
+
+// -------------------------------------------------------------- the state
+
+export interface Replay {
+  startedAt: number;
+  plot: Plot;
+  direction: number;
+  outcome: Outcome;
+  /** The batter's legs, which set how long the race to first takes. */
+  speed: number;
+  /** Did he reach first. Rigged from the outcome, never from the geometry. */
+  safe: boolean;
+  /** 6-4-3. The relay stops at second and the forced man is erased there. */
+  doublePlay: boolean;
+  /** Booted: the chaser gets there and it gets past him anyway. */
+  error: boolean;
+  /**
+   * Everyone already on base who ended up somewhere else, from
+   * `runnerMoves()`. The batter's own move is excluded — he has the race.
+   */
+  moves: RunnerMove[];
+  /** Runners who came all the way home, by the base they started on. */
+  scoredFrom: number[];
+  /**
+   * Which of the replay's sounds have already played.
+   *
+   * Keyed rather than a queue of timers because the game clock stops behind a
+   * menu and setTimeout does not: a pause would fire the whole play's audio at
+   * once. Checked against `t` each frame, so pausing holds the sound too.
+   */
+  cued: Set<string>;
+}
+
+/** Build a replay from what the engine already decided. */
+export function newReplay(o: {
+  now: number;
+  outcome: Outcome;
+  exitVelocity: number;
+  launchAngle: number;
+  direction: number;
+  speed: number;
+  safe: boolean;
+  doublePlay?: boolean;
+  error?: boolean;
+  moves?: RunnerMove[];
+  scoredFrom?: number[];
+}): Replay {
+  return {
+    startedAt: o.now,
+    plot: plotBatted(o.outcome, o.exitVelocity, o.launchAngle),
+    direction: o.direction,
+    outcome: o.outcome,
+    speed: o.speed,
+    safe: o.safe,
+    doublePlay: !!o.doublePlay,
+    error: !!o.error,
+    moves: o.moves ?? [],
+    scoredFrom: o.scoredFrom ?? [],
+    cued: new Set(),
+  };
+}
+
+/** Which noises a play can make. The caller owns the samples. */
+export type Sfx = (name: 'crowd' | 'mitt' | 'whiff' | 'onBase' | 'out', level?: number) => void;
+
+export interface OverheadOpts {
+  /** Grass and dirt, so each division keeps its own colour. */
+  field: string;
+  dirt: string;
+  sfx?: Sfx;
+}
+
+/**
+ * The beat stays in the batter's view before cutting — the crack of the bat
+ * and the ball starting to leave are worth seeing from behind the plate, and
+ * cutting on contact throws away the one frame the swing paid for.
+ */
+export const REPLAY_CUT_MS = 300;
+/** The cut itself. Short: a broadcast cuts, it does not dissolve. */
+export const REPLAY_FADE_MS = 200;
+/** How long the ball sits where it finished before cutting back. */
+export const REPLAY_HOLD_MS = 900;
+/** How long after the throw resolves the call stays up. */
+export const REPLAY_CALL_MS = 700;
+
+/**
+ * Everything about the play at first, resolved once.
+ *
+ * Both the frame loop (which needs to know how long to stay overhead) and the
+ * draw (which needs the dots) ask for this, and they must agree — a replay
+ * that ends before the runner reaches the bag cuts away mid-race.
+ */
+export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Race {
+  const chaser = nearestFielder(r.plot.distFt, r.direction);
+  const fieldedAt = REPLAY_CUT_MS + r.plot.hangMs;
+  return {
+    chaser,
+    fieldedAt,
+    ...raceTiming({
+      speed: r.speed,
+      safe: r.safe,
+      // A double play is always a play at first, whoever fielded it.
+      play: hasPlayAtFirst(r.plot, chaser) || r.doublePlay,
+      fieldedAt,
+      doublePlay: r.doublePlay,
+    }),
+  };
+}
+
+/**
+ * Total. The longer of the two things the replay might be waiting on: the ball
+ * finishing its flight, or the race at first finishing.
+ *
+ * A slow runner on a chopper is the case that needs this — the ball is fielded
+ * in half a second and he is still 1.4 seconds from the bag. Worst case is a
+ * 0.6 hitter at 1900 + 460 = 2360ms.
+ */
+export const replayLength = (r: Replay): number => {
+  const race = raceFor(r);
+  return Math.max(
+    REPLAY_CUT_MS + r.plot.hangMs + REPLAY_HOLD_MS,
+    Math.max(race.runMs, race.throwMs ?? 0) + REPLAY_CALL_MS,
+  );
+};
+
+/**
+ * 0 while behind the plate, 1 while overhead, ramping at each end.
+ *
+ * One function for both directions so the cut in and the cut back cannot drift
+ * apart, and so `> 0` is the only test the frame loop needs.
+ */
+export function overheadAlpha(r: Replay | null, now: number): number {
+  if (!r) return 0;
+  const t = now - r.startedAt;
+  const total = replayLength(r);
+  if (t < REPLAY_CUT_MS) return 0;
+  if (t > total) return 0;
+  const inK = Math.min(1, (t - REPLAY_CUT_MS) / REPLAY_FADE_MS);
+  const outK = Math.min(1, (total - t) / REPLAY_FADE_MS);
+  return Math.min(inK, outK);
+}
+
+export const OUTCOME_COLOR: Record<string, string> = {
+  home_run: '#ffd76a',
+  triple: '#a8e06a',
+  double: '#a8e06a',
+  single: '#a8e06a',
+  foul: '#8a8a7a',
+};
+
+/**
+ * Where a bag sits. -1 is home plate, 0-2 are first through third.
+ *
+ * `r` is the centre-to-bag distance. The corner HUD passes its own and the
+ * overhead passes the camera's, and the layout is already geometrically true
+ * (home to first is r√2, home to second is 2r, and 2r / r√2 is √2, which is
+ * 127ft over 90ft), so there was nothing to write a second time.
+ */
+export function basePoint(i: number, cx: number, cy: number, r: number): { x: number; y: number } {
+  if (i === 0) return { x: cx + r, y: cy };
+  if (i === 1) return { x: cx, y: cy - r };
+  if (i === 2) return { x: cx - r, y: cy };
+  return { x: cx, y: cy + r }; // home
+}
+
+/**
+ * Where a covering fielder stands: at the bag, pulled a few pixels toward the
+ * middle of the diamond.
+ *
+ * He is not ON the bag — the runner is, and drawn later, so a coverer sharing
+ * the exact point vanishes underneath him. That put the picture straight back
+ * where it started, with the throw arriving at what looks like an empty base.
+ * It is also just true: you stretch from beside the bag, not on top of it.
+ */
+function besideBag(cam: Cam, bag: { x: number; y: number }): { x: number; y: number } {
+  const dx = cam.centre.x - bag.x;
+  const dy = cam.centre.y - bag.y;
+  const d = Math.hypot(dx, dy) || 1;
+  return { x: bag.x + (dx / d) * 11, y: bag.y + (dy / d) * 11 };
+}
+
+/** Where a runner is, lerped between two bags. -1 is home, 3 is home again. */
+const bagAt = (cam: Cam, i: number): { x: number; y: number } =>
+  basePoint(i > 2 ? -1 : i, cam.centre.x, cam.centre.y, cam.baseR);
+
+export function drawOverhead(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  r: Replay,
+  now: number,
+  opts: OverheadOpts,
+): void {
+  const t = now - r.startedAt - REPLAY_CUT_MS;
+  // Fraction of the flight completed. Clamped, so the HOLD beat parks the ball
+  // at its landing spot rather than sailing it off the canvas.
+  const k = Math.max(0, Math.min(1, t / r.plot.hangMs));
+
+  ctx.save();
+
+  // Foul ground first, as the era's field colour knocked back, then fair
+  // territory lifted out of it.
+  //
+  // The wedge needs real contrast, not a hint of one: the Holdouts run
+  // field #3b3524 against dirt #4a3d29, two browns a few points apart, and at
+  // the 3.5% lift this started with the whole overhead read as one flat pane.
+  ctx.fillStyle = opts.field;
+  ctx.fillRect(0, 0, cam.w, cam.h);
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(0, 0, cam.w, cam.h);
+
+  const wallPx = WALL_FT * cam.pxPerFt;
+  const rad = (d: number) => ((d - 90) * Math.PI) / 180;
+
+  // Fair territory: the wedge between the foul lines, out to the wall.
+  ctx.fillStyle = opts.field;
+  ctx.beginPath();
+  ctx.moveTo(cam.home.x, cam.home.y);
+  ctx.arc(cam.home.x, cam.home.y, wallPx, rad(-FOUL_DEG), rad(FOUL_DEG));
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fill();
+
+  // The infield dirt, as a skin around the diamond rather than a square —
+  // which is what it looks like from above.
+  ctx.fillStyle = opts.dirt;
+  ctx.beginPath();
+  ctx.arc(cam.centre.x, cam.centre.y, cam.baseR * 1.62, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Foul lines and the wall.
+  ctx.strokeStyle = 'rgba(216,216,192,0.4)';
+  ctx.lineWidth = 2;
+  for (const d of [-FOUL_DEG, FOUL_DEG]) {
+    const end = overheadPoint(WALL_FT, d, cam.home, cam.pxPerFt);
+    ctx.beginPath();
+    ctx.moveTo(cam.home.x, cam.home.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(216,216,192,0.55)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cam.home.x, cam.home.y, wallPx, rad(-FOUL_DEG), rad(FOUL_DEG));
+  ctx.stroke();
+
+  // The bags. Outlines only, and no runners on them — the engine has ALREADY
+  // moved the runners by the time this draws, so lighting the bags from base
+  // state would put the man on second before the ball he hit has landed. The
+  // race below owns that.
+  ctx.strokeStyle = 'rgba(232,232,212,0.8)';
+  ctx.lineWidth = 2;
+  for (let i = -1; i < 3; i++) {
+    const p = basePoint(i, cam.centre.x, cam.centre.y, cam.baseR);
+    const s = i === -1 ? 5 : 7;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - s);
+    ctx.lineTo(p.x + s, p.y);
+    ctx.lineTo(p.x, p.y + s);
+    ctx.lineTo(p.x - s, p.y);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // The nine, each with a job. The chaser is computed against where the ball
+  // FINISHES, not where it is right now — a fielder who re-picks his target
+  // every frame wanders, and real ones break on the ball once.
+  const race = raceFor(r);
+  const { chaser } = race;
+  const landing = overheadPoint(r.plot.distFt, r.direction, cam.home, cam.pxPerFt);
+  // Fielder clocks run from CONTACT, not from the cut — `t` above is the
+  // ball's flight time and they are 220ms apart.
+  const tc = now - r.startedAt;
+  const first = basePoint(0, cam.centre.x, cam.centre.y, cam.baseR);
+  const second = basePoint(1, cam.centre.x, cam.centre.y, cam.baseR);
+
+  /** Ease-out over a window, with the reaction beat in front of it. */
+  const leg = (endMs: number): number => {
+    const span = Math.max(120, endMs - REACTION_MS);
+    return 1 - (1 - Math.max(0, Math.min(1, (tc - REACTION_MS) / span))) ** 2;
+  };
+
+  for (const f of FIELDERS) {
+    const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
+    const role = roleFor(f, chaser, r.doublePlay);
+    let to = post;
+    let k2 = 0;
+
+    if (role === 'chase') {
+      to = landing;
+      // A booted ball is one he GOT to — he just did not hold it. Reaching
+      // short of it would read as him giving up, which is a different play.
+      k2 = (r.error ? 1 : chaseReach(r.outcome)) * leg(race.fieldedAt);
+    } else if (role === 'cover-first') {
+      to = besideBag(cam, first);
+      k2 = leg(race.throwMs ?? race.fieldedAt);
+    } else if (role === 'cover-second') {
+      to = besideBag(cam, second);
+      k2 = leg(race.relayMs ?? race.fieldedAt);
+    } else {
+      to = landing;
+      k2 = SHADE * leg(race.fieldedAt);
+    }
+
+    const p = { x: post.x + (to.x - post.x) * k2, y: post.y + (to.y - post.y) * k2 };
+    const busy = role !== 'shade';
+
+    // A per-position asset (`assets/fielders/6.png`) or one `_default.png` for
+    // all nine. The man who is not involved in the play is drawn faded either
+    // way, which is what stops nine equally-bright figures reading as a crowd.
+    if (
+      drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: String(f.num) }, { alpha: busy ? 1 : 0.55 })
+    ) {
+      continue;
+    }
+
+    ctx.fillStyle = busy ? '#e8e8d4' : 'rgba(200,204,208,0.55)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, busy ? 6 : 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(11,17,12,0.9)';
+    ctx.font = 'bold 8px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(f.num), p.x, p.y + 0.5);
+  }
+
+  // The ball, and the ground it has covered.
+  //
+  // Two outcomes are allowed past their own landing point. A home run keeps
+  // going and leaves the frame, because a ball that stops dead on the warning
+  // track is not what the banner just said; and a booted one trickles on past
+  // the man who should have had it, which is the whole picture of an error.
+  let kBall = k;
+  const over = (t - r.plot.hangMs) / 900;
+  if (r.outcome === 'home_run') kBall = Math.max(0, t / r.plot.hangMs);
+  else if (r.error && over > 0) kBall = k + Math.min(0.22, over * 0.22);
+
+  const at = overheadPoint(r.plot.distFt * kBall, r.direction, cam.home, cam.pxPerFt);
+  ctx.strokeStyle = 'rgba(244,244,232,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cam.home.x, cam.home.y);
+  ctx.lineTo(at.x, at.y);
+  ctx.stroke();
+
+  // A fly ball rises and falls; a grounder is flat. From above that is the
+  // ball's SIZE, not its height — which is the whole reason this view can
+  // reuse one coordinate and still tell a popup from a chopper.
+  const lift = r.plot.ground ? 0 : Math.sin(k * Math.PI);
+  const ballR = 3.5 + lift * 4.5;
+  if (lift > 0.05) {
+    // Its shadow stays on the grass, so the arc is legible from overhead.
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath();
+    ctx.arc(at.x + lift * 5, at.y + lift * 7, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = OUTCOME_COLOR[r.outcome] ?? '#f4f4e8';
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, ballR, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawRace(ctx, cam, now, r, landing, opts);
+
+  ctx.restore();
+}
+
+/**
+ * Play a sound the first time the replay clock passes a moment.
+ *
+ * Driven off `t` rather than scheduled, so it inherits the game clock: pause
+ * mid-flight and the throw does not thump into a glove behind the menu.
+ */
+function cue(r: Replay, key: string, at: number, t: number, sound: () => void): void {
+  if (t < at || r.cued.has(key)) return;
+  r.cued.add(key);
+  sound();
+}
+
+/**
+ * Every noise the play makes after the bat.
+ *
+ * The schedule lives in plot.ts and is pure; this only decides which sample a
+ * cue maps to. The samples themselves belong to the caller — a glove is a
+ * glove whether the ball arrives from a bat or a throw.
+ */
+function cuePlaySounds(
+  r: Replay,
+  t: number,
+  race: ReturnType<typeof raceFor>,
+  sfx: Sfx,
+): void {
+  const cues = playCues({
+    plot: r.plot,
+    outcome: r.outcome,
+    safe: r.safe,
+    cutMs: REPLAY_CUT_MS,
+    fieldedAt: race.fieldedAt,
+    race,
+  });
+
+  for (const c of cues) {
+    cue(r, c.key, c.at, t, () => {
+      switch (c.key) {
+        case 'carry':
+          return sfx('crowd', Math.min(0.9, (r.plot.distFt - 240) / 220));
+        case 'gone':
+          // The homer sting already fired at contact; this is the park
+          // reacting when it actually clears the wall.
+          return sfx('crowd', 1);
+        case 'field':
+          return sfx(r.error ? 'whiff' : 'mitt');
+        case 'relay':
+        case 'catch':
+          return sfx('mitt');
+        case 'call':
+          return sfx(r.safe ? 'onBase' : 'out');
+      }
+    });
+  }
+}
+
+/**
+ * A runner in the overhead replay.
+ *
+ * Reads `assets/fielders/runner.png` rather than a folder of its own — the
+ * replay's figures are all the same size at the same scale, and a `runners/`
+ * kind holding one file would be a folder to explain for no benefit.
+ */
+function drawRunnerDot(
+  ctx: CanvasRenderingContext2D,
+  p: { x: number; y: number },
+  dim = false,
+): void {
+  if (drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: 'runner' }, { alpha: dim ? 0.55 : 1 })) {
+    return;
+  }
+  ctx.fillStyle = dim ? 'rgba(90,169,230,0.55)' : '#5aa9e6';
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * The race to first, the relay on a double play, and everyone else moving up.
+ *
+ * All clocks are measured from CONTACT, not from the cut, because that is when
+ * they all started — at the cut the batter is already a fifth of the way down
+ * the line, which is what it looks like on television too.
+ */
+function drawRace(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  now: number,
+  r: Replay,
+  landing: { x: number; y: number },
+  opts: OverheadOpts,
+): void {
+  const t = now - r.startedAt;
+  const first = bagAt(cam, 0);
+  const second = bagAt(cam, 1);
+  const home = bagAt(cam, -1);
+  const race = raceFor(r);
+  const { fieldedAt, runMs, throwMs, relayMs } = race;
+  if (opts.sfx) cuePlaySounds(r, t, race, opts.sfx);
+
+  // A caught fly is out on the catch. He pulls up rather than running it out,
+  // which is both what happens and what stops a pointless dot finishing a race
+  // that was decided in the air.
+  const caught = !r.plot.ground && !r.safe;
+  const runK = Math.min(caught ? 0.55 : 1, t / runMs);
+
+  // Everyone who was already on. They break with the pitch and take the whole
+  // race to get where inning.ts has already put them.
+  //
+  // ponytail: one leg each, straight from the bag they left to the bag they
+  // reached, at the same pace regardless of who they are. A man going first to
+  // third is doing two legs at real speed and this draws it as one — which at
+  // this scale is a dot travelling a corner, and reads correctly.
+  for (const m of r.moves) {
+    const k = Math.min(1, t / runMs);
+    const a = bagAt(cam, m.from);
+    const b = bagAt(cam, m.to);
+    drawRunnerDot(ctx, { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  }
+  for (const from of r.scoredFrom) {
+    const k = Math.min(1, t / runMs);
+    const a = bagAt(cam, from);
+    drawRunnerDot(ctx, { x: a.x + (home.x - a.x) * k, y: a.y + (home.y - a.y) * k });
+  }
+
+  // The forced man on a double play. He is erased from the base state, so he is
+  // in neither list above — he has to be drawn from the fact of the DP itself.
+  // He stops dead at second when the relay beats him, which IS the out.
+  if (r.doublePlay && relayMs !== null) {
+    const k = Math.min(1, t / relayMs);
+    drawRunnerDot(
+      ctx,
+      { x: first.x + (second.x - first.x) * k, y: first.y + (second.y - first.y) * k },
+      t > relayMs,
+    );
+  }
+
+  // The ball's route: to second first on a double play, then on to first.
+  const throwLeg = (
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    startMs: number,
+    endMs: number,
+  ) => {
+    if (t < startMs) return;
+    const k = Math.min(1, (t - startMs) / Math.max(90, endMs - startMs));
+    ctx.strokeStyle = 'rgba(244,244,232,0.22)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#f4f4e8';
+    ctx.beginPath();
+    ctx.arc(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  if (throwMs !== null) {
+    if (relayMs !== null) {
+      throwLeg(landing, second, fieldedAt, relayMs);
+      throwLeg(second, first, relayMs, throwMs);
+    } else {
+      throwLeg(landing, first, fieldedAt, throwMs);
+    }
+  }
+
+  // The batter, down the line.
+  drawRunnerDot(ctx, { x: home.x + (first.x - home.x) * runK, y: home.y + (first.y - home.y) * runK });
+
+  // The calls. A double play gets two, each landing when its own throw does,
+  // which is what makes 6-4-3 read as two outs rather than one long one.
+  ctx.font = 'bold 15px ui-monospace, Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const call = (text: string, at: { x: number; y: number }, safe: boolean, dx = 22) => {
+    ctx.fillStyle = safe ? '#6fbf73' : '#ff8c66';
+    ctx.fillText(text, at.x + dx, at.y - 16);
+  };
+
+  if (caught) {
+    // Out in the air, so it is called where the catch happened.
+    if (t > fieldedAt) call('OUT', landing, false, 0);
+    return;
+  }
+  // No throw means no play, and no play means no call. An umpire does not
+  // signal safe at first on a ball off the wall — and doing it anyway put a
+  // green SAFE next to the bag under a banner reading HOME RUN.
+  if (throwMs === null) return;
+  if (relayMs !== null && t > relayMs) call('OUT', second, false, -24);
+  if (t > Math.min(runMs, throwMs)) call(r.safe ? 'SAFE' : 'OUT', first, r.safe);
+}

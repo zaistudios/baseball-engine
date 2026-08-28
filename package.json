@@ -1,0 +1,27 @@
+{
+  "name": "baseball-engine",
+  "version": "1.11.0",
+  "private": true,
+  "type": "module",
+  "description": "Baseball engine + retro batting roguelike. Personal project.",
+  "scripts": {
+    "play": "node src/cli/play.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage --coverage.reporter=text --coverage.include=src/**/*.ts --coverage.exclude=src/**/__tests__/**",
+    "check": "npm run typecheck && npm run test",
+    "dev": "vite",
+    "build": "vite build",
+    "demo": "npm run check && vite build && node scripts/bundle.mjs",
+    "game": "vite --open /game.html",
+    "sim": "node scripts/balance.ts",
+    "export": "npm run check && vite build --config vite.game.config.ts && node scripts/bundle.mjs game"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>All-Star Baseball</title>
+    <style>
+      /* Decision 2: canvas for the at-bat, DOM/CSS for everything else.
+         Every element outside #field is here rather than hand-drawn. */
+      :root {
+        --ink: #e8e8d8;
+        --dim: #7a8a6a;
+        --field: #1a2416;
+        --chalk: #d8d8c0;
+      }
+      * { box-sizing: border-box; margin: 0; }
+      body {
+        background: #0d1210;
+        color: var(--ink);
+        font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+        min-height: 100vh;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      h1 { font-size: 15px; letter-spacing: 2px; color: var(--dim); font-weight: 400; }
+      #field {
+        image-rendering: pixelated;
+        border: 2px solid #2f3a2a;
+        max-width: 100%;
+        height: auto;
+        cursor: pointer;
+        display: block;
+      }
+      #hud, #meta {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        justify-content: center;
+        width: 640px;
+        max-width: 100%;
+      }
+      #hud { font-size: 16px; }
+      #meta { font-size: 12px; color: var(--dim); }
+      .box { border: 1px solid #2f3a2a; padding: 4px 10px; }
+      #log { min-height: 3.2em; text-align: center; width: 640px; max-width: 100%; }
+      #log b { color: #ffd76a; }
+      /* The scouting report — what he throws and what he puts you away with. */
+      .scout { color: var(--dim); font-size: 12px; letter-spacing: 0.04em; }
+      button {
+        font: inherit;
+        background: #21301c;
+        color: var(--ink);
+        border: 1px solid #3d5233;
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      button:hover { background: #2c4025; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      /* Every overlay: title, pause, settings, and the shop. One ruleset —
+         the shop used to carry its own copy, which is how a nine-man lineup
+         ended up unscrollable in one place and fine in the others.
+
+         `safe center` and `overflow-y` are load-bearing together. A centred
+         flex column with content taller than the screen overflows BOTH ends,
+         so the top of a long lineup goes above the viewport where no scrollbar
+         can reach it. `safe` drops back to flex-start the moment it does not
+         fit, which puts the whole thing back inside the scrollable area. */
+      .screen {
+        position: fixed;
+        inset: 0;
+        background: rgba(9, 14, 11, 0.97);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: safe center;
+        overflow-y: auto;
+        gap: 18px;
+        padding: 24px;
+        z-index: 20;
+      }
+      .screen[hidden] { display: none; }
+      .screen h2 { font-size: 22px; letter-spacing: 4px; font-weight: 400; }
+      .stack { display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+      button.big { padding: 10px 16px; font-size: 15px; }
+      .small { font-size: 11px; }
+      .rows { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
+      .rows label { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+      .rows label > span:first-child { min-width: 96px; color: var(--dim); }
+      .rows input[type='range'] { flex: 1; accent-color: #6fbf73; }
+      .rows output { min-width: 116px; text-align: right; color: #ffd76a; font-size: 12px; }
+      .rows label.check { gap: 10px; }
+      .rows label.check em { color: var(--dim); font-style: normal; font-size: 11px; }
+      .rows input[type='checkbox'] { accent-color: #6fbf73; width: 16px; height: 16px; }
+
+      /* Shop overlay — a .screen with three overrides. Free layout and free
+         text, the reason decision 2 keeps everything outside the at-bat off
+         the canvas. */
+      #shop {
+        background: rgba(9, 14, 11, 0.96);
+        gap: 16px;
+        z-index: 10;
+      }
+      #shop h2 { font-size: 18px; letter-spacing: 2px; font-weight: 400; }
+      #shop-sub { color: var(--dim); font-size: 13px; text-align: center; }
+      .boxline { display: block; margin-bottom: 10px; letter-spacing: 1px; }
+      table.payout {
+        margin: 0 auto 10px;
+        border-collapse: collapse;
+        min-width: 260px;
+        font-size: 13px;
+      }
+      table.payout td { padding: 2px 10px; text-align: left; color: var(--ink); }
+      table.payout td:last-child { text-align: right; color: #6fbf73; font-variant-numeric: tabular-nums; }
+      table.payout td.neg { color: #ff8c66; }
+      table.payout tr.total td { border-top: 1px solid #3d5233; padding-top: 5px; font-size: 15px; }
+      table.payout tr.total td:last-child { color: #ffd76a; }
+      #offers { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+      .card {
+        border: 1px solid #3d5233;
+        padding: 12px;
+        width: 190px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: #141c15;
+      }
+      .card .rarity { font-size: 11px; letter-spacing: 1px; }
+      .card .name { font-size: 15px; }
+      .card .desc { font-size: 12px; color: var(--dim); flex: 1; }
+      .card .chem { font-size: 11px; }
+      /* Who carries it. The decision the shop now asks. */
+      .card select {
+        background: #0d140e;
+        color: var(--ink);
+        border: 1px solid #3d5233;
+        font: inherit;
+        font-size: 12px;
+        padding: 4px;
+      }
+      #lineup-list .who b { color: #6fbf73; font-weight: normal; }
+
+      /* --- the hover card ------------------------------------------------ */
+      /* Anything with a name you can point at gets the dotted underline, so
+         the card is discoverable without a tutorial line telling you it is. */
+      [data-player] { cursor: help; border-bottom: 1px dotted rgba(216, 216, 192, 0.4); }
+      #tip {
+        position: fixed;
+        z-index: 50;
+        width: 288px;
+        padding: 12px 14px;
+        background: #0d140e;
+        border: 1px solid #6a7f5e;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.75);
+        font-size: 12px;
+        line-height: 1.45;
+        pointer-events: none;
+      }
+      .t-card .t-name { font-size: 15px; color: var(--ink); }
+      .t-card .t-kind { font-size: 10px; letter-spacing: 1px; color: #c9a24a; }
+      .t-card .t-bio { color: var(--dim); font-style: italic; margin: 6px 0 8px; }
+      .t-card .t-stats {
+        display: flex;
+        gap: 10px;
+        font-variant-numeric: tabular-nums;
+        border-top: 1px solid #2a3a27;
+        border-bottom: 1px solid #2a3a27;
+        padding: 6px 0;
+        margin-bottom: 8px;
+      }
+      .t-card .t-stats b { color: #6fbf73; font-weight: normal; }
+      .t-card .t-head { font-size: 10px; letter-spacing: 1px; color: var(--dim); margin: 8px 0 4px; }
+      .t-card .t-syn { margin-bottom: 5px; }
+      .t-card .t-syn .t-label { color: #c9a24a; }
+      .t-card .t-syn.bad .t-label { color: #d05a4a; }
+      .t-card .t-syn .t-needs { color: var(--dim); }
+      .t-card .t-syn .t-eff { color: var(--ink); }
+      .t-card .t-gives { color: var(--dim); }
+      .r-common { color: #9aa89a; }
+      .r-uncommon { color: #6fbf73; }
+      .r-rare { color: #5aa9e6; }
+      .r-legendary { color: #d9a441; }
+      .r-mythic { color: #d264d2; }
+      #kit b { color: #6fbf73; }
+      #atbat-strip {
+        display: flex;
+        gap: 20px;
+        align-items: baseline;
+        width: 640px;
+        max-width: 100%;
+        justify-content: center;
+        font-size: 14px;
+      }
+      .dim { color: var(--dim); }
+      .chem { color: #c9a24a; }
+      /* Tappable — S is a keyboard-only control and a phone has no S. */
+      /* The steal was fully built and keybound and still read as "there is no
+         stealing in this game", because the prompt was plain text sitting in a
+         strip of other plain text. It is a live control, so it now looks like
+         a button and breathes until you use it. */
+      .steal { color: #6fbf73; cursor: pointer; }
+      .steal:empty { cursor: default; }
+      .steal:not(:empty) {
+        border: 1px solid #3d5233;
+        border-radius: 3px;
+        padding: 2px 8px;
+        background: #141c15;
+        animation: stealpulse 1.9s ease-in-out infinite;
+      }
+      .steal:not(:empty):hover { border-color: #6fbf73; background: #1b2a1c; }
+      /* The stance. Dim while it is the default, hot while it is armed — the
+         cost of sitting on a pitch should be visible for the whole at-bat. */
+      .sit { font-size: 12px; padding: 2px 8px; color: var(--dim); }
+      .sit.armed {
+        color: #ffd76a;
+        border-color: #ffd76a;
+        background: #2a2410;
+      }
+      @keyframes stealpulse {
+        0%, 100% { border-color: #3d5233; }
+        50% { border-color: #6fbf73; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .steal:not(:empty) { animation: none; border-color: #6fbf73; }
+      }
+
+      /* The batter's card — a broadcast lower-third. A SEPARATE node from the
+         hover tip on purpose: the tip is positioned from the cursor, and
+         sharing one node means the two modes fight over left/top the first
+         time somebody hovers a name mid-at-bat.
+
+         Shape is the television one: bottom-left, wide and short rather than
+         tall, a hard accent rail down the left with the order number in it,
+         name in caps as the loudest thing on it, and the numbers on one row
+         underneath. It slides in from the left edge, which is how these
+         actually arrive on a broadcast — the vertical fade it used to do read
+         as a tooltip, because it was one. */
+      /* Shrink-wraps the canvas and gives the namecard its origin. `flex` so
+         it hugs the canvas with no inline-block baseline gap under it. */
+      #frame { position: relative; display: flex; max-width: 100%; }
+      #batter-card {
+        position: absolute;
+        left: 0;
+        bottom: 10px;
+        z-index: 40;
+        display: flex;
+        align-items: stretch;
+        max-width: min(420px, 82vw);
+        background: linear-gradient(100deg, #10180f 0%, #0b110c 100%);
+        border: 1px solid #3d5233;
+        border-left: 0;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.8);
+        font-size: 12px;
+        line-height: 1.35;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateX(-102%);
+        transition: opacity 0.16s linear, transform 0.34s cubic-bezier(0.16, 0.9, 0.3, 1);
+      }
+      #batter-card.show { opacity: 1; transform: translateX(0); }
+      #batter-card[hidden] { display: none; }
+      /* The number block, the way a broadcast puts the uniform number. */
+      #batter-card .bc-num {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 46px;
+        padding: 0 8px;
+        background: #6fbf73;
+        color: #0b110c;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+      #batter-card .bc-body { padding: 8px 14px 9px; min-width: 0; }
+      #batter-card .bc-name {
+        font-size: 17px;
+        letter-spacing: 1px;
+        color: var(--chalk);
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      #batter-card .bc-sub {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #c9a24a;
+        margin-top: 1px;
+      }
+      /* One row of numbers, label above value, like a stat strip. */
+      #batter-card .bc-stats {
+        display: flex;
+        gap: 14px;
+        margin-top: 7px;
+        padding-top: 6px;
+        border-top: 1px solid #2f3a2a;
+      }
+      #batter-card .bc-stats span { display: flex; align-items: baseline; gap: 4px; }
+      #batter-card .bc-stats i {
+        font-style: normal;
+        font-size: 9px;
+        letter-spacing: 1px;
+        color: var(--dim);
+      }
+      #batter-card .bc-stats b { color: #6fbf73; font-weight: normal; font-size: 13px; }
+      #batter-card .bc-chem {
+        margin-top: 5px;
+        font-size: 10px;
+        letter-spacing: 0.5px;
+        color: var(--dim);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #batter-card { transition: none; }
+      }
+      #draft { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+      .pcard {
+        border: 1px solid #3d5233;
+        background: #141c15;
+        padding: 10px 12px;
+        width: 190px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+      }
+      .pcard .pname { font-size: 14px; color: var(--ink); }
+      .pcard .pera { font-size: 10px; letter-spacing: 1px; color: #c9a24a; }
+      .pcard .pstat { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+      #lineup-edit { text-align: center; font-size: 13px; }
+      #lineup-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+      #lineup-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #29331f;
+        padding: 3px 8px;
+      }
+      #lineup-list .slot { color: var(--dim); min-width: 18px; }
+      #lineup-list .who { min-width: 168px; text-align: left; }
+      #lineup-list .links { color: #c9a24a; font-size: 11px; flex: 1; text-align: left; }
+      #lineup-list button { padding: 1px 8px; font-size: 12px; }
+      .stack-row { display: flex; gap: 10px; align-items: center; }
+      #patience { letter-spacing: 2px; color: #6fbf73; }
+      #patience.low { color: #ff8c66; }
+      #stake { color: var(--dim); font-size: 11px; }
+      #summary { font-size: 12px; color: var(--dim); }
+      #summary td { padding: 1px 8px; }
+      #summary .w { color: #6fbf73; }
+      #summary .l { color: #ff8c66; }
+
+      /* The scoreboard. DOM and CSS give this away free — hand-drawing a
+         table on canvas would be work with nothing to show for it. */
+      #scoreboard {
+        border-collapse: collapse;
+        border: 2px solid #3d5233;
+        background: #101a12;
+        font-variant-numeric: tabular-nums;
+      }
+      #scoreboard th, #scoreboard td {
+        border: 1px solid #29331f;
+        padding: 3px 11px;
+        text-align: center;
+        font-weight: 400;
+        font-size: 15px;
+      }
+      #scoreboard thead th { color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+      #scoreboard .team { text-align: left; letter-spacing: 2px; min-width: 120px; }
+      #scoreboard .tot { color: #ffd76a; font-size: 17px; }
+      #scoreboard tr.batting .team::after { content: ' ◀'; color: #6fbf73; }
+    </style>
+  </head>
+  <body>
+    <h1>ALL-STAR BASEBALL</h1>
+
+    <table id="scoreboard">
+      <thead>
+        <tr id="sb-innings"><th class="team"></th><th class="tot">R</th></tr>
+      </thead>
+      <tbody>
+        <tr id="sb-away"><td class="team">SANDLOTS</td><td class="tot">0</td></tr>
+        <tr id="sb-home"><td class="team">YOU</td><td class="tot">0</td></tr>
+      </tbody>
+    </table>
+
+    <div id="hud">
+      <span class="box">count <b id="count">0-0</b></span>
+      <span class="box">out <b id="outs">0</b></span>
+      <span class="box">inning <b id="inning">1</b></span>
+      <span class="box">$<b id="money">500</b></span>
+    </div>
+
+    <!-- The canvas got a wrapper so the namecard has something to be a
+         lower-THIRD of. Fixed to the viewport it sat in the dead space under
+         the page; a broadcast graphic belongs over the bottom of the frame. -->
+    <div id="frame">
+      <canvas id="field" width="640" height="480"></canvas>
+      <!-- No `t-card` here: that class only styles `.t-*` children, and the
+           namecard's are `.bc-*`. It was inert, and misleading. -->
+      <div id="batter-card" hidden></div>
+    </div>
+
+    <div id="log">Click the field or press SPACE to start.</div>
+
+    <!-- The hover card. One node, moved and refilled — see tip() in main.ts.
+         Stays a direct child of body: it is positioned from the cursor in
+         viewport coordinates, so it must not inherit the frame's origin. -->
+    <div id="tip" class="t-card" hidden></div>
+
+    <div id="atbat-strip">
+      <span id="batter">—</span>
+      <span class="dim">on deck: <b id="ondeck">—</b></span>
+      <span id="steal" class="steal"></span>
+      <!-- The hitter's approach. A button rather than a held modifier: it is
+           armed between pitches, so it needs no touch equivalent invented for
+           it, and nothing new reads the input device inside the timing seam. -->
+      <button id="sit" class="sit">sit on it (P)</button>
+    </div>
+
+    <div id="meta">
+      <span>encounter <b id="encounter">1</b>/9</span>
+      <span id="league">ACT I · Dead-Ball</span>
+      <span>facing <b id="pitcher">Rookie</b></span>
+      <span>owner <b id="patience">•••·</b> <span id="stake">a loss costs 1</span></span>
+      <span id="kit"></span>
+      <!-- ESC is the only other way in, and a phone has no ESC. -->
+      <button id="pause-btn">Pause</button>
+    </div>
+
+    <!-- Title. First thing you see; nothing runs behind it. -->
+    <div id="menu" class="screen">
+      <h2>ALL-STAR BASEBALL</h2>
+      <p class="dim">A roguelike gauntlet through three eras of the sport.</p>
+      <div class="stack">
+        <!-- Shown only when there is a run to pick up. Hidden by default so
+             a first-time player never sees a dead control. -->
+        <button id="continue" class="big" hidden>Continue run</button>
+        <button id="start" class="big">Start run</button>
+        <button data-open="settings">Settings</button>
+      </div>
+      <p id="save-note" class="dim small" hidden></p>
+      <p class="dim small">SPACE or click swings · T takes · P sits on it · S steals · ESC pauses</p>
+    </div>
+
+    <!-- Pause. ESC. -->
+    <div id="pause" class="screen" hidden>
+      <h2>PAUSED</h2>
+      <div class="stack">
+        <button id="resume" class="big">Resume</button>
+        <button data-open="settings">Settings</button>
+        <button id="quit">Quit to title</button>
+      </div>
+      <p class="dim small">Pausing mid-pitch throws that one out — no strike charged.</p>
+    </div>
+
+    <!-- Settings, reachable from both. -->
+    <div id="settings" class="screen" hidden>
+      <h2>SETTINGS</h2>
+      <div class="rows">
+        <label>
+          <span>Volume</span>
+          <input id="s-volume" type="range" min="0" max="1" step="0.05" />
+          <output id="s-volume-out"></output>
+        </label>
+        <label>
+          <span>Pitch speed</span>
+          <input id="s-speed" type="range" min="0" max="3" step="1" />
+          <output id="s-speed-out"></output>
+        </label>
+        <label class="check">
+          <input id="s-shake" type="checkbox" />
+          <span>Screen shake <em>— turn off if motion bothers you</em></span>
+        </label>
+        <label class="check">
+          <input id="s-hitstop" type="checkbox" />
+          <span>Impact freeze <em>— the pause on contact</em></span>
+        </label>
+        <label class="check">
+          <input id="s-timingbar" type="checkbox" />
+          <span>Timing read-out <em>— the bar under the field</em></span>
+        </label>
+        <label>
+          <span>Timing offset</span>
+          <input id="s-offset" type="range" min="-120" max="120" step="1" />
+          <output id="s-offset-out"></output>
+        </label>
+      </div>
+      <div class="stack">
+        <button id="s-recal">Recalibrate timing</button>
+        <button id="s-close" class="big">Back</button>
+        <button id="s-reset">Reset to defaults</button>
+      </div>
+    </div>
+
+    <!-- Between matches. DOM, not canvas — decision 2. -->
+    <div id="shop" class="screen" hidden>
+      <h2 id="shop-title">Between matches</h2>
+      <p id="shop-sub"></p>
+      <p class="dim" id="draft-label">Sign one — the order they bat in is the build.</p>
+      <div id="draft"></div>
+      <div id="offers"></div>
+
+      <div id="lineup-edit">
+        <p class="dim">Batting order — <b id="chem-count">0</b> chemistry links</p>
+        <ol id="lineup-list"></ol>
+      </div>
+
+      <div class="stack-row">
+        <button id="reroll">Reroll</button>
+        <button id="next" class="big">Next game →</button>
+      </div>
+      <button id="newrun" hidden class="big">New run</button>
+    </div>
+
+    <script type="module" src="/src/web/main.ts"></script>
+  </body>
+</html>
