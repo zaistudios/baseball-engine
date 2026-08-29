@@ -16,7 +16,7 @@ import {
   currentPitcher,
   type GameState,
 } from '../game.ts';
-import { HOME, AWAY, starterOf } from '../teams.ts';
+import { HOME, AWAY, LEAGUE, starterOf } from '../teams.ts';
 import { simulateGame } from '../sim.ts';
 
 const OUT = { kind: 'strikeout' } as const;
@@ -246,5 +246,48 @@ describe('a whole game, simulated', () => {
     const perTeam = runs / N / 2;
     expect(perTeam).toBeGreaterThan(2.5);
     expect(perTeam).toBeLessThan(6.5);
+  });
+
+  /**
+   * ⚠️ THE INSTRUMENT scripts/place.ts CANNOT BE. It reports the foul rate per
+   * SWING — 33.9% against a real ~35%, and it always did, including while the
+   * league was ending 72.5% of its plate appearances with a ball in play
+   * against a real 68%. It rolls a uniform spread of swing timings and the
+   * computer's swings come out of AI_TIMING_BANDS, which is not uniform, so
+   * the foul rate that reaches a real at-bat was lower than the one it read.
+   *
+   * A plate appearance ends exactly three ways and they have to add up like
+   * baseball. This is the shape FOUL_BOOST is tuned against — see tuning.ts.
+   *
+   * ⚠️ IT ROTATES THROUGH THE LEAGUE, and that is not decoration. The default
+   * matchup alone reads K 26.9% and BB 5.8% — both outside this band — because
+   * two clubs are not a league. Tuning FOUL_BOOST against one pair is exactly
+   * how it ended up at 2.3, so a test that guards it off one pair would be the
+   * same mistake wearing a green tick.
+   */
+  it('⚠️ a plate appearance ends the way baseball ends one', () => {
+    const mix = { walk: 0, hit_by_pitch: 0, strikeout: 0, in_play: 0 };
+    let pitches = 0;
+    const N = 120;
+    for (let seed = 0; seed < N; seed++) {
+      const home = LEAGUE[(seed * 7) % LEAGUE.length]!;
+      const away = LEAGUE[(seed * 13 + 5) % LEAGUE.length]!;
+      if (home.abbr === away.abbr) continue;
+      const r = simulateGame(seed * 7919 + 13, 9, home, away);
+      pitches += r.pitches;
+      for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] += r.outcomes[k];
+    }
+    const pa = mix.walk + mix.hit_by_pitch + mix.strikeout + mix.in_play;
+
+    // Real: K 22.4%, BB+HBP 9.6%, ball in play 68%, on 3.9 pitches per PA.
+    expect(mix.strikeout / pa).toBeGreaterThan(0.17);
+    expect(mix.strikeout / pa).toBeLessThan(0.28);
+    expect((mix.walk + mix.hit_by_pitch) / pa).toBeGreaterThan(0.06);
+    expect((mix.walk + mix.hit_by_pitch) / pa).toBeLessThan(0.13);
+    // The one that was wrong, and the reason the other two matter.
+    expect(mix.in_play / pa).toBeGreaterThan(0.63);
+    expect(mix.in_play / pa).toBeLessThan(0.73);
+    expect(pitches / pa).toBeGreaterThan(3.5);
+    expect(pitches / pa).toBeLessThan(4.3);
   });
 });

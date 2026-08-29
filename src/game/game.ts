@@ -39,7 +39,7 @@ import {
   type Staff,
 } from './bullpen.ts';
 import { assignPositions, type Alignment } from './defense.ts';
-import { EMPTY_BOOK, recordAtBat, recordDecision, type StatBook } from './stats.ts';
+import { EMPTY_BOOK, recordAtBat, recordDecision, recordFieldingOut, type StatBook } from './stats.ts';
 
 export type Half = 'top' | 'bottom';
 export type Side = 'home' | 'away';
@@ -569,7 +569,29 @@ export function creditRuns(g: GameState, bases: Bases, runs: number): GameState 
 export function recordOut(g: GameState, bases: Bases): GameState {
   if (g.over) throw new Error('game already over');
   const outs = g.outs + 1;
-  const next = { ...g, outs, bases };
+
+  // ⚠️ IT GOES ON THE PITCHER'S LINE TOO. This is the out that does NOT come
+  // from a plate appearance — a caught stealing — so it never passes through
+  // recordAtBat(), and without this the box score is one out short of the game
+  // for every runner thrown out. In real baseball an out on the bases counts
+  // toward innings pitched exactly like a strikeout does.
+  //
+  // Found 2026-08-28 by stats.test.ts, which allows a walk-off to leave one
+  // half unfinished: a game that had BOTH a walk-off and a caught stealing
+  // finally ran past the tolerance. It had been wrong the whole time.
+  //
+  // Safe against double-counting: recordOut() has exactly one caller, and the
+  // batter's outs go through recordPlay() -> recordAtBat() instead.
+  const next: GameState = {
+    ...g,
+    outs,
+    bases,
+    stats: recordFieldingOut(
+      g.stats,
+      currentPitcher(g).name,
+      fieldingTeam(g).abbr,
+    ),
+  };
   return outs < 3 ? next : rollHalf(next);
 }
 

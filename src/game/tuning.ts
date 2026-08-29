@@ -21,10 +21,41 @@
  * matters — staying alive with two strikes is a thing that happens to you now
  * rather than a rule you read about.
  *
- * Tuned against scripts/balance.ts. Raising it further keeps pushing the pitch
- * count up; watch that at-bats do not start feeling like a war of attrition.
+ * ⚠️ RETUNED 2.3 -> 2.7 ON 2026-08-28, AGAINST THE LEAGUE. The old value was
+ * set against scripts/balance.ts, which plays ALB and DET and nobody else, so
+ * it was tuned on two benches out of thirty. Measured across three full
+ * seasons instead, 2.3 left every plate-appearance number short at once —
+ * strikeouts 19.7% against a real 22.4%, walks 7.7% against 9.6%, and
+ * therefore **72.5% of plate appearances ending with a ball in play against a
+ * real 68%**, on 3.61 pitches per PA against 3.90.
+ *
+ * ⚠️ THE FOUL RATE PER SWING LOOKED FINE THE WHOLE TIME. scripts/place.ts read
+ * 33.9% against a real ~35% and always had. It rolls a UNIFORM spread of swing
+ * timings; the computer's swings come out of AI_TIMING_BANDS, which is not
+ * uniform, so the rate that reaches a real at-bat was lower than the rate the
+ * script measured. A per-swing number cannot see this. The instrument that can
+ * is the plate-appearance mix — see game.test.ts, which now guards it.
+ *
+ * This is ONE knob and it moves everything the right way at once, because a
+ * foul is what makes an at-bat long enough to reach a third strike or a fourth
+ * ball. Measured over three seasons per value:
+ *
+ *   2.3   K 19.7%  BB 7.7%  in play 72.6%  P/PA 3.61  273 pitches/game
+ *   2.6   K 22.1%  BB 8.0%  in play 69.9%  P/PA 3.79  282
+ *   2.7   K 22.8%  BB 8.1%  in play 69.1%  P/PA 3.91  303   <- shipped
+ *   2.8   K 24.1%  BB 8.4%  in play 67.5%  P/PA 3.94  298
+ *   3.3   K 28.3%  BB 8.9%  in play 62.8%  P/PA 4.24  323
+ *   real  K 22.4%  BB 9.6%  in play 68.0%  P/PA 3.90  ~295
+ *
+ * 2.7 rather than 2.8 because 2.8 overshoots the strikeout rate, which is the
+ * tightest of the three. Run scoring barely moves across the whole range
+ * (4.50 to 4.68 per team), so this is not a run-environment knob — it is an
+ * at-bat LENGTH knob, and the run environment survives it by construction.
+ *
+ * Raising it further keeps pushing the pitch count up; watch that at-bats do
+ * not start feeling like a war of attrition. Past about 3.3 they do.
  */
-export const FOUL_BOOST = 2.3;
+export const FOUL_BOOST = 2.7;
 
 /**
  * THE HOME CROWD, as a multiplier on the home club's swing chance.

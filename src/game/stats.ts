@@ -151,6 +151,25 @@ export function recordAtBat(book: StatBook, f: PlayFacts): StatBook {
 }
 
 /**
+ * ONE OUT THAT WAS NOT A PLATE APPEARANCE — a runner thrown out on the bases.
+ *
+ * ⚠️ IT STILL BELONGS ON THE PITCHER'S LINE. A caught stealing counts toward
+ * innings pitched in real baseball, and this engine's only path into an arm's
+ * `outs` was recordAtBat(), which a steal never reaches. The box score was one
+ * out short of the game for every runner thrown out, which stats.test.ts
+ * finally caught on 2026-08-28 in a game that had a walk-off AND a caught
+ * stealing — the walk-off tolerance had been hiding it.
+ *
+ * Creates the line if the arm has none yet: a runner can be thrown out before
+ * the reliever who just came in has finished anybody, and dropping the out in
+ * that case is the same bug in a smaller window.
+ */
+export function recordFieldingOut(book: StatBook, pitcher: string, pitcherTeam: string): StatBook {
+  const a = book.arm[pitcher] ?? newArm(pitcherTeam);
+  return { ...book, arm: { ...book.arm, [pitcher]: { ...a, outs: a.outs + 1, tm: pitcherTeam } } };
+}
+
+/**
  * Credit the decision. Called once, when the game is final — see game.ts.
  *
  * A name that never appears in the book cannot be given a decision: it would
