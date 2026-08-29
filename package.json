@@ -16,7 +16,8 @@
     "demo": "npm run check && vite build && node scripts/bundle.mjs",
     "game": "vite --open /game.html",
     "sim": "node scripts/balance.ts",
-    "export": "npm run check && vite build --config vite.game.config.ts && node scripts/bundle.mjs game"
+    "export": "npm run check && vite build --config vite.game.config.ts && node scripts/bundle.mjs game",
+    "release": "npm run export && node scripts/release.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
