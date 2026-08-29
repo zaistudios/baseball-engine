@@ -51,13 +51,41 @@ roguelike: no run, no shop, no money, no divisions. The engine foundation.
 npm run game    # play it — opens /game.html
 npm run sim     # 500 headless games, prints run scoring
 npm run export  # fold it into ONE html file you can play offline
+npm run release # ...and ship that file as a GitHub release
 ```
 
 `npm run export` writes **`dist/baseball-engine-v<version>.html`** — the whole
-game in a single 42 kB file with nothing external in it. Double-click it, put it
+game in a single 231 kB file with nothing external in it. Double-click it, put it
 on a USB stick, email it to yourself. It is a classic script at the end of
 `<body>` rather than a module, because browsers refuse to fetch ES modules
 across a `file://` origin and opening by double-click is the entire point.
+
+## Getting it onto another machine
+
+⚠️ **Cloning this repo does not get you a playable game.** `dist/` is gitignored
+— the built html changes wholesale every build and does not belong in git
+history — and `game.html` loads `/src/game/main.ts`, which a browser will
+neither execute nor fetch over `file://`. A clone gets you the source; you still
+need Node and one `npm install` to turn it into something you can play.
+
+**The releases are the deliverable.** Grab the html from
+[the latest release](https://github.com/zaistudios/baseball-engine/releases/latest)
+and double-click it: no clone, no Node, no network. That is the copy to put on a
+USB stick.
+
+To cut one:
+
+```bash
+npm version patch --no-git-tag-version   # or minor / major — your call
+git commit -am "vX.Y.Z" && git push
+npm run release
+```
+
+`npm run release` exports, tags, pushes the tag and creates the release with the
+file attached. It refuses to run on a dirty tree — a release built from
+uncommitted code can never be rebuilt from its own tag — and refuses a version
+that already shipped. `node scripts/release.mjs --dry-run` shows what it would
+do without doing any of it.
 
 ⚠️ `npm run demo` (the roguelike) and `npm run export` (this game) both clear
 `dist/`, so each wipes the other's output. Run whichever one you want last.
