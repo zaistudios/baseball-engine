@@ -1082,10 +1082,19 @@ export function pitchToSpot(
     speedMph: PITCH_SPEED_MPH[type] + (pitcher.speedBonus ?? 0),
     inZone,
     location,
-    // ponytail: your wild ones cannot hit anybody, though his can — see
-    // HBP_CHANCE in throwPitch(). Wire it here when a plunking is a thing the
-    // game wants you to be able to do on purpose.
-    hitBatter: false,
+    // ⚠️ THE SAME RULE THE COMPUTER PITCHES UNDER. Until 2026-08-29 this was a
+    // hardcoded `false`: his wild ones could hit your batters and yours could
+    // never hit his, every game, in the half you are on the mound.
+    //
+    // That is the inversion of the rule difficulty.ts states at length — an
+    // assist applies to YOU and never to the computer, or you have built a
+    // setting that improves the opposition. A penalty that applies only to the
+    // computer is the same defect facing the other way, and it had been
+    // quietly paying out in your favour since interactive pitching shipped.
+    //
+    // Identical to the line in throwPitch(): the only pitch that can hit
+    // anybody is one that missed off the plate AND ran inside.
+    hitBatter: !inZone && location === 'inside' && rng.next() < HBP_CHANCE,
     // You know what you threw, so there is nothing to tip, and `setup` is the
     // neutral intent — the hitter reads the count, not your mind.
     tell: null,

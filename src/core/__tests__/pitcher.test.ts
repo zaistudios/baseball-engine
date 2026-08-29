@@ -317,6 +317,62 @@ describe('hit by pitch', () => {
       if (throwPitch(pitcherFor('splice', 1), NEUTRAL, NOWHERE, rng).hitBatter) plunks++;
     expect(plunks / n).toBeLessThan(0.05);
   });
+
+  /**
+   * ⚠️ AND IT HAS TO WORK IN THE HALF YOU PITCH. pitchToSpot() returned a
+   * hardcoded `hitBatter: false` until 2026-08-29, so the computer could hit
+   * your batters and you could never hit his — every game, in the half you are
+   * on the mound. That is the rule difficulty.ts states, inverted: a penalty
+   * that lands only on the computer is the same defect as an assist that lands
+   * only on you, and it had been paying out in your favour the whole time.
+   */
+  it('⚠️ your pitches can hit somebody too, on the same rule as his', () => {
+    const rng = makeRng(4242);
+    let plunks = 0;
+    for (let i = 0; i < 5000; i++) {
+      const p = pitchToSpot(pitcherFor('splice', 1), 'fastball', 'inside', rng);
+      if (p.hitBatter) {
+        plunks++;
+        expect(p.inZone).toBe(false);
+        expect(p.location).toBe('inside');
+      }
+    }
+    expect(plunks).toBeGreaterThan(0);
+  });
+
+  it('...and never on a strike, or on a pitch away from the batter', () => {
+    const rng = makeRng(99);
+    for (const spot of ['outside', 'high', 'low', 'low_outside'] as const) {
+      for (let i = 0; i < 800; i++) {
+        // A pitch called away can miss off the plate, but it cannot come back
+        // across the batter to hit him.
+        expect(pitchToSpot(pitcherFor('splice', 1), 'fastball', spot, rng).hitBatter).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * The rate is YOURS to set, which is the property worth keeping: pound the
+   * inside corner all night and you will eventually hit somebody. Measured per
+   * plate appearance at ~3.9 pitches: always-inside 3.3%, a normal mix 0.7%,
+   * never-inside 0.04%, against the computer's own 1.0%.
+   */
+  it('pounding inside costs more than mixing it up', () => {
+    const rate = (spots: readonly PitchLocation[]) => {
+      const rng = makeRng(1234);
+      let plunks = 0;
+      const n = 20000;
+      for (let i = 0; i < n; i++)
+        if (pitchToSpot(pitcherFor('splice', 1), 'fastball', spots[i % spots.length]!, rng).hitBatter)
+          plunks++;
+      return plunks / n;
+    };
+    const inside = rate(['inside']);
+    const mixed = rate(['middle', 'inside', 'outside', 'high', 'low']);
+    expect(inside).toBeGreaterThan(mixed * 2);
+    // Still an event, not a mechanic — well under a plunk every other batter.
+    expect(inside).toBeLessThan(0.05);
+  });
 });
 
 describe('count leverage', () => {

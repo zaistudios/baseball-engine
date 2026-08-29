@@ -21,10 +21,19 @@
  * matters — staying alive with two strikes is a thing that happens to you now
  * rather than a rule you read about.
  *
- * ⚠️ RETUNED 2.3 -> 2.7 ON 2026-08-28, AGAINST THE LEAGUE. The old value was
- * set against scripts/balance.ts, which plays ALB and DET and nobody else, so
- * it was tuned on two benches out of thirty. Measured across three full
- * seasons instead, 2.3 left every plate-appearance number short at once —
+ * ⚠️ RETUNED 2.3 -> 2.7 ON 2026-08-28, AGAINST THE LEAGUE.
+ *
+ * ⚠️ AND A CORRECTION, 2026-08-29: this comment used to say the old value was
+ * tuned against scripts/balance.ts, "which plays ALB and DET and nobody else."
+ * That is FALSE and it was written here without opening the file — balance.ts
+ * rotates through every ordered pairing in the league and its own header
+ * explains that it was changed for exactly this reason. The claim came out of
+ * a stale note and got repeated into a code comment, a vault note and a commit
+ * message before anybody checked. Where 2.3 actually came from is not
+ * recorded. Do not repeat an instrument's flaw second-hand; open it.
+ *
+ * Measured across three full seasons, 2.3 left every plate-appearance number
+ * short at once —
  * strikeouts 19.7% against a real 22.4%, walks 7.7% against 9.6%, and
  * therefore **72.5% of plate appearances ending with a ball in play against a
  * real 68%**, on 3.61 pitches per PA against 3.90.
