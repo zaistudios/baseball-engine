@@ -328,6 +328,12 @@ export interface SimResult {
   /** Plate appearances where the bunt was on, both sides. */
   bunts: number;
   /**
+   * Foul pops somebody got under. Counted for the same reason errors are: it
+   * is a rule that ENDS at-bats, so it moves the plate-appearance mix, and a
+   * balance run that cannot see it cannot tell whether it is set right.
+   */
+  foulOuts: number;
+  /**
    * How the plate appearances ended, both sides.
    *
    * Here because runs-per-game alone cannot say WHY the number is off. A run
@@ -376,6 +382,7 @@ export function simulateGame(
   let errors = 0;
   let wilds = 0;
   let bunts = 0;
+  let foulOuts = 0;
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -403,6 +410,7 @@ export function simulateGame(
     outcomes[out.atBat.kind]++;
     if (out.atBat.error) errors++;
     if (out.atBat.bunt) bunts++;
+    if (out.atBat.outcome === 'foul_out') foulOuts++;
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -413,7 +421,7 @@ export function simulateGame(
     }
   }
 
-  return { game: g, pitches, halves, outcomes, errors, wilds, bunts };
+  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts };
 }
 
 /** A one-line box score, for the CLI and for eyeballing a sim run. */

@@ -89,6 +89,12 @@ export interface Replay {
   /** Runners who came all the way home, by the base they started on. */
   scoredFrom: number[];
   /**
+   * Who goes after it, when the geometry cannot say. Only fouls set this —
+   * see raceFor(). Undefined means "ask nearestFielder", which is right for
+   * every ball hit into fair territory.
+   */
+  chaserNum?: number;
+  /**
    * Which of the replay's sounds have already played.
    *
    * Keyed rather than a queue of timers because the game clock stops behind a
@@ -111,10 +117,14 @@ export function newReplay(o: {
   error?: boolean;
   moves?: RunnerMove[];
   scoredFrom?: number[];
+  chaserNum?: number;
 }): Replay {
   return {
     startedAt: o.now,
-    plot: plotBatted(o.outcome, o.exitVelocity, o.launchAngle),
+    // Direction matters to the plot for fouls only, and it must be the same
+    // call placement.ts makes or the ball is drawn somewhere the play-by-play
+    // did not put it.
+    plot: plotBatted(o.outcome, o.exitVelocity, o.launchAngle, o.direction),
     direction: o.direction,
     outcome: o.outcome,
     speed: o.speed,
@@ -123,6 +133,7 @@ export function newReplay(o: {
     error: !!o.error,
     moves: o.moves ?? [],
     scoredFrom: o.scoredFrom ?? [],
+    ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     cued: new Set(),
   };
 }
@@ -151,6 +162,22 @@ export const REPLAY_HOLD_MS = 900;
 export const REPLAY_CALL_MS = 700;
 
 /**
+ * How long a FOUL sits there before cutting back — much less than a ball in
+ * play, and this is a pacing decision rather than a cosmetic one.
+ *
+ * ⚠️ THERE IS MORE THAN ONE FOUL IN AN AVERAGE PLATE APPEARANCE. Giving each
+ * one the full nine hundred milliseconds a finished play gets would add most of
+ * a second to every at-bat in the game, several times over — the mode's whole
+ * premise is that a season fits in an afternoon, and this is exactly the kind of
+ * change that quietly eats that. The ball leaves the bat, you see where it went,
+ * and the pitcher is getting the ball back.
+ *
+ * The caught one does NOT use this: a foul out ends an at-bat and gets the same
+ * beat as any other out. See replayLength().
+ */
+export const FOUL_HOLD_MS = 220;
+
+/**
  * Everything about the play at first, resolved once.
  *
  * Both the frame loop (which needs to know how long to stay overhead) and the
@@ -158,7 +185,15 @@ export const REPLAY_CALL_MS = 700;
  * that ends before the runner reaches the bag cuts away mid-race.
  */
 export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Race {
-  const chaser = nearestFielder(r.plot.distFt, r.direction);
+  // ⚠️ NOBODY STANDS IN FOUL GROUND, so nearestFielder() — which measures
+  // against the nine at their posts in fair territory — answers the wrong
+  // question about a foul and usually returns the pitcher. The catcher and the
+  // two corners are the men who chase these, and placement.ts already decided
+  // which; `chaserNum` carries that answer over rather than working it out a
+  // second way and disagreeing.
+  const chaser =
+    (r.chaserNum !== undefined ? FIELDERS.find((f) => f.num === r.chaserNum) : undefined) ??
+    nearestFielder(r.plot.distFt, r.direction);
   const fieldedAt = REPLAY_CUT_MS + r.plot.hangMs;
   return {
     chaser,
@@ -166,13 +201,20 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
     ...raceTiming({
       speed: r.speed,
       safe: r.safe,
-      // A double play is always a play at first, whoever fielded it.
-      play: hasPlayAtFirst(r.plot, chaser) || r.doublePlay,
+      // ⚠️ A FOUL HAS NO PLAY ANYWHERE. Nobody runs, nobody covers, nothing is
+      // thrown — the at-bat either continues or the batter is already out in
+      // the air. Without this the replay draws a man breaking for first on a
+      // ball hit into the seats.
+      play: !isFoul(r) && (hasPlayAtFirst(r.plot, chaser) || r.doublePlay),
       fieldedAt,
       doublePlay: r.doublePlay,
     }),
   };
 }
+
+/** Fouls of both kinds — the one that continues the at-bat and the one that ends it. */
+export const isFoul = (r: Replay): boolean =>
+  r.outcome === 'foul' || r.outcome === 'foul_out';
 
 /**
  * Total. The longer of the two things the replay might be waiting on: the ball
@@ -183,6 +225,10 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
  * 0.6 hitter at 1900 + 460 = 2360ms.
  */
 export const replayLength = (r: Replay): number => {
+  // A foul that did not end the at-bat has no race to wait on and no call to
+  // hold — see FOUL_HOLD_MS. The caught one falls through to the normal beat,
+  // because it is an out and an out is worth a moment.
+  if (r.outcome === 'foul') return REPLAY_CUT_MS + r.plot.hangMs + FOUL_HOLD_MS;
   const race = raceFor(r);
   return Math.max(
     REPLAY_CUT_MS + r.plot.hangMs + REPLAY_HOLD_MS,
@@ -212,7 +258,11 @@ export const OUTCOME_COLOR: Record<string, string> = {
   triple: '#a8e06a',
   double: '#a8e06a',
   single: '#a8e06a',
+  // Both fouls are drawn in the same dead grey — the ball is out of play and
+  // the colour says so before the banner does. The green in this map is
+  // reserved for a ball that is still alive.
   foul: '#8a8a7a',
+  foul_out: '#8a8a7a',
 };
 
 /**
@@ -429,7 +479,11 @@ export function drawOverhead(
   ctx.arc(at.x, at.y, ballR, 0, Math.PI * 2);
   ctx.fill();
 
-  drawRace(ctx, cam, now, r, landing, opts);
+  // ⚠️ NOBODY RUNS ON A FOUL. drawRace() puts the batter down the line and
+  // moves every runner up; on a ball into the seats none of that happened, and
+  // on a foul out the batter never left the box. It also owns the SAFE/OUT
+  // call, which a foul has no business showing.
+  if (!isFoul(r)) drawRace(ctx, cam, now, r, landing, opts);
 
   ctx.restore();
 }

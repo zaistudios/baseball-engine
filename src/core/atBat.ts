@@ -32,6 +32,21 @@ export interface AtBatState {
   strikes: number;
   /** Set exactly once, when the at-bat ends. */
   result?: AtBatResult;
+  /**
+   * WHAT THE LAST SWING DID, whether or not it ended the at-bat.
+   *
+   * ⚠️ THIS EXISTS SO A FOUL CAN BE DRAWN. Before it, swingAt() resolved the
+   * swing, saw a foul, added a strike and threw the HitResult away — so the
+   * screen knew a foul had happened and could not know where it went, how hard
+   * it was hit or how high. The ball simply vanished. Every other batted ball
+   * reaches the replay through `result.hit`; a foul has no result, so it needs
+   * somewhere else to be.
+   *
+   * Set on every swing including the whiff, so "what happened on that pitch" is
+   * answerable from the count alone. Undefined before the first swing and after
+   * a take, which is exactly the case where there is nothing to draw.
+   */
+  lastSwing?: HitResult;
 }
 
 export const newAtBat = (): AtBatState => ({ balls: 0, strikes: 0 });
@@ -75,13 +90,25 @@ export function takePitch(state: AtBatState, inZone: boolean, hitBatter = false)
 export function swingAt(state: AtBatState, input: SwingInput, rng: Rng): AtBatState {
   assertLive(state);
   const hit = resolveSwing(input, rng);
+  // Carried on every path below, including the ones that do not end the at-bat.
+  // See AtBatState.lastSwing — it is what lets a foul be drawn.
+  const swung = { ...state, lastSwing: hit };
 
-  if (hit.outcome === 'strikeout') return addStrike(state);
+  if (hit.outcome === 'strikeout') return addStrike(swung);
   if (hit.outcome === 'foul') {
     // The bunt exception. A foul bunt with two strikes rings him up, and
     // addStrike() already knows what a third strike is.
-    if (state.strikes >= 2 && !hit.bunted) return state;
-    return addStrike(state);
+    //
+    // ⚠️ NOTE WHAT IS RETURNED WHEN THE FOUL IS FREE: `swung`, not `state`. The
+    // count is unchanged either way, but the swing has to survive or the screen
+    // cannot draw the ball. main.ts tests for a free foul by comparing the
+    // COUNT, not the object — see the note there.
+    if (state.strikes >= 2 && !hit.bunted) return swung;
+    return addStrike(swung);
   }
-  return { ...state, result: { kind: 'in_play', hit } };
+  // ⚠️ A CAUGHT FOUL ARRIVES HERE, and that is the whole reason foul_out is a
+  // separate outcome. It is an out like any other from this point on: it ends
+  // the at-bat, applyAtBat() records it, and nothing downstream needs a special
+  // case. A `foul` reaching applyAtBat() throws — see the note in inning.ts.
+  return { ...swung, result: { kind: 'in_play', hit } };
 }

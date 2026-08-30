@@ -148,6 +148,8 @@ const BASES_GAINED: Record<Outcome, number> = {
   popup: 0,
   ground_out: 0,
   line_out: 0,
+  // An out. He never left the box.
+  foul_out: 0,
   foul: 0,
 };
 

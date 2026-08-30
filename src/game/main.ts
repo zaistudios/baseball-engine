@@ -117,7 +117,7 @@ import {
 import { armCondition, fatigue, hasRelief, openedBy, ZONE_FATIGUE_PENALTY } from './bullpen.ts';
 import { autoCaller, manageBench, manageBullpen, rollLoose, runTheBases } from './sim.ts';
 import { fieldBall } from './defense.ts';
-import { withPlacement, scorecard, throwNotation, BAG_WORD } from './placement.ts';
+import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { knob } from './identity.ts';
 import { momentOn, decide, valueShift, type Moment } from './moments.ts';
@@ -653,14 +653,17 @@ function resolvePitch(): void {
       lastGrade = 'BUNT — TOOK IT';
       flash = pitch.hitBatter ? 'HIT BY PITCH' : 'BALL';
     } else {
-      const before = atBat;
+
       atBat = swingAt(
         atBat,
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
         rng,
       );
       lastGrade = 'BUNT';
-      flash = atBat === before ? 'BUNT FOUL' : 'BUNT';
+      // ⚠️ READ OFF THE SWING, NOT THE COUNT. This asked whether the count moved,
+      // and a bunt foul ALWAYS moves it — swingAt() has no free-foul branch for a
+      // bunt — so 'BUNT FOUL' was unreachable long before lastSwing existed.
+      flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'BUNT';
       // Two strikes and he fouled it off: the count already rang him up, and
       // the banner should say so rather than reading like a live at-bat.
       if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
@@ -727,7 +730,8 @@ function resolvePitch(): void {
     const whiffed = g === 'miss';
     observePitch(book, pitch, true, offset, whiffed);
     flash = g === 'miss' ? 'SWING AND MISS' : `${g.toUpperCase()}`;
-    if (atBat === before) flash = 'FOUL';
+    if (wasFreeFoul(before, atBat)) flash = 'FOUL';
+    if (showFoul(batter.speed)) flash = 'FOUL';
 
     // The streak, and the loud version of it. Only a SWING moves this — a take
     // is left alone deliberately, see streak.ts.
@@ -752,7 +756,15 @@ function resolvePitch(): void {
     }
   }
 
-  flashUntil = pauseFor(1000);
+  // ⚠️ THE FOUL'S BEAT IS THE REPLAY'S, not the flat second every other pitch
+  // gets. Without this the next pitch is thrown while the ball is still in the
+  // air on the overhead — the pause and the replay are two clocks and they have
+  // to agree about how long a foul takes. Speed-scaled for the same reason
+  // finishAtBat's is: at 8x the replay is 8x faster and the wait must be too.
+  flashUntil =
+    replay && replay.outcome === 'foul'
+      ? performance.now() + replayLength(replay) / speed()
+      : pauseFor(1000);
   phase = 'resolve';
 }
 
@@ -901,13 +913,14 @@ function resolveTheirSwing(): void {
       atBat = takePitch(atBat, false, false);
       flash = 'BALL — he had it squared';
     } else {
-      const before = atBat;
+
       atBat = swingAt(
         atBat,
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
         rng,
       );
-      flash = atBat === before ? 'BUNT FOUL' : 'HE BUNTS';
+      // Same unreachable test as the human bunt above — see the note there.
+      flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'HE BUNTS';
       if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
     }
   } else {
@@ -936,7 +949,12 @@ function resolveTheirSwing(): void {
       atBat = swingAt(atBat, input, rng);
       const g = grade(offset, stats.contact * stuff, stats.vision);
       flash = g === 'miss' ? 'SWING AND MISS' : 'IN PLAY';
-      if (atBat === before) flash = 'FOUL';
+      // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
+      // `atBat === before` and so started calling every two-strike foul the
+      // computer hit "IN PLAY".
+      if (wasFreeFoul(before, atBat)) flash = 'FOUL';
+      // Their fouls are drawn too. Same event, same picture.
+      if (showFoul(batter.speed)) flash = 'FOUL';
       if (theirCall.guess === pitch.type && g !== 'miss') flash += ' — he sat on it';
     }
   }
@@ -947,6 +965,53 @@ function resolveTheirSwing(): void {
 }
 
 // ------------------------------------------------------- ending an at-bat
+
+/**
+ * WAS THAT FOUL FREE — the two-strike one that costs nothing.
+ *
+ * ⚠️ COMPARED ON THE COUNT, NEVER ON THE OBJECT. Three call sites used to ask
+ * `atBat === before`, which worked only because swingAt() returned the SAME
+ * state object when a foul changed nothing. It returns a new one on every swing
+ * now — it has to, because it carries `lastSwing` so the ball can be drawn — so
+ * that test became permanently false and the screen started calling a
+ * two-strike foul "IN PLAY". The count is what "nothing happened" actually
+ * means, and it cannot rot the same way.
+ */
+const wasFreeFoul = (before: AtBatState, after: AtBatState): boolean =>
+  after.result === undefined &&
+  after.strikes === before.strikes &&
+  after.balls === before.balls;
+
+/**
+ * DRAW THE FOUL, if the last swing was one. Returns whether it did.
+ *
+ * ⚠️ EVERY OTHER BATTED BALL REACHES THE REPLAY FROM finishAtBat(), which a
+ * foul never reaches because it does not end the at-bat. Before this the ball
+ * simply vanished off the bat. It gets the same cut to the overhead a ball in
+ * play gets, sized to a play that decides nothing — see FOUL_HOLD_MS.
+ *
+ * ⚠️ BOTH HALVES OF THE INNING CALL THIS. Your fouls and theirs are the same
+ * event and drawing only yours would be the two halves of the game disagreeing
+ * about what a foul ball is.
+ *
+ * The CAUGHT one is deliberately not built here: it ends the at-bat and goes
+ * through finishAtBat() like any other out, replay and all.
+ */
+function showFoul(runnerSpeed: number): boolean {
+  const swing = atBat.lastSwing;
+  if (!swing || swing.outcome !== 'foul') return false;
+  replay = newReplay({
+    now: performance.now(),
+    outcome: swing.outcome,
+    exitVelocity: swing.exitVelocity,
+    launchAngle: swing.launchAngle,
+    direction: swing.direction,
+    speed: runnerSpeed,
+    safe: false,
+    chaserNum: place(swing).fielderNum,
+  });
+  return true;
+}
 
 /** The count says the at-bat is done. Fold it into the game. */
 function finishAtBat(): void {
@@ -989,6 +1054,11 @@ function finishAtBat(): void {
           safe: result.hit.isHit || !!fielding?.error,
           doublePlay: !!fielding?.doublePlay,
           error: !!fielding?.error,
+          // Only a foul out sets this, and only because nobody stands in foul
+          // ground for nearestFielder() to find. See raceFor().
+          ...(result.hit.outcome === 'foul_out' && placed.placement
+            ? { chaserNum: placed.placement.fielderNum }
+            : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           moves: runnerMoves(log.before, log.after).filter((m) => m.from >= 0),
           scoredFrom: scorersFrom(log.before, log.after, log.runs),

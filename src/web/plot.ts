@@ -79,8 +79,65 @@ export interface Plot {
  */
 const HANG_MIN_MS = 900;
 const HANG_MAX_MS = 2600;
-const hangFor = (distFt: number): number =>
-  Math.max(HANG_MIN_MS, Math.min(HANG_MAX_MS, 700 + distFt * 4.2));
+
+/**
+ * ⚠️ A FOUL GETS ITS OWN, MUCH TIGHTER BAND, and this is pacing rather than
+ * physics. The floor above is 900ms because nothing in play should feel
+ * hurried; a foul is not a play, there is more than one of them in an average
+ * plate appearance, and the batter's-view flash it interrupts is a second long.
+ * Left on the normal band a foul pop measured 1,570ms of hang and the next
+ * pitch was thrown while the replay was still drawing.
+ *
+ * The band is still WIDE ENOUGH TO READ: a foul liner comes in around 620ms
+ * and a foul pop hits the 900 ceiling, so the two are visibly different plays,
+ * which is the whole reason the angle term exists.
+ */
+const FOUL_HANG_MIN_MS = 380;
+const FOUL_HANG_MAX_MS = 900;
+
+/** A mishit does not hang like a struck one, and there are several a PA. */
+const FOUL_HANG_SCALE = 0.62;
+
+/**
+ * ⚠️ IT IS DERIVED FROM THE VERTICAL HALF OF THE LAUNCH, NOT FROM DISTANCE, and
+ * the first attempt at this fixed the popup and introduced a subtler bug.
+ *
+ * That version kept the old distance curve and multiplied it by an angle
+ * factor. It reads fine and it is NOT MONOTONIC: past about 45° a steeper ball
+ * travels LESS far, so the distance term falls faster than the angle term
+ * rises, and a 64° popup came back forty milliseconds SHORTER than a 60° one.
+ * The test that caught it is in foul.test.ts and it was written before the
+ * failure, not after.
+ *
+ * Time in the air is `2·v·sin(θ)/g` and nothing else — it does not care how far
+ * the ball went sideways. So that is what this is, scaled to land the existing
+ * pacing where it already was: a 110mph home run at 30° comes out near the
+ * 2,380ms the distance curve used to give it, and an ordinary fly is within a
+ * few percent of its old value. What changes is the two cases the old curve got
+ * wrong — the popup, which now hangs like one, and the screamer, which no
+ * longer does.
+ */
+const HANG_PER_FPS = 43.3;
+
+const airHang = (exitVelocityMph: number, launchAngleDeg: number, foul: boolean): number => {
+  const deg = Math.max(0, Math.min(89, launchAngleDeg));
+  const up = exitVelocityMph * Math.sin((deg * Math.PI) / 180);
+  const ms = up * HANG_PER_FPS * (foul ? FOUL_HANG_SCALE : 1);
+  return foul
+    ? Math.max(FOUL_HANG_MIN_MS, Math.min(FOUL_HANG_MAX_MS, ms))
+    : Math.max(HANG_MIN_MS, Math.min(HANG_MAX_MS, ms));
+};
+
+/**
+ * A ball on the ground has no hang at all — this is time to REACH somebody, so
+ * unlike the air it really does go with distance. Kept on the original curve.
+ */
+const groundHang = (distFt: number, foul: boolean): number => {
+  const ms = (700 + distFt * 4.2) * 0.72;
+  return foul
+    ? Math.max(FOUL_HANG_MIN_MS, Math.min(FOUL_HANG_MAX_MS, ms * FOUL_HANG_SCALE))
+    : Math.max(HANG_MIN_MS * 0.72, Math.min(HANG_MAX_MS, ms));
+};
 
 /**
  * Plot one batted ball.
@@ -89,16 +146,66 @@ const hangFor = (distFt: number): number =>
  * wall as the scoreboard, both ways. Everything else — how far, how long, how
  * flat — comes from the velocity and angle the hit engine already rolled.
  */
+/** The lines, and the furthest round the back a foul is allowed to be drawn. */
+export const FOUL_LINE_DEG = 45;
+
+/**
+ * How far a foul is allowed to finish from the plate.
+ *
+ * A long one down the line reaches the seats; nothing needs to be drawn beyond
+ * that, and the camera does not have the room for it anyway.
+ */
+export const FOUL_MAX_FT = 250;
+
+/**
+ * ⚠️ A FOUL HIT STRAIGHT BACK DOES NOT TRAVEL, and the range formula does not
+ * know that. Physically the bat has reversed most of the ball's energy rather
+ * than redirecting it — that is WHY it went backwards — so the ball that ends
+ * up over the catcher went twenty feet, not the hundred and twenty the parabola
+ * would give it at the same speed and angle.
+ *
+ * It is also what keeps the replay on the canvas. The overhead camera puts home
+ * plate about forty-eight feet from the bottom edge, because until now nothing
+ * was ever drawn behind it. A foul plotted a hundred feet straight back is
+ * off-screen, which is not a picture of anything.
+ *
+ * So carry falls off from full at the line to a fifth of it at the backstop.
+ */
+const foulCarry = (dirDeg: number): number => {
+  const span = FOUL_MAX_DEG_DRAWN - FOUL_LINE_DEG;
+  const back = Math.max(0, Math.min(1, (Math.abs(dirDeg) - FOUL_LINE_DEG) / span));
+  return 1 - 0.8 * back;
+};
+
+/** Matches FOUL_MAX_DEG in core/hit.ts — the furthest round a foul is sent. */
+const FOUL_MAX_DEG_DRAWN = 128;
+
 export function plotBatted(
   outcome: Outcome,
   exitVelocityMph: number,
   launchAngleDeg: number,
+  /**
+   * Only read for fouls, and only to decide how far it carries — see
+   * foulCarry(). A fair ball's distance has never depended on its direction and
+   * still does not, so every existing caller is unaffected by the default.
+   */
+  directionDeg = 0,
 ): Plot {
+  const foul = outcome === 'foul' || outcome === 'foul_out';
   if (launchAngleDeg < GROUND_ANGLE) {
     // On the ground. Range formula does not apply — a -5° chopper has negative
     // range in it, which would plot behind the catcher.
-    const distFt = Math.max(50, Math.min(240, exitVelocityMph * 1.7));
-    return { distFt, hangMs: hangFor(distFt) * 0.72, ground: true };
+    //
+    // Hang is asked for at the reference angle rather than the ball's own: a
+    // grounder's launch angle can be negative, the lift factor would floor out,
+    // and a ball that never leaves the dirt is not "hanging" at all. The 0.72
+    // is what makes it scurry, and it is measured against the same curve every
+    // other ball uses.
+    const rolled = Math.max(50, Math.min(240, exitVelocityMph * 1.7));
+    // A foul chopper dies against the screen or trickles into the coach's box;
+    // it does not run 200ft the way a fair one down the line does.
+    const distFt = foul ? Math.max(18, rolled * foulCarry(directionDeg) * 0.6) : rolled;
+    return { distFt, hangMs: groundHang(distFt, foul), ground: true };
   }
 
   const v = exitVelocityMph * FPS_PER_MPH;
@@ -124,8 +231,17 @@ export function plotBatted(
       ? Math.max(distFt, WALL_FT + 14)
       : Math.min(distFt, WALL_FT - 8);
 
+  // ⚠️ THE FOUL CLAMP COMES BEFORE THE FAIR ONE, and it has a much lower floor.
+  // The 60ft minimum below is right for a ball in play — nothing fair finishes
+  // in the batter's box — and wrong for the pop straight up that the catcher
+  // takes four strides for.
+  if (foul) {
+    distFt = Math.max(18, Math.min(FOUL_MAX_FT, distFt * foulCarry(directionDeg)));
+    return { distFt, hangMs: airHang(exitVelocityMph, launchAngleDeg, true), ground: false };
+  }
+
   distFt = Math.max(60, Math.min(WALL_FT + 60, distFt));
-  return { distFt, hangMs: hangFor(distFt), ground: false };
+  return { distFt, hangMs: airHang(exitVelocityMph, launchAngleDeg, false), ground: false };
 }
 
 /**
@@ -226,7 +342,12 @@ export function chaseReach(outcome: Outcome): number {
   if (outcome === 'triple') return 0.58; // it got well past him
   if (outcome === 'double') return 0.72;
   if (outcome === 'single') return 0.84; // close, and not close enough
-  return 1; // popup, line out, ground out — he is there
+  // ⚠️ A FOUL HE DID NOT CATCH IS A FOUL HE COULD NOT REACH, and drawing him
+  // arriving under it would say the opposite. He breaks, he gets most of the
+  // way, the ball lands past him — which is what a foul into the seats looks
+  // like from above. The caught one is `foul_out` and falls through to 1.
+  if (outcome === 'foul') return 0.55;
+  return 1; // popup, line out, ground out, foul out — he is there
 }
 
 // ------------------------------------------------------------- the defence

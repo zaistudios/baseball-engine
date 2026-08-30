@@ -232,6 +232,108 @@ export interface HitResult {
 }
 
 /**
+ * HOW STEEP A FOUL HAS TO BE BEFORE SOMEBODY GETS UNDER IT.
+ *
+ * A foul pop is the ball that goes nearly straight up off the end of the bat
+ * and comes down in the same postcode. That is a statement about the ANGLE it
+ * left at and about nothing else.
+ *
+ * ⚠️ IT USED TO ALSO REQUIRE A LOW EXIT VELOCITY, AND THAT RULE WAS QUIETLY
+ * UNFAIR. A foul's exit velocity is `70 × timing × (0.8 + power × 0.4)`, so the
+ * cap was really a cap on the HITTER'S POWER: measured, a club averaging 1.15
+ * power produced 70.5mph on a late foul and 74.9 on an early one, against a bar
+ * of 71. The consequence was not a slightly lower rate — it was that only
+ * below-average hitters, mistiming late, could ever foul out at all, and the
+ * strong clubs were exempt as a class. It survived a 200-game headless
+ * measurement because averaging over thirty clubs hid it, and it was caught by
+ * playing three full games and seeing ZERO foul outs in 230 plate appearances
+ * where four were expected.
+ *
+ * A big man pops one up foul exactly as catchably as a small one. The angle is
+ * the whole rule now.
+ *
+ * ⚠️ IT IS A RATE ON PLATE APPEARANCES, NOT ON FOULS. There is about one foul
+ * per trip to the plate, so the share of FOULS this catches is close to the
+ * share of PLATE APPEARANCES it ends. Measured over 150 headless games per
+ * setting, every club against every other; the top row is the rule switched
+ * off, which is what everything else is a change from:
+ *
+ *   angle   foul outs   K       BB      in play   R/team   P/game
+ *   —        0.00%      24.58%  7.62%   67.81%    4.35     287
+ *   76       1.08%      24.31%  7.68%   68.01%    4.23     286
+ *   75       1.79%      23.82%  7.64%   68.55%    4.24     283   <- shipped
+ *   74       2.25%      23.39%  7.52%   69.09%    4.20     284
+ *   72       3.46%      23.03%  7.24%   69.73%    3.97     278
+ *   70       4.49%      22.35%  7.27%   70.37%    3.97     275
+ *   60       9.48%      20.07%  7.11%   72.82%    3.81     264
+ *   real     ~2%        22.4%   9.6%    68.0%     4.4      ~295
+ *
+ * ⚠️ IT MOVES THE STRIKEOUT RATE, WHICH IS THE REAL COST AND WAS NOT OBVIOUS
+ * BEFORE MEASURING. Every foul caught is a foul no longer available to become
+ * strike two, so at-bats end sooner — in the air instead of on a third strike —
+ * and the pitch count comes down with them. At the shipped setting that is
+ * three quarters of a point of strikeout rate and four pitches a game. It moves
+ * TOWARD real baseball from where the league already sat (24.6% K against a
+ * real 22.4%, in-play 67.8% against 68%), which is luck rather than design and
+ * should not be read as the rule being free: past about 4% it starts eating
+ * strikeouts that should have happened and a tenth of a run a side with them.
+ *
+ * ⚠️ TUNED AGAINST LAUNCH_ANGLE.foul, WHICH IS ITS POPULATION. That range is
+ * [-45, 78] and this bar cuts the top three degrees off it. Move the range and
+ * this number means something entirely different — re-measure, do not scale it.
+ */
+export const FOUL_POP_ANGLE = 75;
+
+/**
+ * Was that foul a pop somebody could get under?
+ *
+ * ⚠️ IT ROLLS NOTHING, AND THAT IS DELIBERATE. The launch angle is a value the
+ * swing has ALREADY rolled, so this adds no draw to the rng stream — which
+ * means every seeded at-bat in the engine and in the tests plays out exactly as
+ * it did, right up until the moment a foul is caught. An extra rng.next() here
+ * would have re-rolled every subsequent pitch of every game in the project. The
+ * randomness is real; it is just already spent.
+ */
+export const caughtFoul = (launchAngle: number): boolean => launchAngle >= FOUL_POP_ANGLE;
+
+/**
+ * WHERE A FOUL BALL ACTUALLY GOES — outside the lines, which is the one thing
+ * `direction` could not say before.
+ *
+ * The fair field is ±45°. `directionFor()` clamps to exactly that, so before
+ * this a foul ball carried a direction somewhere in FAIR territory — fine while
+ * nothing drew it, and a lie the moment anything did.
+ *
+ * ⚠️ THE WORSE THE TIMING, THE STRAIGHTER BACK IT GOES, which is the opposite
+ * of what it first looks like it should be. A ball pulled hard and foul was
+ * nearly fair: it leaves at just past the line. A ball hit dead off the middle
+ * of the bat and fouled was not mistimed sideways at all — it was hit under, and
+ * it goes over the catcher. So the fair-territory angle is INVERTED into foul
+ * ground: ±45 stays near the line, and 0 goes to the backstop.
+ *
+ * Beyond ±90 is behind home plate, which overheadPoint() draws correctly with
+ * no special case because it is just polar coordinates.
+ */
+export const FOUL_MAX_DEG = 128;
+
+/**
+ * ⚠️ IT STARTS PAST THE LINE, NOT ON IT. The foul line is FAIR ground — a ball
+ * that lands on the chalk is in play — so a foul has to be strictly outside it.
+ * The first version began at exactly 45 and a ball pulled to the very edge of
+ * the timing window came out at 45.000, drawn sitting on the line the play-by-
+ * play had just called it foul of.
+ */
+const FOUL_LINE_DEG = 45;
+const JUST_FOUL_DEG = 46.5;
+
+export function foulDirection(direction: number): number {
+  const side = direction >= 0 ? 1 : -1;
+  const pulled = Math.min(FOUL_LINE_DEG, Math.abs(direction));
+  const back = JUST_FOUL_DEG + (FOUL_LINE_DEG - pulled) * 1.55;
+  return side * Math.min(FOUL_MAX_DEG, back);
+}
+
+/**
  * Launch angle ranges, ported verbatim from HitCalculator.calculate_launch_angle().
  * These are what make a popup look like a popup without anyone animating one.
  */
@@ -240,7 +342,26 @@ const LAUNCH_ANGLE: Record<Outcome, readonly [number, number]> = {
   ground_out: [-10, 5],
   line_out: [10, 20],
   popup: [45, 80],
-  foul: [-45, 45],
+  /**
+   * ⚠️ WIDENED FROM [-45, 45] SO THAT FOUL POPS EXIST AT ALL. A foul is every
+   * kind of miss-hit there is — the chopper that dribbles past the bag, the
+   * screamer into the seats, and the one straight up off the end of the bat —
+   * and the old ceiling of 45° could not produce that last one. Nothing read a
+   * foul's launch angle before this change, so the range was never wrong; it
+   * was never asked.
+   *
+   * This is now the population FOUL_POP_ANGLE cuts, which makes it the shape
+   * behind the foul-out rate. Moving either moves that rate.
+   */
+  foul: [-45, 78],
+  /**
+   * Never read on the normal path — a caught foul keeps the angle its `foul`
+   * roll already gave it, because it is the same batted ball. Present for the
+   * Record, and set to the part of the foul range that can be caught, so a
+   * hand-built foul_out in a test or a script is a ball that could really have
+   * been one.
+   */
+  foul_out: [FOUL_POP_ANGLE, 78],
   single: [5, 25],
   double: [15, 30],
   triple: [8, 18],
@@ -479,6 +600,9 @@ const EXIT_VELOCITY: Record<Outcome, number> = {
   ground_out: 75,
   line_out: 95,
   foul: 70,
+  // Never read on the normal path — a caught foul keeps the velocity its
+  // `foul` roll gave it. See LAUNCH_ANGLE.foul_out.
+  foul_out: 62,
   single: 85,
   double: 95,
   triple: 100,
@@ -582,6 +706,8 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
   // the return. Taken first so no swing modifier can reach it.
   if (input.isBunt) {
     const outcome = resolveBunt(input, stats, rng);
+    // Down a line, not sprayed — a bunt is aimed, not mistimed.
+    const aimed = rng.range(-30, 30);
     return {
       outcome,
       timing: 'good',
@@ -593,8 +719,16 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
       exitVelocity: BUNT_EXIT_VELOCITY,
       // Popped-up bunts go straight up; everything else dribbles.
       launchAngle: outcome === 'popup' ? rng.range(50, 75) : rng.range(-5, 5),
-      // Down a line, not sprayed — a bunt is aimed, not mistimed.
-      direction: rng.range(-30, 30),
+      // ⚠️ A BUNTED FOUL IS STILL FOUL. This returned the aimed direction
+      // unchanged, so a bunt pushed foul was drawn and described as sitting in
+      // fair territory — the same lie the full swing told before foulDirection()
+      // existed, surviving in the one path that returns early.
+      //
+      // ⚠️ IT IS NOT PROMOTED TO A CATCH. resolveBunt() has its own `popup`
+      // outcome for a bunt popped up, which is already an out; running a
+      // dribbler down the line through caughtFoul() would retire men on balls
+      // that trickle foul a foot from the plate.
+      direction: outcome === 'foul' ? foulDirection(aimed) : aimed,
       clutchApplied: false,
       bunted: true,
     };
@@ -656,8 +790,24 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
     probs = applyFoul(probs, input.foulBoost ?? 1);
   }
 
-  const outcome = rollOutcome(probs, rng);
-  const [loAngle, hiAngle] = LAUNCH_ANGLE[outcome];
+  const rolled = rollOutcome(probs, rng);
+  const [loAngle, hiAngle] = LAUNCH_ANGLE[rolled];
+
+  // ⚠️ EVERY ROLL HAPPENS BEFORE THE FOUL IS EXAMINED, and the order matters
+  // more than it looks. The angle and the velocity are drawn for the outcome
+  // the TABLE gave, and the foul rules below only READ them — see caughtFoul().
+  // Draw anything new down there and the rng stream shifts for every pitch
+  // after it, which would silently re-roll every seeded season in the project.
+  const launchAngle = loAngle === hiAngle ? loAngle : rng.range(loAngle, hiAngle);
+  const exitVelocity = Math.min(
+    MAX_EXIT_VELOCITY,
+    EXIT_VELOCITY[rolled] * VELOCITY_BY_TIMING[timing] * (0.8 + stats.power * 0.4),
+  );
+  const fair = directionFor(input.offsetMs, input.batterHand);
+
+  // A foul goes outside the lines, and a soft steep one gets caught.
+  const foul = rolled === 'foul';
+  const outcome: Outcome = foul && caughtFoul(launchAngle) ? 'foul_out' : rolled;
 
   return {
     outcome,
@@ -665,12 +815,9 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
     pitchType: input.pitchType,
     isOut: isOut(outcome),
     isHit: isHit(outcome),
-    exitVelocity: Math.min(
-      MAX_EXIT_VELOCITY,
-      EXIT_VELOCITY[outcome] * VELOCITY_BY_TIMING[timing] * (0.8 + stats.power * 0.4),
-    ),
-    launchAngle: loAngle === hiAngle ? loAngle : rng.range(loAngle, hiAngle),
-    direction: directionFor(input.offsetMs, input.batterHand),
+    exitVelocity,
+    launchAngle,
+    direction: foul ? foulDirection(fair) : fair,
     clutchApplied,
     platoon,
     stance: input.isPowerSwing ? 'sitting' : protecting ? 'protecting' : 'normal',

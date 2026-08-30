@@ -168,6 +168,15 @@ export function callPlay(p: PlayInput): PlayCall {
           };
     case 'foul':
       return { score: 'F', says: 'Fouled off.' };
+    case 'foul_out':
+      // ⚠️ THE NOTATION IS THE SAME AS A FAIR POP — a foul out is scored by the
+      // man who caught it and nothing marks it as foul, which is real scoring
+      // practice. The catcher is the common one and gets his own sentence
+      // because "popped up to the catcher" reads as a fair ball behind the
+      // plate, which is not a thing.
+      return p.chaser === 2
+        ? { score: 'P2', says: `Straight up — the catcher throws the mask, and has it. ${away(p.outs)}.` }
+        : { score: `P${p.chaser}`, says: `Popped up into foul ground — ${who} camps under it, ${away(p.outs)}.` };
     case 'strikeout':
       return { score: 'K', says: `Struck him out, ${away(p.outs)}.` };
   }

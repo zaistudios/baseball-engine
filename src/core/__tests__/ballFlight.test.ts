@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { resolveSwingSeeded, DIRECTION_DEG_PER_MS, type PitchLocation } from '../hit.ts';
-import type { Outcome } from '../hitTables.ts';
+import { ALL_OUTCOMES, type Outcome } from '../hitTables.ts';
 
 /** Roll seeds until the wanted outcome shows up. Real rolls, not stubs. */
 function find(want: Outcome, offsetMs = 30) {
@@ -117,9 +117,12 @@ describe('where the pitch was, and what it does to the ball', () => {
     // bias rollOutcome toward its post-loop ground_out fallback and never say so.
     for (const loc of ['high', 'low', 'inside', 'outside', 'middle'] as const) {
       const s = shares(loc);
-      const total = (
-        ['strikeout', 'popup', 'ground_out', 'line_out', 'foul', 'single', 'double', 'triple', 'home_run'] as Outcome[]
-      ).reduce((sum, o) => sum + s(o), 0);
+      // ⚠️ ALL_OUTCOMES, NOT A HAND-LISTED NINE. These are MEASURED shares, so
+      // the day a tenth outcome arrived the nine stopped summing to one — by
+      // exactly the new one's rate — and the failure read as lost probability
+      // mass rather than as a stale list. Third hardcoded copy of this
+      // vocabulary to break the same way.
+      const total = ALL_OUTCOMES.reduce((sum, o) => sum + s(o), 0);
       expect(total).toBeCloseTo(1, 5);
     }
   });
@@ -198,7 +201,8 @@ describe('power, once a hitter has any', () => {
   });
 
   it('still totals one at every power level', () => {
-    const all: Outcome[] = ['strikeout', 'popup', 'ground_out', 'line_out', 'foul', 'single', 'double', 'triple', 'home_run'];
+    // Same hand-listed vocabulary, same reason it must not be. See above.
+    const all: readonly Outcome[] = ALL_OUTCOMES;
     for (const power of [0.7, 1.0, 1.2, 1.35, 1.8]) {
       const s = shares(power);
       expect(all.reduce((sum, o) => sum + s(o), 0)).toBeCloseTo(1, 5);

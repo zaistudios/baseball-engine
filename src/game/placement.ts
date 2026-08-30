@@ -38,7 +38,9 @@ export type Zone =
   | 'right-center'
   | 'right'
   | 'down-the-line'
-  | 'wall';
+  | 'wall'
+  /** Outside the lines. Only a foul ball is ever here — see place(). */
+  | 'foul-ground';
 
 export interface Placement {
   distFt: number;
@@ -131,10 +133,64 @@ function zoneFor(distFt: number, dirDeg: number): Zone {
   return 'right';
 }
 
-/** Plot one batted ball and describe where it finished. */
+/**
+ * WHICH SIDE OF THE PLATE A FOUL WENT, in the three ways that read differently.
+ *
+ * Past ±90 is genuinely behind home. Between the line and there it is the
+ * corner — the first- or third-base side, in the seats or off the netting.
+ */
+export type FoulSide = 'back' | 'first' | 'third';
+
+export const foulSide = (dirDeg: number): FoulSide =>
+  Math.abs(dirDeg) >= 90 ? 'back' : dirDeg > 0 ? 'first' : 'third';
+
+const FOUL_WORDS: Record<FoulSide, string> = {
+  back: 'straight back',
+  first: 'off down the first-base side',
+  third: 'off down the third-base side',
+};
+
+/**
+ * WHO IS UNDER A FOUL POP.
+ *
+ * ⚠️ NOT nearestFielder(). That function measures against the nine standing in
+ * FAIR territory, and it is right for every ball hit into it — but nobody
+ * plays a position in foul ground, so asking it who is nearest a ball behind
+ * the plate gets whichever of the nine happens to be least far away, which is
+ * usually the pitcher. The three men who actually catch foul pops are the
+ * catcher and the two corners, and which one it is depends only on the side.
+ */
+const foulCatcher = (dirDeg: number): number => {
+  const side = foulSide(dirDeg);
+  return side === 'back' ? 2 : side === 'first' ? 3 : 5;
+};
+
+/**
+ * Plot one batted ball and describe where it finished.
+ *
+ * ⚠️ A FOUL DOES NOT GO THROUGH THE FAIR MACHINERY. `zoneFor`, `nearestFielder`
+ * and the gap are all statements about the wedge between the lines — "the
+ * left-center gap" is not a place a foul ball can be, and a gap distance
+ * measured to a fielder who is not playing there is a number with nothing
+ * behind it. So a foul gets its own short answer: how far, which side, and who
+ * would be under it. `inTheGap` is false by construction, which also keeps
+ * stretch() from ever looking at one.
+ */
 export function place(hit: HitResult): Placement {
-  const plot = plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle);
+  const plot = plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction);
   const dirDeg = hit.direction;
+
+  if (hit.outcome === 'foul' || hit.outcome === 'foul_out') {
+    return {
+      distFt: plot.distFt,
+      dirDeg,
+      zone: 'foul-ground',
+      gapFt: 0,
+      fielderNum: foulCatcher(dirDeg),
+      inTheGap: false,
+    };
+  }
+
   const f = nearestFielder(plot.distFt, dirDeg);
   const gapFt = gapTo(plot.distFt, dirDeg, f.num);
 
@@ -235,6 +291,7 @@ const ZONE_WORDS: Record<Zone, string> = {
   right: 'right field',
   'down-the-line': 'down the line',
   wall: 'the wall',
+  'foul-ground': 'foul ground',
 };
 
 const POSITION_WORD: Record<number, string> = {
@@ -270,7 +327,15 @@ export function describePlay(outcome: Outcome, hit: HitResult, p: Placement): st
     case 'ground_out':
       return `grounded out to ${who}`;
     case 'foul':
-      return 'fouled it off';
+      // ⚠️ IT SAYS WHERE IT WENT NOW. A foul used to be four words because
+      // nothing knew anything about it; it has a real direction and a real
+      // shape, so the play-by-play can tell a chopper down the line from one
+      // hooked into the seats from one straight up over the catcher.
+      return `fouled it ${FOUL_WORDS[foulSide(p.dirDeg)]}`;
+    case 'foul_out':
+      return p.fielderNum === 2
+        ? 'fouled out to the catcher'
+        : `fouled out to ${who}`;
     case 'strikeout':
       return 'struck out';
   }
@@ -334,8 +399,16 @@ export function scorecard(
     case 'line_out':
       return `L${fielderNum}`;
 
+    // ⚠️ A FOUL OUT IS A PUTOUT AND HAS TO BE SCORED AS ONE. It fell through to
+    // the empty default below on the first pass, which reads as "nobody was
+    // retired" — and a man is out. Scored `P2` for the catcher and the corners
+    // alike: real scoring does not mark it foul, it marks who caught it.
+    case 'foul_out':
+      return `P${fielderNum}`;
+
     // A hit has no putout in it. Nobody was retired, so there is nothing for
-    // the scorer to write down but the hit itself.
+    // the scorer to write down but the hit itself. `foul` lands here too: the
+    // at-bat is still going and there is nothing to record yet.
     default:
       return '';
   }

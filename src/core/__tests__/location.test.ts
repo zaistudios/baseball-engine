@@ -11,13 +11,20 @@ import { describe, expect, it } from 'vitest';
 import { applyLocation, locationOffset, ALL_LOCATIONS, type PitchLocation } from '../hit.ts';
 import { OUTCOME_TABLES, ALL_PITCH_TYPES, type Outcome, type OutcomeTable } from '../hitTables.ts';
 
-/** A flat table, so a multiplier shows up as a plain ratio. */
+/**
+ * A flat table, so a multiplier shows up as a plain ratio.
+ *
+ * ⚠️ foul_out IS ZERO, not a ninth. No table can roll it — see t() in
+ * hitTables.ts — so a fixture that gave it a share would be testing a
+ * distribution the engine cannot produce.
+ */
 const flat = (): OutcomeTable => ({
   strikeout: 1 / 9,
   popup: 1 / 9,
   ground_out: 1 / 9,
   line_out: 1 / 9,
   foul: 1 / 9,
+  foul_out: 0,
   single: 1 / 9,
   double: 1 / 9,
   triple: 1 / 9,

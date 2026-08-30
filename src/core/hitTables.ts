@@ -48,6 +48,25 @@ export type Outcome =
   | 'ground_out'
   | 'line_out'
   | 'foul'
+  /**
+   * A FOUL POP SOMEBODY CAUGHT. An out, and the only outcome in this union no
+   * table can ever roll — see the note on `t()` below.
+   *
+   * ⚠️ IT IS A SEPARATE OUTCOME RATHER THAN A FLAG ON THE FOUL, and that is
+   * forced rather than chosen. applyAtBat() in inning.ts THROWS on a `foul`
+   * reaching it — "atBat.ts never ends an at-bat on one" — so a caught foul
+   * carrying the foul outcome would crash the engine the first time anybody
+   * popped one up to the catcher. Giving it its own name also means every
+   * Record<Outcome, …> in the codebase becomes a compiler error until it is
+   * handled, which is the only way a change this wide gets made without
+   * missing a site.
+   *
+   * ⚠️ AND IT IS NOT `popup`. Reusing that would have been two lines and would
+   * have put the ball in FAIR territory on the replay, told the scorer to say
+   * "popped up to third", and made it eligible for anything that keys off a
+   * fly ball. A foul out is its own play.
+   */
+  | 'foul_out'
   | 'single'
   | 'double'
   | 'triple'
@@ -60,6 +79,7 @@ const OUTS: ReadonlySet<Outcome> = new Set<Outcome>([
   'popup',
   'ground_out',
   'line_out',
+  'foul_out',
 ]);
 
 const HITS: ReadonlySet<Outcome> = new Set<Outcome>([
@@ -72,7 +92,17 @@ const HITS: ReadonlySet<Outcome> = new Set<Outcome>([
 export const isOut = (o: Outcome): boolean => OUTS.has(o);
 export const isHit = (o: Outcome): boolean => HITS.has(o);
 
-/** Every table lists all nine outcomes explicitly, including the zeroes. */
+/**
+ * Every table lists all nine ROLLABLE outcomes explicitly, including the zeroes.
+ *
+ * ⚠️ `foul_out` IS NOT AN ARGUMENT AND MUST NOT BECOME ONE. It is filled in at
+ * zero here, so the forty-five tables below are untouched and every row still
+ * sums to one, which rollOutcome() depends on. A caught foul is not something
+ * the outcome tables decide — the table says `foul`, and resolveSwing() then
+ * asks whether THAT PARTICULAR foul was a catchable pop. Giving it a column
+ * would mean re-normalising forty-five hand-tuned rows to make room for it,
+ * which is the balance change this deliberately is not.
+ */
 const t = (
   strikeout: number,
   popup: number,
@@ -89,6 +119,7 @@ const t = (
   ground_out,
   line_out,
   foul,
+  foul_out: 0,
   single,
   double,
   triple,
@@ -169,6 +200,10 @@ export const ALL_OUTCOMES: readonly Outcome[] = [
   'ground_out',
   'line_out',
   'foul',
+  // Zero in every table by construction — see t(). Listed so anything that
+  // walks the vocabulary (the balance scripts, the table sum test) sees all of
+  // it, and so a row that somehow grew a foul_out column would be caught.
+  'foul_out',
   'single',
   'double',
   'triple',

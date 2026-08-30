@@ -33,7 +33,7 @@ import {
 import { newMatch } from '../inning.ts';
 import { resolveSwingSeeded } from '../hit.ts';
 import { makeRng } from '../rng.ts';
-import type { Outcome } from '../hitTables.ts';
+import { ALL_OUTCOMES, type Outcome } from '../hitTables.ts';
 
 /**
  * Roll a lot of swings in one division and count the outcomes.
@@ -85,10 +85,17 @@ describe('a division changes the rules, not just the palette', () => {
     expect(modern.single ?? 0).toBeLessThan(dead.single ?? 0);
   });
 
-  it('never produces an outcome the tables do not contain', () => {
-    const legal: Outcome[] = ['strikeout', 'popup', 'ground_out', 'line_out', 'foul', 'single', 'double', 'triple', 'home_run'];
+  it('never produces an outcome outside the vocabulary', () => {
+    // ⚠️ READ OFF ALL_OUTCOMES, NOT A LITERAL. This used to hand-list the nine
+    // and broke the day a tenth arrived — which is the drift ALL_OUTCOMES
+    // exists to stop, and this was the one place still copying it out.
+    //
+    // ⚠️ AND IT IS NOT THE SAME CLAIM AS "IN THE TABLES". `foul_out` is legal
+    // and no table can roll it: resolveSwing() promotes a foul to one after the
+    // roll — see caughtFoul(). The claim worth guarding is that nothing comes
+    // out of a swing that the rest of the engine has no case for.
     for (const key of [...Object.keys(dead), ...Object.keys(future)]) {
-      expect(legal).toContain(key as Outcome);
+      expect(ALL_OUTCOMES).toContain(key as Outcome);
     }
   });
 
