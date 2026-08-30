@@ -40,6 +40,32 @@
  * ⚠️ READ THE INTERVAL BEFORE YOU COPY THE WEIGHT. A rating whose interval
  * spans zero has not been measured, it has been sampled. Raise the game count
  * or leave the weight alone; do not paste it in because it printed.
+ *
+ * ⚠️ FOURTH FAULT, FOUND 2026-08-29: THE STEP WAS THE SAME SIZE FOR EVERY
+ * RATING, AND THAT SIZE WAS OFF THE END OF THE LEAGUE. It bumped every rating
+ * by a flat +0.1. Measured against the clubs that actually exist, the
+ * between-club standard deviation of a club's average is 0.023 for power,
+ * 0.017 for contact, 0.013 for vision, and 0.006 for an arm's zone rate — so a
+ * flat tenth was FOUR standard deviations of power, SIX of contact, and
+ * SIXTEEN of zone rate. Two things went wrong and they pull in opposite
+ * directions:
+ *
+ *   1. EVERY READING WAS TAKEN OUTSIDE THE LEAGUE. No club is four standard
+ *      deviations better than average at anything, so the number came from a
+ *      part of the response curve no roster occupies, where hit tables and
+ *      thresholds have long since saturated.
+ *   2. THE RATINGS WERE NOT COMPARED AT THE SAME PLACE. Bumping one rating 4σ
+ *      and another 16σ and then printing the two side by side as if they were
+ *      the same experiment is the fault this file's own header spends three
+ *      paragraphs warning about, in a fourth costume. It is why zoneRate and
+ *      stamina kept coming back "indistinguishable from zero": they were being
+ *      read so far out that the curve had gone flat.
+ *
+ * So the step is now PER RATING, and it is a multiple of that rating's own
+ * between-club spread — see SPREADS. The question the table answers becomes the
+ * question value.ts actually asks: what is a club that is better than average
+ * at this worth? The weight is then divided back down to per rating point,
+ * which is the unit value.ts multiplies in.
  */
 import { LEAGUE, type Team } from '../src/game/teams.ts';
 import { simulateGame } from '../src/game/sim.ts';
@@ -47,7 +73,27 @@ import type { Player } from '../src/core/roster.ts';
 import type { Pitcher } from '../src/core/pitcher.ts';
 
 const N = Number(process.argv[2] ?? 16);
-const STEP = 0.1;
+
+/**
+ * HOW BIG A BUMP, IN BETWEEN-CLUB STANDARD DEVIATIONS OF THAT RATING.
+ *
+ * ⚠️ TWO, NOT ONE, AND IT IS A COMPROMISE BETWEEN TWO HONEST FAILURES. One
+ * sigma is the most faithful bump — it is "a club a bit better than average at
+ * this" — but the effect it produces is small enough that resolving it takes
+ * about ten times the games, and every rating comes back inside its error bar
+ * at any sample size a person will actually wait for. Two sigma is still a real
+ * roster: it is roughly the gap between an average club and one of the best
+ * three in the league at that rating, which is a difference a trade can
+ * actually make. Anything past about three is back to measuring a club that
+ * does not exist.
+ */
+const SPREADS = 2;
+
+const meanOf = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+const sdOf = (xs: readonly number[]): number => {
+  const m = meanOf(xs);
+  return Math.sqrt(meanOf(xs.map((x) => (x - m) ** 2)));
+};
 
 /**
  * Five clubs from the middle of the table. Not the best and not the worst:
@@ -64,16 +110,30 @@ const bumpBats = (t: Team, key: BatKey, by: number): Team => ({
   lineup: t.lineup.map((p): Player => ({ ...p, [key]: p[key] + by })),
 });
 
+/** What an arm reads at a rating today, with the engine's own default. */
+const ARM_DEFAULT: Record<ArmKey, number> = {
+  zoneRate: 0.55,
+  break: 1,
+  clutch: 1,
+  stamina: 1,
+  speedBonus: 0,
+};
+
 // ⚠️ THE WHOLE STAFF, ROTATION AND PEN. It moved only the rotation, which was
 // the whole staff when it was written and is now half of one — a weight
 // measured by bumping three of six arms would read about half of what the
 // rating is actually worth, and value.ts prices all six.
+//
+// ⚠️ THE BUMP IS IN THE FIELD'S OWN UNITS AND IS NO LONGER RESCALED HERE. This
+// used to multiply zoneRate's step by 0.5 and speedBonus's by 20 to paper over
+// the fact that one is a share and one is miles an hour while the step was a
+// flat tenth for everybody. Now that the step is that rating's own spread, the
+// units come out right on their own and the fudge factors were a second,
+// undocumented weighting sitting on top of the measurement.
 const bumpArm = (a: Pitcher, key: ArmKey, by: number): Pitcher => {
-  // zoneRate is a share and speedBonus is mph — neither is a 1.0-centred
-  // multiplier, so a flat +0.1 would mean something different on each.
-  if (key === 'zoneRate') return { ...a, zoneRate: Math.min(0.95, a.zoneRate + by * 0.5) };
-  if (key === 'speedBonus') return { ...a, speedBonus: (a.speedBonus ?? 0) + by * 20 };
-  return { ...a, [key]: (a[key] ?? 1) + by };
+  const v = (a[key] ?? ARM_DEFAULT[key]) + by;
+  if (key === 'zoneRate') return { ...a, zoneRate: Math.max(0.2, Math.min(0.95, v)) };
+  return { ...a, [key]: v };
 };
 
 const bumpArms = (t: Team, key: ArmKey, by: number): Team => ({
@@ -141,6 +201,31 @@ interface Result {
   /** 95% half-width on that mean. */
   ci: number;
   winDelta: number;
+  /** How much the rating was moved, in its own units. */
+  step: number;
+}
+
+/**
+ * THE BUMP FOR EACH RATING: SPREADS times the standard deviation of that
+ * rating's CLUB AVERAGE across the league.
+ *
+ * ⚠️ THE SPREAD OF CLUB AVERAGES, NOT OF PLAYERS. value.ts exists to rank
+ * CLUBS, so the difference that matters is the one between two clubs' nines,
+ * not the one between two men in a lineup. The player-level spread is several
+ * times wider and using it would put the bump back outside the league.
+ */
+const batStep: Record<BatKey, number> = {} as Record<BatKey, number>;
+for (const key of ['power', 'contact', 'vision', 'clutch', 'speed', 'bunt'] as BatKey[]) {
+  batStep[key] = SPREADS * sdOf(LEAGUE.map((t) => meanOf(t.lineup.map((p) => p[key]))));
+}
+
+const armStep: Record<ArmKey, number> = {} as Record<ArmKey, number>;
+for (const key of ['zoneRate', 'break', 'clutch', 'stamina', 'speedBonus'] as ArmKey[]) {
+  armStep[key] = SPREADS * sdOf(
+    LEAGUE.map((t) =>
+      meanOf([...t.rotation, ...t.bullpen].map((a) => a[key] ?? ARM_DEFAULT[key])),
+    ),
+  );
 }
 
 const SUBJECTS = SUBJECT_ABBRS.map((abbr) => LEAGUE.find((t) => t.abbr === abbr)!);
@@ -161,7 +246,7 @@ baselines.forEach((b, i) => {
 });
 
 /** Bump one rating on every subject and average what it was worth. */
-function sweep(key: string, bump: (t: Team) => Team): Result {
+function sweep(key: string, step: number, bump: (t: Team) => Team): Result {
   let delta = 0;
   let winDelta = 0;
   let varSum = 0;
@@ -182,25 +267,35 @@ function sweep(key: string, bump: (t: Team) => Team): Result {
     delta: delta / k,
     ci: 1.96 * (Math.sqrt(varSum) / k),
     winDelta: winDelta / k,
+    step,
   };
 }
 
 const bat: Result[] = [];
 for (const key of ['power', 'contact', 'vision', 'clutch', 'speed', 'bunt'] as BatKey[]) {
-  bat.push(sweep(key, (t) => bumpBats(t, key, STEP)));
+  bat.push(sweep(key, batStep[key], (t) => bumpBats(t, key, batStep[key])));
 }
 
 const arm: Result[] = [];
 for (const key of ['zoneRate', 'break', 'clutch', 'stamina', 'speedBonus'] as ArmKey[]) {
-  arm.push(sweep(key, (t) => bumpArms(t, key, STEP)));
+  arm.push(sweep(key, armStep[key], (t) => bumpArms(t, key, armStep[key])));
 }
 
+/**
+ * ⚠️ THE WEIGHT IS PER RATING POINT, NOT PER BUMP. Each rating was moved by a
+ * different amount — its own two sigma — so the raw deltas are not comparable
+ * and dividing each by the step it was measured at is what makes them so. This
+ * is the unit value.ts multiplies, which is the whole point of printing it.
+ */
+const perPoint = (r: Result): number => (r.step === 0 ? 0 : r.delta / r.step);
+
 const row = (r: Result, anchor: number): string => {
-  const weight = anchor === 0 ? 0 : (r.delta / anchor) * 1.6;
+  const weight = anchor === 0 ? 0 : (perPoint(r) / anchor) * 1.6;
   const flat = Math.abs(r.delta) <= r.ci;
   return (
     `  ${r.key.padEnd(12)}` +
-    `${(r.delta >= 0 ? '+' : '') + r.delta.toFixed(3)}`.padStart(7) +
+    `${r.step.toFixed(4)}`.padStart(7) +
+    `${(r.delta >= 0 ? '+' : '') + r.delta.toFixed(3)}`.padStart(8) +
     ` ± ${r.ci.toFixed(3)}` +
     `${(r.winDelta >= 0 ? '+' : '') + r.winDelta.toFixed(2)}%`.padStart(9) +
     `${weight.toFixed(2)}`.padStart(8) +
@@ -209,14 +304,14 @@ const row = (r: Result, anchor: number): string => {
 };
 
 // ⚠️ ANCHORED ON CONTACT, not on whichever row won. See fault 3 in the header.
-const anchor = bat.find((r) => r.key === 'contact')!.delta;
+const anchor = perPoint(bat.find((r) => r.key === 'contact')!);
 
-console.log(`\nEffect of +${STEP} across the lineup, per game`);
-console.log('  rating       Δ run diff        Δ win   weight');
+console.log(`\nEffect of a ${SPREADS}σ club-level bump across the lineup, per game`);
+console.log('  rating         step  Δ run diff        Δ win   weight');
 for (const r of bat) console.log(row(r, anchor));
 
-console.log(`\nEffect of +${STEP} across the rotation, per game`);
-console.log('  rating       Δ run diff        Δ win   weight');
+console.log(`\nEffect of a ${SPREADS}σ club-level bump across the whole staff, per game`);
+console.log('  rating         step  Δ run diff        Δ win   weight');
 for (const r of arm) console.log(row(r, anchor));
 
 const unresolved = [...bat, ...arm].filter((r) => Math.abs(r.delta) <= r.ci);

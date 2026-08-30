@@ -27,8 +27,8 @@ import {
   standings,
   seeds,
   champion,
-  REGULAR_DAYS,
-  SEASON_END,
+  regularDays,
+  seasonEnd,
 } from '../src/game/franchise.ts';
 import { simulateGame } from '../src/game/sim.ts';
 import { newStaff, fatigueOf, limitOf } from '../src/game/bullpen.ts';
@@ -46,7 +46,7 @@ for (const t of LEAGUE) titles[t.abbr] = 0;
 
 for (let i = 0; i < N; i++) {
   let s = newSeason('---', i * 7919 + 3);
-  while (s.day < SEASON_END) s = playDay(s);
+  while (s.day < seasonEnd(s)) s = playDay(s);
   const four = seeds(s);
   four.forEach((_, k) => seedApp[k]!++);
   const champ = champion(s);
@@ -157,7 +157,7 @@ for (const t of LEAGUE) {
 }
 for (let i = 0; i < N; i++) {
   let s = newSeason('---', i * 31 + 11);
-  while (s.day < REGULAR_DAYS) s = playDay(s);
+  while (s.day < regularDays(s)) s = playDay(s);
   for (const row of standings(s)) {
     rf[row.abbr]! += row.rf;
     ra[row.abbr]! += row.ra;

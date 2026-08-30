@@ -76,20 +76,31 @@ import {
 } from './game.ts';
 import { HOME, AWAY, LEAGUE, statsOf, type Team } from './teams.ts';
 import {
-  FINAL,
-  REGULAR_DAYS,
-  SEMIS,
+  DEFAULT_GAMES,
+  LENGTHS,
+  DEFAULT_RULES,
+  type Rules,
   champion,
   clearSeason,
   dayLabel,
+  gameInRound,
   gamesOn,
   loadSeason,
   newSeason,
   playDay,
-  resultsOn,
+  regularDays,
+  seasonEnd,
   saveSeason,
   seasonOver,
   seeds,
+  roundName,
+  roundOn,
+  roundsOf,
+  rulesOf,
+  seriesOf,
+  matchupsInRound,
+  stillIn,
+  simTo,
   standings,
   teamOf,
   yourGame,
@@ -110,6 +121,8 @@ import { withPlacement, scorecard, throwNotation, BAG_WORD } from './placement.t
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { knob } from './identity.ts';
 import { momentOn, decide, valueShift, type Moment } from './moments.ts';
+import { formOf, formLabel, inForm } from './form.ts';
+import { BRACKET, OFFENCE, PARITY, SERIES, STREAK, cleanRules, roundsIn, type Choice } from './rules.ts';
 import { restedStamina } from './rotation.ts';
 import type { StarterPick } from './game.ts';
 import { aiShouldSend, sendRunner, stealOpportunity, chanceFor } from './running.ts';
@@ -1122,8 +1135,11 @@ function finalize(): void {
   }, boxScore(game));
   saveSeason(season);
 
-  if (played === FINAL) {
-    const champ = champion(season);
+  // ⚠️ ASKED OF THE SEASON, NOT OF THE DAY NUMBER. A round is a series now, so
+  // "was that the last game" has no fixed answer — a best-of-seven can end on
+  // any of four nights. champion() going from null to a name is the event.
+  const champ = champion(season);
+  if (champ) {
     elBanner.textContent =
       champ === season.you ? `${champ} WIN IT ALL.` : `${champ} TAKE THE TITLE.`;
     say(`${champ} are champions.`, 'big');
@@ -1133,18 +1149,22 @@ function finalize(): void {
     return;
   }
 
-  if (played === SEMIS) {
-    say(
-      game.winner === YOU
-        ? `${season.you} are through to the final.`
-        : `${season.you} are out. One game left to decide it.`,
-      'half',
-    );
+  if (played >= regularDays(season)) {
+    // A playoff night that did not end the year: you are out, the series goes
+    // on, or you have won it and moved up a round.
+    const round = roundOn(season, played);
+    if (!stillIn(season, season.you)) {
+      say(`${season.you} are out.`, 'half');
+    } else if (roundOn(season, season.day) > round) {
+      say(`${season.you} take the ${roundName(season, round).toLowerCase()}.`, 'half');
+    } else {
+      say(`${season.you} play on — ${dayLabel(season).toLowerCase()} next.`, 'half');
+    }
     return;
   }
 
   const me = standings(season).find((r) => r.abbr === season!.you)!;
-  const left = REGULAR_DAYS - season.day;
+  const left = regularDays(season) - season.day;
   say(
     `${season.you} are ${me.w}-${me.l}. ` + (left > 0 ? `${left} to play.` : 'That is the year.'),
     'half',
@@ -2121,23 +2141,24 @@ function renderStandings(s: Season): void {
 
 /** The bracket, once there is one. Empty for the whole regular season. */
 function bracketLines(s: Season): string[] {
-  if (s.day < SEMIS) return [];
+  if (s.day < regularDays(s)) return [];
 
-  const played = (m: Matchup, r: Result | undefined): string =>
-    r
-      ? `${r.away} ${r.ar} at ${r.home} ${r.hr} — ${r.hr > r.ar ? r.home : r.away}`
-      : `${m.away} at ${m.home}`;
-
-  const round = (day: number, name: string): string[] => {
-    const done = resultsOn(s, day);
-    return gamesOn(s, day).map(
-      (m) =>
-        `${name} ` +
-        played(m, done.find((r) => r.home === m.home && r.away === m.away)),
-    );
-  };
-
-  return ['', '<b>PLAYOFFS</b>', ...round(SEMIS, 'SEMI '), ...round(FINAL, 'FINAL')];
+  // ⚠️ ONE LINE PER SERIES, NOT PER GAME. A best-of-seven bracket of eight
+  // clubs is up to twenty-eight ball games, and printing them all would bury
+  // the panel it shares with the standings. What a bracket is FOR is who is
+  // beating whom, so each pairing gets its series score and its winner.
+  const out: string[] = [];
+  for (let r = 0; r < roundsOf(s); r++) {
+    const pairs = matchupsInRound(s, r);
+    if (!pairs.length) break;
+    out.push(`<b>${roundName(s, r)}</b>`);
+    for (const p of pairs) {
+      const score = seriesOf(s) === 1 ? '' : ` ${p.homeWins}-${p.awayWins}`;
+      const tail = p.winner ? ` — ${p.winner}` : '';
+      out.push(`  ${p.home} v ${p.away}${score}${tail}`);
+    }
+  }
+  return out.length ? ['', '<b>PLAYOFFS</b>', ...out] : [];
 }
 
 /**
@@ -2423,6 +2444,21 @@ function showMoment(s: Season, m: Moment, then: () => void): void {
  * cannot tell you why it moved somebody, so a lineup it shuffled would read as
  * noise. Give the CPU an order rule when a club identity wants one.
  */
+/**
+ * HOT or COLD beside a man's name, or nothing.
+ *
+ * ⚠️ IT READS THE SAME FUNCTION THE AT-BAT DOES. form.ts is what inForm()
+ * applies to the club that walks out there, so a man tagged HOT here is
+ * measurably better tonight — the tag is a readout, not flavour. A label drawn
+ * off a second rule would be the game lying to the player about its own dice.
+ */
+function formTag(s: Season, name: string): string {
+  const f = formOf(s.seed, s.day, name);
+  const tag = formLabel(f);
+  if (!tag) return '';
+  return ` <b style="color:var(--${tag.hot ? 'good' : 'bad'})">${tag.text}</b>`;
+}
+
 function lineupPanel(s: Season): string {
   const you = teamOf(s, s.you);
   const book = s.stats;
@@ -2439,7 +2475,7 @@ function lineupPanel(s: Season): string {
       return (
         '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + i + '" style="cursor:pointer">' +
         '<span>' + (on ? '&#9656; moving' : String(i + 1)) + '</span>' +
-        '<b>' + p.name + '</b>' +
+        '<b>' + p.name + formTag(s, p.name) + '</b>' +
         '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(p.power) +
         ' &middot; CON ' + showScale(p.contact) + ' &middot; VIS ' + showScale(p.vision) +
         ' &middot; SPD ' + showScale(p.speed) + '</span>' +
@@ -2463,17 +2499,20 @@ function lineupPanel(s: Season): string {
       const at = you.lineup.length + i;
       const on = at === lineupPick;
       const line = book?.bat[p.name];
-      const s = statsOf(p);
+      // ⚠️ NOT `s`. This used to shadow the Season with the man's batting line,
+      // which was harmless while nothing in the row needed the season — and
+      // stopped being harmless the moment formTag() did.
+      const bat = statsOf(p);
       const so_far = line && line.pa > 0
         ? `${rate(avg(line))} &middot; ${line.hr}HR ${line.rbi}RBI`
         : '';
       return (
         '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" style="cursor:pointer">' +
-        '<span class="dim">' + (on ? '&#9656; moving' : s.power >= 1.3 ? 'bat' : s.speed >= 1.25 ? 'legs' : 'platoon') + '</span>' +
-        '<b>' + p.name + '</b>' +
-        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(s.power) +
-        ' &middot; CON ' + showScale(s.contact) + ' &middot; VIS ' + showScale(s.vision) +
-        ' &middot; SPD ' + showScale(s.speed) + '</span>' +
+        '<span class="dim">' + (on ? '&#9656; moving' : bat.power >= 1.3 ? 'bat' : bat.speed >= 1.25 ? 'legs' : 'platoon') + '</span>' +
+        '<b>' + p.name + formTag(s, p.name) + '</b>' +
+        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(bat.power) +
+        ' &middot; CON ' + showScale(bat.contact) + ' &middot; VIS ' + showScale(bat.vision) +
+        ' &middot; SPD ' + showScale(bat.speed) + '</span>' +
         '<span class="dim">' + so_far + '</span></div>'
       );
     })
@@ -2521,7 +2560,7 @@ function rotationPanel(s: Season): string {
       const on = i === myStarter;
       return (
         '<div class="penrow' + (on ? ' picked' : '') + '" data-sp="' + i + '" style="cursor:pointer">' +
-        '<span>' + (on ? '&#9656; starting' : '') + '</span><b>' + arm.name + '</b>' +
+        '<span>' + (on ? '&#9656; starting' : '') + '</span><b>' + arm.name + formTag(s, arm.name) + '</b>' +
         '<span class="dim">' + arm.throws + 'HP &middot; BRE ' + showScale(arm.break ?? 1) +
         ' &middot; STA ' + showScale(sta) + '</span>' +
         '<span style="color:' + colour + '">' + word + '</span></div>'
@@ -2645,7 +2684,10 @@ function showPregame(s: Season, m: Matchup): void {
       `<div style="margin-top:6px" class="dim">lineup &nbsp; ` +
       `POW <b>${avg((p) => p.power)}</b> &nbsp; CON <b>${avg((p) => p.contact)}</b> &nbsp;` +
       ` VIS <b>${avg((p) => p.vision)}</b> &nbsp; SPD <b>${avg((p) => p.speed)}</b></div>` +
-      `<div style="margin-top:6px">${arm.name} <span class="dim">` +
+      // ⚠️ THEIR STARTER'S FORM IS ON THE CARD TOO, not just yours. Who is hot
+      // is the one thing on this screen that changes week to week, and hiding
+      // the away half of it would make the tag read as a house advantage.
+      `<div style="margin-top:6px">${arm.name}${formTag(s, arm.name)} <span class="dim">` +
       `(${arm.throws}HP, ${scoutingReport(arm).split(' · ').slice(1).join(' · ')})</span></div>` +
       `<div class="dim">${arm.blurb}</div>` +
       `</div>`
@@ -2692,6 +2734,7 @@ function showPregame(s: Season, m: Matchup): void {
     lineupPanel(s) +
     rotationPanel(s) +
     `<button class="go" data-play="1">PLAY BALL <kbd>SPACE</kbd></button>` +
+    `<button class="go" data-cal="1">THE SCHEDULE <kbd>C</kbd></button>` +
     `<button class="go" data-stats="1">LEAGUE LEADERS <kbd>L</kbd></button>` +
     `</div>`;
   el.style.display = 'flex';
@@ -2714,6 +2757,18 @@ function showPregame(s: Season, m: Matchup): void {
     el.scrollTop = at;
   };
 
+  /**
+   * Hand the keyboard back. See onKey at the bottom — every door off this card
+   * that is not go() has to take the card's listener down first, or the screen
+   * it opens is sharing SPACE with a PLAY BALL button nobody can see.
+   */
+  const leaveCard = (): void => {
+    removeEventListener('keydown', onKey);
+  };
+
+  /** Click one of this card's buttons. See onKey. */
+  const press = (sel: string): void => el.querySelector<HTMLButtonElement>(sel)?.click();
+
   const bindRotation = (): void => {
     el.querySelectorAll<HTMLElement>('[data-sp]').forEach((row) => {
       row.onclick = () => {
@@ -2726,8 +2781,18 @@ function showPregame(s: Season, m: Matchup): void {
     el.querySelectorAll<HTMLElement>('[data-lu]').forEach((row) => {
       row.onclick = () => swapInto(Number(row.dataset['lu']));
     });
-    el.querySelector<HTMLButtonElement>('[data-stats]')!.onclick = () =>
+    el.querySelector<HTMLButtonElement>('[data-stats]')!.onclick = () => {
+      leaveCard();
       showStats(season ?? s, null, () => showPregame(season ?? s, m));
+    };
+    // ⚠️ THE CALENDAR LEAVES THIS CARD FOR GOOD IF YOU SKIP. Its `back` puts
+    // you here again, but a day cell calls skipTo(), which advances the season
+    // and re-enters through nextGame() — so the card you come back to is the
+    // card for the day you jumped to, drawn fresh, not this closure.
+    el.querySelector<HTMLButtonElement>('[data-cal]')!.onclick = () => {
+      leaveCard();
+      showCalendar(season ?? s, () => showPregame(season ?? s, m));
+    };
   };
 
   /**
@@ -2793,26 +2858,250 @@ function showPregame(s: Season, m: Matchup): void {
     // showed two gassed relievers, the in-game pen panel reads the Staff and
     // showed them at their card rating, and the arm that came in was whole.
     // Both screens have to be looking at the same ledger.
-    kickOff(teamOf(s, m.home), teamOf(s, m.away), youAre, {
-      [youAre]: { index: mineP.index, stamina: mineP.stamina, penLegs: mineP.penLegs },
-      [them === m.home ? 'home' : 'away']: {
-        index: theirsP.index,
-        stamina: theirsP.stamina,
-        penLegs: theirsP.penLegs,
-      },
-    } as { home?: StarterPick; away?: StarterPick });
+    // ⚠️ IN TODAY'S FORM, both sides, exactly as playDay() sends out the other
+    // fourteen games on the card. See form.ts: if the game you play read the
+    // flat roster while the league's games read form, your club would be the
+    // only one in it whose slumps never happened.
+    kickOff(
+      inForm(teamOf(s, m.home), s.seed, s.day, rulesOf(s).streak),
+      inForm(teamOf(s, m.away), s.seed, s.day, rulesOf(s).streak),
+      youAre,
+      {
+        [youAre]: { index: mineP.index, stamina: mineP.stamina, penLegs: mineP.penLegs },
+        [them === m.home ? 'home' : 'away']: {
+          index: theirsP.index,
+          stamina: theirsP.stamina,
+          penLegs: theirsP.penLegs,
+        },
+      } as { home?: StarterPick; away?: StarterPick },
+    );
   };
   // ⚠️ Its own listener, removed on the way out. The main keydown handler runs
   // press(), which drives a game that has not started yet — routing SPACE
   // through it here would deliver a pitch behind the screen.
+  //
+  // ⚠️ AND IT HAS TO COME DOWN BEFORE ANOTHER SCREEN GOES UP, or the card is
+  // still listening underneath it: SPACE on the calendar would close the
+  // calendar AND throw the first pitch of a game the player did not ask to
+  // start. leaveCard() is that, on its own, for the doors that are not go().
   function onKey(e: KeyboardEvent): void {
+    const k = e.key.toLowerCase();
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       go();
+      return;
+    }
+    // The two other doors off this card, both of which the buttons advertise.
+    // Routed through the buttons rather than calling the two screens directly,
+    // so the key and the click can never take different paths off this card —
+    // the click is the one that remembers to hand the keyboard back.
+    if (k === 'c' || k === 'l') {
+      e.preventDefault();
+      press(k === 'c' ? '[data-cal]' : '[data-stats]');
     }
   }
   addEventListener('keydown', onKey);
   el.querySelector<HTMLButtonElement>('[data-play]')!.onclick = () => go();
+}
+
+/**
+ * THE CALENDAR — every day of your year, and the one control that makes a long
+ * season possible: pick a day and everything before it is played without you.
+ *
+ * ⚠️ WHY THIS EXISTS. A fourteen-game year is a schedule you can simply play.
+ * A hundred and sixty-two is not, and shipping the longer years without a way
+ * past them would be a menu option that hands the player a chore. So the
+ * calendar is not a view — it is the second half of the season-length feature,
+ * and every cell in it is a button.
+ *
+ * ⚠️ IT JUMPS FORWARD ONLY. There is no rewinding a season — see simTo() — so
+ * a played day is text and an unplayed one is a door. Clicking today plays
+ * today, which is the same thing PLAY BALL does, and is there so the grid has
+ * no dead cell in the middle of it.
+ *
+ * ponytail: a flat wrap of day cells, not a month grid with weekday columns
+ * and empty leading squares. The season has no dates in it — day 1 is not a
+ * Tuesday and nothing in the engine thinks otherwise — so a real calendar
+ * would be six weeks of decoration around the only number that means anything.
+ * Give it dates when there is something that CARES about dates, like a
+ * day-of-week rest rule; what it grows then is a label per cell.
+ */
+function showCalendar(s: Season, back: () => void): void {
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const n = regularDays(s);
+  const mine = (m: Matchup): boolean => m.home === s.you || m.away === s.you;
+
+  // Your results, by day. Playoff days are in here too — the grid runs to the
+  // end of the bracket, not to the end of the schedule, because "sim to the
+  // final" is the jump a knocked-out player wants.
+  //
+  // ⚠️ INDEXED ONCE, not filtered per cell. resultsOn() walks every result in
+  // the season, and a hundred and sixty-four cells each walking two and a half
+  // thousand results is the same answer computed four hundred thousand times.
+  const yours = new Map<number, Result>();
+  for (const r of s.results) if (mine(r)) yours.set(r.day, r);
+
+  const cell = (day: number): string => {
+    // ⚠️ THE PLAYOFF CELLS ARE NAMED FOR THEIR ROUND, NOT NUMBERED ON FROM THE
+    // SCHEDULE. "163" means nothing beside "SF 2"; and with a bracket of eight
+    // and a best-of-seven there are twenty-one playoff days to tell apart.
+    const label =
+      day < n
+        ? String(day + 1)
+        : shortRound(s, roundOn(s, day)) + (seriesOf(s) > 1 ? ` ${gameInRound(s, day) + 1}` : '');
+    const m = gamesOn(s, day).find(mine);
+    const r = yours.get(day);
+
+    // ---- Behind you. Either a result to read, or a day you sat out.
+    if (day < s.day) {
+      if (!r) {
+        return (
+          `<div class="cal off"><span class="calday">${label}</span>` +
+          `<span class="dim">—</span></div>`
+        );
+      }
+      const home = r.home === s.you;
+      const [us, them] = home ? [r.hr, r.ar] : [r.ar, r.hr];
+      const won = us > them;
+      return (
+        `<div class="cal done"><span class="calday">${label}</span>` +
+        `<span class="dim">${home ? 'vs' : 'at'} ${home ? r.away : r.home}</span>` +
+        `<span class="${won ? 'w' : 'l'}">${won ? 'W' : 'L'} ${us}-${them}</span></div>`
+      );
+    }
+
+    // ---- Ahead of you, so it is a door whatever is in it. A playoff day with
+    // no opponent yet is STILL a door, and it is the most useful one on the
+    // screen: "sim the rest of the year" is a click on the semifinal. Naming
+    // an opponent there would be a lie — see the note in gamesOn().
+    const today = day === s.day;
+    const who = m
+      ? `${m.home === s.you ? 'vs' : 'at'} ${m.home === s.you ? m.away : m.home}`
+      : day >= n
+        ? 'bracket'
+        : 'not you';
+    return (
+      `<button class="cal${today ? ' now' : ''}" data-day="${day}">` +
+      `<span class="calday">${label}</span>` +
+      `<span class="${m ? '' : 'dim'}">${who}</span>` +
+      `<span class="dim">${today && m ? 'play' : 'sim to here'}</span></button>`
+    );
+  };
+
+  const days: string[] = [];
+  for (let d = 0; d < seasonEnd(s); d++) days.push(cell(d));
+
+  const table = standings(s);
+  const me = table.find((r) => r.abbr === s.you);
+  const played = s.results.filter((r) => mine(r) && r.day < n).length;
+
+  el.innerHTML =
+    `<div class="wrap">` +
+    `<h1>${dayLabel(s)}</h1>` +
+    `<h2>${s.you} — THE SCHEDULE</h2>` +
+    `<div class="panel dim">` +
+    `${me ? `<b>${me.w}-${me.l}</b>, ` : ''}${played} of ${n} played. ` +
+    `Pick a day and the ones before it are played for you — your club included.` +
+    `</div>` +
+    `<div class="calgrid">${days.join('')}</div>` +
+    `<button class="go" data-back="1">BACK TO THE CARD <kbd>SPACE</kbd></button>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+      back();
+    }
+  }
+  addEventListener('keydown', onKey);
+  el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => {
+    leave();
+    back();
+  };
+
+  el.querySelectorAll<HTMLElement>('[data-day]').forEach((b) => {
+    b.onclick = () => {
+      leave();
+      skipTo(Number(b.dataset['day']));
+    };
+  });
+}
+
+/** A round's name in two or three characters, for a calendar cell. */
+const shortRound = (s: Season, round: number): string => {
+  const left = roundsOf(s) - round;
+  return left <= 1 ? 'F' : left === 2 ? 'SF' : `R${2 ** left}`;
+};
+
+/**
+ * Play everything up to a day, then arrive at it.
+ *
+ * ⚠️ THE MOMENT GATE IS WHY THIS IS NOT ONE LINE. simTo() halts on a day a
+ * franchise moment would fire on, WITHOUT playing it — see franchise.ts — so a
+ * jump from day two to day ninety stops at the trade deadline and hands the
+ * player the question. nextGame() then does what it always does: shows the
+ * moment, then the card. Which means a skip lands you either on the day you
+ * asked for or on a decision, and never past one.
+ *
+ * ⚠️ AND IT PAINTS BEFORE IT WORKS. A day of a thirty-club league is fifteen
+ * whole ball games and costs about a tenth of a second; a jump across a
+ * hundred and sixty of them is the better part of twenty seconds of blocked
+ * main thread. Measured, not guessed: thirty-nine days took 4.3s in Chrome.
+ * Without a frame in between, the tab simply stops responding on the click and
+ * every player's first thought is that it crashed.
+ *
+ * ⚠️ A TIMER, NOT requestAnimationFrame, AND THAT IS A BUG FIX RATHER THAN A
+ * PREFERENCE. This first used the two-frame rAF idiom — the standard way to run
+ * something strictly after a paint. Chrome DOES NOT FIRE rAF IN A BACKGROUND
+ * TAB, and a hundred-and-thirty-day skip is precisely when a person tabs away:
+ * they click it BECAUSE it is going to take half a minute. Caught in the
+ * browser with document.hidden true and the callback never arriving — the
+ * screen sat on "PLAYING 132 DAYS" for ever, the season frozen mid-jump, and
+ * coming back to the tab was the only thing that would restart it. A timer
+ * fires either way. Yielding to a macrotask is enough of a gap for the browser
+ * to paint the note first when it IS visible, which is all the rAF was buying.
+ *
+ * ponytail: a note and a timer, not a web worker and a progress bar. The work
+ * is one synchronous call into a pure function, and moving it off the main
+ * thread means shipping the engine, the league and the whole season across a
+ * structured clone to save a wait nobody does twice a game.
+ */
+function skipTo(day: number): void {
+  if (!season) return;
+  const el = document.getElementById('pre');
+  const days = day - season.day;
+
+  const work = (): void => {
+    season = simTo(season!, day, (at) => momentOn(at) !== null);
+    saveSeason(season);
+    if (el) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+    }
+    nextGame();
+  };
+
+  // A jump of a day or three is over before a frame lands. Telling the player
+  // to wait for something that already happened is its own kind of broken.
+  if (!el || days <= 3) return work();
+
+  el.innerHTML =
+    `<div class="wrap"><h1>${dayLabel(season)}</h1>` +
+    `<h2>PLAYING ${days} DAYS</h2>` +
+    `<div class="panel dim">The rest of the league is on the field. ` +
+    `${days * (gamesOn(season).length || 15)} ball games — this takes a moment.</div></div>`;
+  el.style.display = 'flex';
+  setTimeout(work, 32);
 }
 
 /**
@@ -3054,7 +3343,10 @@ function showCareer(back: () => void): void {
       const won = y.champion === y.club;
       return (
         `<tr${won ? ' class="you"' : ''}><td class="team">${c.years.length - i}. ${y.club}` +
-        `${won ? ' ★' : ''}</td><td>${y.w}</td><td>${y.l}</td><td>${y.finish}</td>` +
+        // ⚠️ THE LENGTH OF THE YEAR IS A COLUMN. A 9-5 and a 96-66 stacked in
+        // one table with no games column read as one scale and are not.
+        `${won ? ' ★' : ''}</td><td class="dim">${y.games ?? DEFAULT_GAMES}</td>` +
+        `<td>${y.w}</td><td>${y.l}</td><td>${y.finish}</td>` +
         `<td>${y.champion}</td>` +
         `<td class="team">${y.bat ? `${y.bat.name} ${rate(y.bat.avg)}` : '—'}</td>` +
         `<td class="team">${y.arm ? `${y.arm.name} ${y.arm.era.toFixed(2)}` : '—'}</td></tr>`
@@ -3065,7 +3357,8 @@ function showCareer(back: () => void): void {
   const table = c.years.length
     ? `<div class="panel"><div class="dim penhead">EVERY SEASON</div>` +
       `<div style="overflow-x:auto"><table class="line"><thead><tr>` +
-      `<th></th><th>W</th><th>L</th><th>FIN</th><th>CHAMP</th><th>BEST BAT</th><th>BEST ARM</th>` +
+      `<th></th><th>G</th><th>W</th><th>L</th><th>FIN</th><th>CHAMP</th>` +
+      `<th>BEST BAT</th><th>BEST ARM</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div></div>`
     : `<div class="panel dim">Nothing in the book yet. Finish a franchise and it lands here.</div>`;
 
@@ -3218,12 +3511,19 @@ function nextGame(): void {
 }
 
 /**
- * The title screen: mode, then club, then (exhibition only) opponent. One
- * overlay that is removed once there is a game to start.
+ * The title screen: mode, then (franchise only) how long the year is, then
+ * club, then (exhibition only) opponent. One overlay that is removed once there
+ * is a game to start.
  *
- * ponytail: still no back button and still no phase enum — `mode` and
- * `mine` being null IS the state, and a three-click form does not need more
- * than two nullable locals.
+ * ponytail: still no back button and still no phase enum — `mode`, `len` and
+ * `mine` being null IS the state, and a four-click form does not need more
+ * than three nullable locals.
+ *
+ * ⚠️ THE LENGTH IS ASKED BEFORE THE CLUB, and that order is the point. It is
+ * the only question on this screen that cannot be changed afterwards — the
+ * schedule is laid down at kickoff and a season cannot be lengthened mid-year
+ * without invalidating every standing in it — so it goes where a question you
+ * only get one shot at goes, which is first.
  */
 function pregame(): void {
   const el = document.getElementById('start')!;
@@ -3234,9 +3534,60 @@ function pregame(): void {
 
   let mode: 'exhibition' | 'franchise' | null = null;
   let mine: Team | null = null;
+  /** What this franchise will play under, edited in place by the rules screen. */
+  let rules: Rules = { ...DEFAULT_RULES };
+  /** Whether the player has pressed START on that screen. */
+  let ruled = false;
 
   const card = (go: string, title: string, sub: string): string =>
     `<button data-go="${go}"><b>${title}</b><br>${sub}</button>`;
+
+  /**
+   * THE RULES SCREEN — every setting on one page, each a row of buttons with
+   * the current pick lit.
+   *
+   * ⚠️ ONE PAGE, NOT A WIZARD. Season length was a step of its own when it was
+   * the only setting, and five sequential steps to start a franchise is four
+   * screens between a player and a ball game — which is pillar one. Everything
+   * is defaulted and every row is optional, so START is reachable on the first
+   * press and a player who wants none of this never has to read it.
+   *
+   * ⚠️ AND IT IS A SCREEN RATHER THAN A MENU YOU CAN REOPEN. Every one of these
+   * builds the season's rosters or its calendar at kickoff — see rules.ts — so
+   * there is nothing here that can honestly be changed in August.
+   */
+  const drawRules = (): void => {
+    prompt.textContent = 'HOW SHOULD THIS LEAGUE PLAY';
+    const row = <K extends keyof Rules>(
+      key: K,
+      title: string,
+      choices: readonly Choice<K>[],
+      label: (c: Choice<K>) => string,
+    ): string =>
+      `<div class="dim penhead" style="grid-column:1/-1">${title}</div>` +
+      choices
+        .map(
+          (c) =>
+            `<button data-set="${key}" data-val="${c.value}"` +
+            `${rules[key] === c.value ? ' class="on"' : ''}>` +
+            `<b>${label(c)}</b><br>${c.blurb}</button>`,
+        )
+        .join('');
+
+    grid.innerHTML =
+      row('games', 'HOW LONG IS THE SEASON', LENGTHS.map((l) => ({
+        value: l.games, name: `${l.games}`, blurb: l.blurb,
+      })), (c) => `${c.value} GAMES`) +
+      row('parity', 'HOW MUCH DOES TALENT DECIDE GAMES', PARITY, (c) => c.name) +
+      row('streak', 'DO MEN RUN HOT AND COLD', STREAK, (c) => c.name) +
+      row('offence', 'HOW MANY RUNS A NIGHT', OFFENCE, (c) => c.name) +
+      row('bracket', 'HOW MANY CLUBS MAKE THE PLAYOFFS', BRACKET, (c) => c.name) +
+      row('series', 'HOW LONG IS A PLAYOFF ROUND', SERIES, (c) => c.name) +
+      `<div style="grid-column:1/-1;margin-top:8px">` +
+      `<button data-go="start" style="width:100%;text-align:center;padding:12px">` +
+      `<b>START — ${rules.games} GAMES, ${roundsIn(rules.bracket)} ROUND` +
+      `${roundsIn(rules.bracket) === 1 ? '' : 'S'} OF ${rules.series}</b></button></div>`;
+  };
 
   // ⚠️ THE DIFFICULTY SITS ON THE FIRST SCREEN, BEFORE THE MODE, because it is
   // the only setting on it that decides whether the game is playable at all for
@@ -3277,8 +3628,13 @@ function pregame(): void {
       grid.innerHTML =
         resume +
         card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
-        card('franchise', 'FRANCHISE', `${REGULAR_DAYS} games, then a bracket`) +
+        card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
         book;
+      return;
+    }
+    // The questions you only get to answer once. See the header.
+    if (mode === 'franchise' && !ruled) {
+      drawRules();
       return;
     }
     prompt.textContent = mine
@@ -3326,13 +3682,28 @@ function pregame(): void {
       draw();
       return;
     }
+    // One of the rules rows. The value came off a button this screen drew, so
+    // it is a number from rules.ts — but it goes through cleanRules() anyway,
+    // because that is the one function that decides what a legal Rules is and
+    // a second opinion here is how the two drift apart.
+    const set = btn.dataset['set'];
+    if (set) {
+      rules = cleanRules({ ...rules, [set]: Number(btn.dataset['val']) });
+      drawRules();
+      return;
+    }
+    if (go === 'start') {
+      ruled = true;
+      draw();
+      return;
+    }
 
     const picked = LEAGUE[Number(btn.dataset['i'])]!;
     if (mode === 'franchise') {
       // A fresh season replaces whatever was saved — there is one slot, and
       // the CONTINUE card above is the only way back to the old one.
       clearSeason();
-      season = newSeason(picked.abbr, Date.now() >>> 0);
+      season = newSeason(picked.abbr, Date.now() >>> 0, rules.games, rules);
       saveSeason(season);
       start();
       return;

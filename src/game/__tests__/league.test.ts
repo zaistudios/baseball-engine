@@ -11,9 +11,9 @@
 import { describe, expect, it } from 'vitest';
 import { LEAGUE, club } from '../teams.ts';
 import { armValue, byStrength, clubValue, playerValue, showScale, strengthLabel, strengthRank } from '../value.ts';
-import { newSeason, playDay, standings, yourGame, REGULAR_DAYS, BLOWOUT, YOUR_STORY } from '../franchise.ts';
+import { newSeason, playDay, regularDays, standings, yourGame, BLOWOUT, YOUR_STORY } from '../franchise.ts';
 
-/** Nobody's club, so playDay() simulates all four games instead of skipping one. */
+/** Nobody's club — a season whose owner is not in the league, so no day of it has a game to hand in. */
 const NOBODY = '---';
 
 describe('what a club is worth', () => {
@@ -88,7 +88,7 @@ describe('a season keeps its own record', () => {
   });
 
   it('only calls a game a rout when it was one', () => {
-    const s = play(REGULAR_DAYS);
+    const s = play(regularDays(newSeason(NOBODY, 0)));
     for (const item of s.news!.filter((n) => n.kind === 'game')) {
       expect(item.text).toMatch(/rout|shut out/);
       // A shutout qualifies on its own; a rout has to clear the margin.
@@ -106,14 +106,14 @@ describe('a season keeps its own record', () => {
    * mentions were "MIN rout ALB", "MIN shut out ALB" and "FLA rout ALB", and
    * the 10-6 win, the eleven-inning loss and the 7-2 finale went unwritten.
    *
-   * ⚠️ THE SEASON HAS TO BE DRIVEN THE WAY main.ts DRIVES IT. playDay() with no
-   * Result of your own does not play your game AT ALL — gamesOn() hands back
-   * the other fourteen and yours is simply skipped. A test that loops bare
-   * playDay() over a season you own is testing a league you are not in.
+   * ⚠️ THE SEASON HAS TO BE DRIVEN THE WAY main.ts DRIVES IT. Bare playDay()
+   * SIMULATES your game rather than letting you decide it, so a test that loops
+   * it over a season you own is testing a wire written about games you did not
+   * play, which is not what the wire is for.
    */
   const seasonWhereYouWinBy = (you: string, margin: number, seed = 20260828) => {
     let s = newSeason(you, seed);
-    for (let d = 0; d < REGULAR_DAYS; d++) {
+    for (let d = 0; d < regularDays(s); d++) {
       const m = yourGame(s);
       if (!m) {
         s = playDay(s);
@@ -155,10 +155,10 @@ describe('a season keeps its own record', () => {
   });
 
   it('announces the bracket exactly once, on the day it exists', () => {
-    const s = play(REGULAR_DAYS);
+    const s = play(regularDays(newSeason(NOBODY, 0)));
     const set = s.news!.filter((n) => n.text.startsWith('Playoffs set'));
     expect(set).toHaveLength(1);
-    expect(set[0]!.day).toBe(REGULAR_DAYS - 1);
+    expect(set[0]!.day).toBe(regularDays(s) - 1);
   });
 
   it('an old save with no wire and no hits still folds', () => {

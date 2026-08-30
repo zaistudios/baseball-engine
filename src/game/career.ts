@@ -35,7 +35,7 @@
  * why anybody opens one.
  */
 
-import { REGULAR_DAYS, champion, standings, teamOf, type Season } from './franchise.ts';
+import { champion, regularDays, standings, teamOf, type Season } from './franchise.ts';
 import { avg, era, type StatBook } from './stats.ts';
 
 /** One hitter's season, as the book remembers it. */
@@ -64,6 +64,15 @@ export interface Year {
   l: number;
   /** Where you finished in the table, one-based. */
   finish: number;
+  /**
+   * How long the year was. Optional — a season filed before the length was
+   * pickable was always DEFAULT_GAMES, and the book renders it as such.
+   *
+   * ⚠️ IT IS RECORDED BECAUSE THE BOOK PUTS YEARS SIDE BY SIDE. A 9-5 and a
+   * 96-66 in adjacent rows with no games column is two records that look like
+   * one scale and are not, and the career total underneath silently adds them.
+   */
+  games?: number;
   /** Who won it all — you, or somebody else. */
   champion: string;
   /** The season's seed. See the header: this is what stops a double entry. */
@@ -89,13 +98,19 @@ export const newCareer = (): Career => ({ years: [] });
  * are the two numbers the records page sorts by; picking "best player" some
  * other way would put a man in the book who does not hold any of its records.
  *
- * ponytail: a floor of one third of the schedule rather than a real qualifying
- * rule. A reliever who threw four scoreless innings is not your best arm, and
- * that is the whole of what needs saying.
+ * ponytail: a floor of one plate appearance per scheduled game rather than a
+ * real qualifying rule. A reliever who threw four scoreless innings is not your
+ * best arm, and that is the whole of what needs saying. `games` is the season's
+ * own length — the bar has to grow with the year, or a hundred-and-sixty-two
+ * game season lets a man who played a fortnight hold the batting mark.
  */
-function marks(book: StatBook, names: { bats: string[]; arms: string[] }): Pick<Year, 'bat' | 'arm'> {
-  const FLOOR_PA = REGULAR_DAYS;
-  const FLOOR_OUTS = REGULAR_DAYS;
+function marks(
+  book: StatBook,
+  names: { bats: string[]; arms: string[] },
+  games: number,
+): Pick<Year, 'bat' | 'arm'> {
+  const FLOOR_PA = games;
+  const FLOOR_OUTS = games;
 
   const bats = names.bats
     .map((n) => ({ n, l: book.bat[n] }))
@@ -145,11 +160,16 @@ export function file(c: Career, s: Season): Career {
     finish: at + 1,
     champion: champion(s) ?? '—',
     seed: s.seed,
+    games: regularDays(s),
     ...(s.stats
-      ? marks(s.stats, {
-          bats: you.lineup.map((p) => p.name),
-          arms: [...you.rotation, ...you.bullpen].map((p) => p.name),
-        })
+      ? marks(
+          s.stats,
+          {
+            bats: you.lineup.map((p) => p.name),
+            arms: [...you.rotation, ...you.bullpen].map((p) => p.name),
+          },
+          regularDays(s),
+        )
       : {}),
   };
 

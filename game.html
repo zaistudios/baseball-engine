@@ -160,6 +160,32 @@
       #pre .wire div { padding: 2px 0; border-bottom: 1px solid #1a221c; }
       #pre .wire .roster { color: var(--good); }
       #pre .go { width: 100%; text-align: center; padding: 12px; font-size: 14px; }
+      /* ---- the calendar. Every day of the year as one wrapping grid of equal
+         cells, because at 162 games a table with a row per day is a scroll
+         nobody reads and at 14 it is four lines of nothing. auto-fill rather
+         than auto-fit so the cells stay the same size on a short season as on
+         a long one — a fourteen-game year should not draw five cells stretched
+         across the whole screen. */
+      #pre .calgrid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: 5px;
+      }
+      #pre .cal {
+        display: flex; flex-direction: column; gap: 1px;
+        background: var(--panel); border: 1px solid var(--line);
+        padding: 6px 7px; font-size: 11px; line-height: 1.4; text-align: left;
+      }
+      /* The day number, small and out of the way — it is how you find a cell,
+         not what the cell says. */
+      #pre .cal .calday { color: var(--dim); font-size: 10px; letter-spacing: 1px; }
+      /* Played: text, not a door. See showCalendar — there is no rewinding. */
+      #pre .cal.done, #pre .cal.off { opacity: 0.55; }
+      #pre .cal .w { color: var(--good); }
+      #pre .cal .l { color: var(--bad); }
+      /* Today, and the only cell that plays rather than skips. */
+      #pre button.cal.now { border-color: var(--hot); }
+      #pre button.cal.now .calday { color: var(--hot); }
+
       /* ---- a franchise moment. Same overlay, so the only new rule is that the
          choices stack full-width and read as paragraphs rather than as the
          grid of club buttons on the start screen. */

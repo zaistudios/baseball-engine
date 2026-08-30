@@ -1,8 +1,17 @@
 /**
- * FRANCHISE. One season: a fourteen-game schedule, a four-club playoff, and a
- * champion. The rest of the league plays its own games headlessly the same day
- * you play yours, so the standings you are shown already have that afternoon in
- * them — fourteen other games a day at thirty clubs, and none of them wait.
+ * FRANCHISE. One season: a schedule you chose the length of, a four-club
+ * playoff, and a champion. The rest of the league plays its own games headlessly
+ * the same day you play yours, so the standings you are shown already have that
+ * afternoon in them — fourteen other games a day at thirty clubs, and none of
+ * them wait.
+ *
+ * ⚠️ THE SEASON'S LENGTH IS ON THE SEASON, NOT IN THIS FILE. `Season.games` is
+ * picked on the title screen and never moves again, and every calendar figure
+ * — the last day of the schedule, the semifinal, the final, the end — is
+ * derived from it by the four functions below. There is no module-level
+ * REGULAR_DAYS any more, deliberately: a constant read at import time is a
+ * second answer to a question the save already answers, and the two disagree
+ * the moment a fourteen-game save is loaded next to a hundred-and-sixty-two.
  *
  * ⚠️ ONE YEAR, DELIBERATELY. There is no offseason and no year two. The season
  * ends when somebody wins the final, and the only way on from there is a new
@@ -33,7 +42,17 @@
  */
 
 import { simulateGame } from './sim.ts';
-import { LEAGUE, club, type Team } from './teams.ts';
+import { inForm } from './form.ts';
+import { LEAGUE, club, leagueUnder, type Team } from './teams.ts';
+import {
+  DEFAULT_GAMES,
+  DEFAULT_RULES,
+  MAX_GAMES,
+  cleanRules,
+  roundsIn,
+  winsNeeded,
+  type Rules,
+} from './rules.ts';
 import { clubValue } from './value.ts';
 import {
   pickStarter,
@@ -128,6 +147,29 @@ export interface Season {
   you: string;
   /** Which day is NEXT. Runs past the schedule into the bracket; see below. */
   day: number;
+  /**
+   * HOW LONG THE REGULAR SEASON IS. Chosen once, on the title screen, and
+   * fixed for the year — see LENGTHS.
+   *
+   * Optional so a save written before the picker existed still loads, and it
+   * loads as what it actually was: DEFAULT_GAMES. Read it through
+   * regularDays(), never directly, so the fallback lives in one place.
+   */
+  games?: number;
+  /**
+   * EVERYTHING THIS FRANCHISE DECIDED BEFORE IT PLAYED — see rules.ts. Length,
+   * parity, streakiness, run environment, and the shape of the bracket.
+   *
+   * ⚠️ `games` ABOVE IS THE SAME NUMBER AND IT IS KEPT ON PURPOSE. It shipped
+   * one change earlier, so saves exist that have it and no `rules`; regularDays()
+   * reads rules first and falls back to it. newSeason() writes both and keeps
+   * them equal — rulesOf() is the only thing that should ever read `rules`
+   * directly, so there is one place the two can be reconciled.
+   *
+   * Optional, like everything else added after the fact: a season saved before
+   * rules existed plays under DEFAULT_RULES, which is what it was playing under.
+   */
+  rules?: Rules;
   /** Seeds every headless game, so a reloaded season plays out identically. */
   seed: number;
   /** Every club as this season has them, by abbr. See the header. */
@@ -163,6 +205,25 @@ export interface Season {
    */
   decided?: readonly number[];
   /**
+   * WHICH SCENARIOS HAVE ALREADY ASKED. See moments.ts.
+   *
+   * ⚠️ THIS IS THE GATE AND `decided` IS NOT, ANY MORE. `decided` holds the
+   * DAYS you were asked on, which was gate enough while moments were two fixed
+   * days — a day cannot come round twice. A scenario fires on a CONDITION, and
+   * a condition stays true: a man in a slump is still in a slump tomorrow, so
+   * without a record of which questions have been asked the same one arrives
+   * every morning until the average moves.
+   *
+   * Both are kept. `decided` still stops a second question on a day you have
+   * already answered, and it is what a season saved before scenarios existed
+   * carries — such a save simply has no `seen`, and its two scheduled moments
+   * are gated by their days exactly as they were.
+   *
+   * Validated on load like `decided`, and for the same reason: it reaches the
+   * engine, so a garbled entry must cost at most the scenario it names.
+   */
+  seen?: readonly string[];
+  /**
    * EVERY LINE IN THE LEAGUE, running. See stats.ts.
    *
    * ⚠️ A STOCK RATHER THAN A FOLD, and this is the second deliberate exception
@@ -180,76 +241,132 @@ export interface Season {
   stats?: StatBook;
 }
 
-/**
- * HOW MANY CLUBS YOU MEET, home and away. Fourteen games, and the number does
- * not move when the league does.
- *
- * ⚠️ THIS IS WHAT KEEPS A THIRTY-CLUB LEAGUE A HALF-HOUR GAME. The circle
- * method below will happily produce a full double round robin, and at thirty
- * clubs that is FIFTY-EIGHT days — a season nobody sitting down after work is
- * going to finish, and twenty-nine of those days are games you watch rather
- * than play. So the rotation is cut after seven rounds and mirrored, which
- * gives you seven opponents twice each instead of twenty-nine once each.
- *
- * ⚠️ YOU DO NOT PLAY EVERYBODY, and that is the trade. Half the league is
- * somebody you only ever meet in the bracket. Playing a club home AND away was
- * the better half of the trade to keep: a fourteen-game schedule of fourteen
- * strangers has no rivalry in it and no chance to take one back.
- */
-export const OPPONENTS = 7;
+// ⚠️ DEFAULT_GAMES, MAX_GAMES and LENGTHS MOVED TO rules.ts and are re-exported
+// here. They were declared in this file when season length was the only
+// setting; they are now three of six, and a file that owns one of a set owns
+// the odd one out. Re-exported rather than relocated silently because every
+// screen and script that already imports them from here should keep working —
+// there is nothing to gain from making callers chase the move.
+export { DEFAULT_GAMES, MAX_GAMES, LENGTHS, DEFAULT_RULES, type Rules } from './rules.ts';
 
 /**
- * A double round-robin by the circle method: fix one club, rotate the rest,
- * pair the ends. Every club is paired every round, so nobody is ever idle; the
- * second half is the first half with the venues swapped.
+ * THE SCHEDULE, one array per day, for a season of any length.
+ *
+ * A round-robin by the circle method: fix one club, rotate the rest, pair the
+ * ends. Every club is paired every round, so nobody is ever idle.
+ *
+ * ⚠️ HOME AND AWAY, BACK TO BACK — day 2r is a round and day 2r+1 is that same
+ * round with the venues swapped. That is a two-game series, which is what
+ * baseball looks like, and it is also what makes ONE builder serve fourteen
+ * games and a hundred and sixty-two. The old version cut the rotation at seven
+ * rounds and appended all seven mirrors at the end; generalised to a hundred
+ * and sixty-two that would have made the entire second half of the year a
+ * replay of the first with the venues flipped. Pairing them as they are dealt
+ * costs nothing and slices cleanly at any even length.
+ *
+ * ⚠️ THE ROTATION WRAPS. At thirty clubs it has a period of twenty-nine, so a
+ * season longer than fifty-eight games simply comes round again — which is
+ * right: that is how a club ends up facing a division rival six times and
+ * somebody across the league four.
  */
-function buildSchedule(): Matchup[][] {
+const CACHE = new Map<number, readonly (readonly Matchup[])[]>();
+
+export function schedule(games: number): readonly (readonly Matchup[])[] {
+  const hit = CACHE.get(games);
+  if (hit) return hit;
+
   const abbrs = LEAGUE.map((t) => t.abbr);
   const n = abbrs.length;
   const rot = abbrs.slice(1);
-  const first: Matchup[][] = [];
+  const days: Matchup[][] = [];
 
-  for (let r = 0; r < Math.min(OPPONENTS, n - 1); r++) {
+  for (let r = 0; days.length < games; r++) {
     const order = [abbrs[0]!, ...rot];
-    const games: Matchup[] = [];
+    const home: Matchup[] = [];
     for (let i = 0; i < n / 2; i++) {
       const a = order[i]!;
       const b = order[n - 1 - i]!;
       // Alternate the host by round and by slot, or the fixed club hosts every
-      // round in the first half and travels every round in the second.
-      games.push(r % 2 === i % 2 ? { home: a, away: b } : { home: b, away: a });
+      // single opener and travels every single return.
+      home.push(r % 2 === i % 2 ? { home: a, away: b } : { home: b, away: a });
     }
-    first.push(games);
+    days.push(home);
+    if (days.length < games) days.push(home.map((g) => ({ home: g.away, away: g.home })));
     rot.unshift(rot.pop()!);
   }
 
-  return [...first, ...first.map((d) => d.map((g) => ({ home: g.away, away: g.home })))];
+  const out: readonly (readonly Matchup[])[] = days.slice(0, games);
+  CACHE.set(games, out);
+  return out;
 }
 
-/** The regular season, one array per day. Static — the schedule is static. */
-export const DAYS: readonly (readonly Matchup[])[] = buildSchedule();
+/**
+ * THE CALENDAR IS ONE CURSOR. `day` indexes the schedule through the regular
+ * season and then keeps counting into the bracket, so there is no phase enum to
+ * keep in step with it and no second piece of state that can disagree about
+ * where the season has got to.
+ */
+/** The rules this season is playing under. See rules.ts. */
+export const rulesOf = (s: Season): Rules => s.rules ?? { ...DEFAULT_RULES, games: regularDays(s) };
+
+export const regularDays = (s: Season): number => s.rules?.games ?? s.games ?? DEFAULT_GAMES;
 
 /**
- * THE CALENDAR IS ONE CURSOR. `day` indexes DAYS through the regular season
- * and then keeps counting into the bracket, so there is no phase enum to keep
- * in step with it and no second piece of state that can disagree about where
- * the season has got to.
+ * THE BRACKET, AS DAYS.
+ *
+ * ⚠️ A ROUND OWNS A FIXED BLOCK OF DAYS WHETHER IT NEEDS THEM OR NOT. A
+ * best-of-seven that ends in five leaves two empty days on the calendar rather
+ * than shifting everything after it forward. That is deliberate: the day cursor
+ * is the only piece of state saying where the season has got to (see the header
+ * on gamesOn), and a round whose length depended on how it went would make
+ * "which day is the final" a question you can only answer by replaying the
+ * whole bracket. An empty day costs a card with no games on it, which gamesOn()
+ * already returns for a dozen other reasons.
  */
-export const REGULAR_DAYS = DAYS.length;
-export const SEMIS = REGULAR_DAYS;
-export const FINAL = REGULAR_DAYS + 1;
-export const SEASON_END = REGULAR_DAYS + 2;
+export const roundsOf = (s: Season): number => roundsIn(rulesOf(s).bracket);
+export const seriesOf = (s: Season): number => rulesOf(s).series;
+export const playoffDays = (s: Season): number => roundsOf(s) * seriesOf(s);
+export const seasonEnd = (s: Season): number => regularDays(s) + playoffDays(s);
 
-export const newSeason = (you: string, seed: number): Season => ({
-  you,
-  day: 0,
-  seed,
-  rosters: Object.fromEntries(LEAGUE.map((t) => [t.abbr, t])),
-  results: [],
-  news: [],
-  decided: [],
-  rest: {},
-});
+/** Which round a day belongs to, 0-based. Negative during the schedule. */
+export const roundOn = (s: Season, day: number = s.day): number =>
+  Math.floor((day - regularDays(s)) / seriesOf(s));
+
+/** Which game of its round a day is, 0-based. */
+export const gameInRound = (s: Season, day: number = s.day): number =>
+  (day - regularDays(s)) % seriesOf(s);
+
+/**
+ * The day the last round starts. Kept because "is the season over" and "who is
+ * the champion" both want the final round and neither wants the arithmetic.
+ */
+export const finalRound = (s: Season): number => roundsOf(s) - 1;
+
+export const newSeason = (
+  you: string,
+  seed: number,
+  games: number = DEFAULT_GAMES,
+  rules: Rules = DEFAULT_RULES,
+): Season => {
+  const r: Rules = { ...rules, games };
+  return {
+    you,
+    day: 0,
+    seed,
+    games,
+    rules: r,
+    // ⚠️ THE SEASON'S ROSTERS ARE BUILT UNDER ITS OWN RULES, and this is the
+    // one place that happens. parity and offence are roster transformations —
+    // see leagueUnder() in teams.ts — so applying them here means every read
+    // through teamOf() gets the league this franchise actually plays in, and
+    // nothing downstream needs to know a setting existed.
+    rosters: Object.fromEntries(leagueUnder(r.parity, r.offence).map((t) => [t.abbr, t])),
+    results: [],
+    news: [],
+    decided: [],
+    rest: {},
+  };
+};
 
 /** The relief outings from one side of a finished game, ready for a Result. */
 export const workOf = (staff: Parameters<typeof reliefWork>[0]): ArmWork[] =>
@@ -303,7 +420,7 @@ const armNamed = (s: Season, abbr: string, name: string): Pitcher | undefined =>
 /** A club as THIS season has it. Falls back to config if one has gone missing. */
 export const teamOf = (s: Season, abbr: string): Team => s.rosters[abbr] ?? club(abbr);
 
-export const seasonOver = (s: Season): boolean => s.day >= SEASON_END;
+export const seasonOver = (s: Season): boolean => s.day >= seasonEnd(s);
 
 const winnerOf = (r: Result): string => (r.hr > r.ar ? r.home : r.away);
 
@@ -312,42 +429,164 @@ export const resultsOn = (s: Season, day: number): Result[] =>
   s.results.filter((r) => r.day === day);
 
 /** The top four, best first. Seeding and the bracket both come from here. */
-export const seeds = (s: Season): string[] => standings(s).slice(0, 4).map((r) => r.abbr);
+export const seeds = (s: Season): string[] =>
+  standings(s).slice(0, rulesOf(s).bracket).map((r) => r.abbr);
+
+/**
+ * PAIR A ROUND OFF: best against worst, second against second-worst.
+ *
+ * The list is always in seed order — survivors() keeps it that way — so this is
+ * the whole of what a bracket is. Eight clubs give 1-8, 2-7, 3-6, 4-5; the four
+ * winners come back in seed order and give 1-4, 2-3.
+ */
+const pairUp = (alive: readonly string[]): Matchup[] => {
+  const out: Matchup[] = [];
+  for (let i = 0; i < alive.length / 2; i++) {
+    out.push({ home: alive[i]!, away: alive[alive.length - 1 - i]! });
+  }
+  return out;
+};
+
+/** Every day a given round occupies. */
+const daysOfRound = (s: Season, round: number): number[] => {
+  const first = regularDays(s) + round * seriesOf(s);
+  return Array.from({ length: seriesOf(s) }, (_, i) => first + i);
+};
+
+/**
+ * Who won a series, or null if it is still going.
+ *
+ * ⚠️ COUNTED OFF THE RESULTS, NOT TRACKED IN A COUNTER. franchise.ts's header
+ * says the save holds the games and everything else is a fold — a stored series
+ * score can disagree with the games that produced it, a fold cannot. This is
+ * the `wins` counter the old single-elimination note said a series would grow,
+ * and it turns out not to need storing at all.
+ */
+function seriesScore(s: Season, round: number, m: Matchup): { home: number; away: number } {
+  let home = 0;
+  let away = 0;
+  for (const day of daysOfRound(s, round)) {
+    for (const r of resultsOn(s, day)) {
+      // A series is one pairing, whichever way round the venue was that night —
+      // the host alternates, so half these results have the sides swapped.
+      const inIt =
+        (r.home === m.home && r.away === m.away) || (r.home === m.away && r.away === m.home);
+      if (!inIt) continue;
+      if (winnerOf(r) === m.home) home++;
+      else away++;
+    }
+  }
+  return { home, away };
+}
+
+function seriesWinner(s: Season, round: number, m: Matchup): string | null {
+  const need = winsNeeded(seriesOf(s));
+  const { home, away } = seriesScore(s, round, m);
+  if (home >= need) return m.home;
+  if (away >= need) return m.away;
+  return null;
+}
+
+/** One pairing of a round, with where the series stands. For the screens. */
+export interface SeriesLine extends Matchup {
+  /** Wins for the higher seed, and for the lower. */
+  homeWins: number;
+  awayWins: number;
+  winner: string | null;
+}
+
+/** Every pairing of a round, or [] if the bracket has not reached it. */
+export function matchupsInRound(s: Season, round: number): SeriesLine[] {
+  if (s.day < regularDays(s)) return [];
+  const alive = survivors(s, round);
+  if (alive.length < 2) return [];
+  return pairUp(alive).map((m) => {
+    const { home, away } = seriesScore(s, round, m);
+    return { ...m, homeWins: home, awayWins: away, winner: seriesWinner(s, round, m) };
+  });
+}
+
+/**
+ * The clubs still alive going INTO a round, in seed order, or [] if the bracket
+ * has not got that far.
+ */
+function survivors(s: Season, round: number): string[] {
+  const order = seeds(s);
+  let alive = order;
+  for (let r = 0; r < round; r++) {
+    const won = pairUp(alive).map((m) => seriesWinner(s, r, m));
+    if (won.some((w) => w === null)) return [];
+    // ⚠️ BACK INTO SEED ORDER, not into the order the games were appended in.
+    // pairUp() reads "best against worst" straight off the list it is handed,
+    // so a list in finishing order would re-pair the next round wrongly the
+    // moment an underdog won.
+    alive = (won as string[]).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  }
+  return alive;
+}
 
 /**
  * The card for a day — the schedule during the regular season, the bracket
  * after it.
  *
- * ponytail: SINGLE ELIMINATION, ONE GAME A ROUND, higher seed hosts. A
- * best-of-anything needs a series with its own win count, its own home-and-away
- * pattern and its own "is it over", which is three pieces of state to hold
- * something that is currently one row of results. Make it best-of-seven when a
- * round lasting one game is the actual complaint; what it grows then is a
- * `wins` counter, not a rewrite.
+ * ⚠️ A SERIES THAT IS ALREADY DECIDED PLAYS NOTHING. Sweep a best-of-seven in
+ * four and days five, six and seven come back empty, exactly the way a real
+ * postseason does not play them. That is what makes the fixed block of days
+ * per round in playoffDays() honest rather than a fiction.
+ *
+ * ⚠️ THE HOST ALTERNATES, HIGHER SEED FIRST. So a best-of-seven gives the
+ * better club games one, three, five and seven at home — four of the seven, and
+ * the decider. Not the real 2-3-2, which exists for travel reasons this league
+ * does not have; what it has to get right is that the seed is worth something,
+ * and the majority plus the last game is that.
  */
 export function gamesOn(s: Season, day: number = s.day): readonly Matchup[] {
-  if (day < REGULAR_DAYS) return DAYS[day] ?? [];
+  if (day < regularDays(s)) return schedule(regularDays(s))[day] ?? [];
 
-  const four = seeds(s);
-  if (four.length < 4) return [];
+  // ⚠️ THERE IS NO BRACKET UNTIL THE SCHEDULE IS PLAYED OUT. seeds() will
+  // happily hand back a top four of a table that is all zeroes — sorted on the
+  // abbr tiebreak — so asking this about a playoff day mid-season used to get a
+  // confident, alphabetical, completely fictional semifinal.
+  //
+  // It was invisible while the only caller asked about TODAY: you cannot be on
+  // day fifteen without having played fourteen. The calendar asks about days
+  // that have not happened, and it drew "SEMIFINAL — vs CHF" beside game one.
+  // Guarded here rather than there, because every future caller that looks
+  // forward has the same question and deserves the same answer.
+  if (s.day < regularDays(s)) return [];
 
-  if (day === SEMIS) {
-    return [
-      { home: four[0]!, away: four[3]! },
-      { home: four[1]!, away: four[2]! },
-    ];
+  const round = roundOn(s, day);
+  if (round < 0 || round >= roundsOf(s)) return [];
+
+  const alive = survivors(s, round);
+  if (alive.length < 2) return [];
+
+  const nth = gameInRound(s, day);
+  return pairUp(alive).flatMap((m) => {
+    if (seriesWinner(s, round, m)) return [];
+    return [nth % 2 === 0 ? m : { home: m.away, away: m.home }];
+  });
+}
+
+/**
+ * IS THIS CLUB STILL ALIVE IN THE BRACKET?
+ *
+ * ⚠️ THE FURTHEST ROUND ANYBODY HAS FINISHED, not the round today belongs to.
+ * A series can end early, so the day cursor and the state of the bracket are
+ * not the same question — sweep in four and the bracket has moved on while the
+ * calendar has three empty days left in the round. Walking back from the last
+ * round to the first finds the newest answer that exists.
+ *
+ * Everyone is alive during the regular season, including the clubs that are
+ * about to miss out: the bracket does not exist yet. See gamesOn().
+ */
+export function stillIn(s: Season, abbr: string): boolean {
+  if (s.day < regularDays(s)) return true;
+  for (let r = roundsOf(s); r >= 0; r--) {
+    const alive = survivors(s, r);
+    if (alive.length) return alive.includes(abbr);
   }
-
-  if (day === FINAL) {
-    const survivors = resultsOn(s, SEMIS).map(winnerOf);
-    if (survivors.length < 2) return [];
-    // The better seed hosts. Read off the seed order rather than the order the
-    // semifinals happen to have been appended in, which is not the bracket.
-    const [a, b] = survivors as [string, string];
-    return four.indexOf(a) < four.indexOf(b) ? [{ home: a, away: b }] : [{ home: b, away: a }];
-  }
-
-  return [];
+  return false;
 }
 
 /** Today's matchup involving you, or null — you are out, or the year is done. */
@@ -356,25 +595,57 @@ export const yourGame = (s: Season): Matchup | null =>
 
 /** Who won it all, or null until somebody has. */
 export function champion(s: Season): string | null {
-  const decided = resultsOn(s, FINAL)[0];
-  return decided ? winnerOf(decided) : null;
+  const last = finalRound(s);
+  const two = survivors(s, last);
+  if (two.length < 2) return null;
+  return seriesWinner(s, last, pairUp(two)[0]!);
 }
 
-/** What to call the day on a screen. */
-export function dayLabel(s: Season): string {
-  if (s.day < REGULAR_DAYS) return `GAME ${s.day + 1} OF ${REGULAR_DAYS}`;
-  if (s.day === SEMIS) return 'SEMIFINAL';
-  if (s.day === FINAL) return 'CHAMPIONSHIP';
-  return 'SEASON OVER';
+/**
+ * WHAT A ROUND IS CALLED. Named from the end backwards — the last one is always
+ * the CHAMPIONSHIP whether the bracket has one round or three, and the one
+ * before it is always the SEMIFINAL. A bracket of two is a championship and
+ * nothing else, which is why counting forwards ("round 1") would print
+ * "ROUND 1 OF 1" for a one-game final.
+ */
+export function roundName(s: Season, round: number): string {
+  const left = roundsOf(s) - round;
+  if (left <= 1) return 'CHAMPIONSHIP';
+  if (left === 2) return 'SEMIFINAL';
+  // Everything earlier is named for how many clubs are still in it.
+  return `ROUND OF ${2 ** left}`;
+}
+
+/** What to call a day on a screen. Defaults to the day the season is on. */
+export function dayLabel(s: Season, day: number = s.day): string {
+  const n = regularDays(s);
+  if (day < n) return `GAME ${day + 1} OF ${n}`;
+  if (day >= seasonEnd(s)) return 'SEASON OVER';
+  const name = roundName(s, roundOn(s, day));
+  // A one-game round is just its name; a series says which night it is.
+  return seriesOf(s) === 1 ? name : `${name} — GAME ${gameInRound(s, day) + 1}`;
 }
 
 /**
  * Close out the day: your final goes in as given, everything else on the card
  * is simulated, and the calendar turns over.
  *
- * `yours` is OPTIONAL, and that is the eliminated case — miss the bracket, or
- * lose the semifinal, and the rest of the playoffs is a day you watch rather
- * than a day you play.
+ * `yours` is OPTIONAL, and it now means TWO things — the second is what makes a
+ * hundred-and-sixty-two-game year playable at all:
+ *
+ *   1. You are OUT. Miss the bracket, or lose the semifinal, and the rest of
+ *      the playoffs is a day you watch rather than a day you play. There is no
+ *      game of yours on the card to hand in.
+ *   2. You are SIMMING PAST IT. The calendar lets you jump forward to a date,
+ *      and the games in between have to be played by somebody.
+ *
+ * ⚠️ SO A DAY WITH NO `yours` SIMULATES THE WHOLE CARD, YOUR GAME INCLUDED.
+ * It used to filter your club out unconditionally, which was invisible while
+ * the only caller that omitted `yours` was the eliminated case — you had no
+ * game that day, so the filter removed nothing. The moment anything skips a
+ * day you were ON the card, that filter is a club quietly playing a shorter
+ * schedule than the other twenty-nine and sitting above them in the table.
+ *
  *
  * The seed is derived from the season seed and the day, NOT carried forward,
  * so re-simulating a day gives the same finals — a reloaded save is the same
@@ -387,7 +658,9 @@ export function dayLabel(s: Season): string {
  * the save to answer a question `Season.stats` already answers.
  */
 export function playDay(s: Season, yours?: Result, book?: StatBook): Season {
-  const others = gamesOn(s).filter((g) => g.home !== s.you && g.away !== s.you);
+  const others = yours
+    ? gamesOn(s).filter((g) => g.home !== s.you && g.away !== s.you)
+    : gamesOn(s);
   // Every game played today, yours first — folded into the league's book at the
   // bottom. Collected on the way past rather than returned, because a Result is
   // the wrong shape to carry one and the sims are the only place they exist.
@@ -400,11 +673,16 @@ export function playDay(s: Season, yours?: Result, book?: StatBook): Season {
     // which was the actual complaint. See rotation.ts.
     const hp = starterFor(s, g.home);
     const ap = starterFor(s, g.away);
+    // ⚠️ BOTH SIDES GO OUT IN TODAY'S FORM. See form.ts — the club that plays
+    // is the roster with this week's hot and cold folded in, and it has to be
+    // applied HERE, where the season's seed and day are known, rather than
+    // inside simulateGame() which only ever sees a per-game seed. main.ts does
+    // the same to the two clubs it hands kickOff().
     const { game } = simulateGame(
       s.seed + s.day * 101 + i,
       9,
-      teamOf(s, g.home),
-      teamOf(s, g.away),
+      inForm(teamOf(s, g.home), s.seed, s.day, rulesOf(s).streak),
+      inForm(teamOf(s, g.away), s.seed, s.day, rulesOf(s).streak),
       {
         home: { index: hp.index, stamina: hp.stamina, penLegs: hp.penLegs },
         away: { index: ap.index, stamina: ap.stamina, penLegs: ap.penLegs },
@@ -462,6 +740,30 @@ export function playDay(s: Season, yours?: Result, book?: StatBook): Season {
   // has to change for it, which is the whole reason the wire exists before any
   // of them do.
   return { ...next, news: [...(s.news ?? []), ...headlines(s, next, played)] };
+}
+
+/**
+ * FAST-FORWARD TO A DAY, playing everything on the way headlessly — yours
+ * included, which is what the note on playDay's `yours` is about.
+ *
+ * This is the engine half of the calendar. A hundred-and-sixty-two-game year is
+ * only playable because you do not have to play all of it, and "skip to here"
+ * is the whole of what that means.
+ *
+ * ⚠️ `stop` IS HOW A MOMENT SURVIVES A SKIP. moments.ts fires on two fixed days
+ * of the schedule and asks you a question that changes a roster; a jump from
+ * day two to day ninety would sail straight past both and quietly cost you the
+ * only two decisions in the mode. The caller passes momentOn — this file cannot
+ * import it, because moments.ts imports this one — and the jump halts on the
+ * day it would have fired, with the day NOT yet played, so the normal flow
+ * asks the question and then plays it.
+ *
+ * Returns `s` untouched if the target is behind you. There is no rewinding a
+ * season, and a target in the past is a stale button, not an error.
+ */
+export function simTo(s: Season, target: number, stop?: (s: Season) => boolean): Season {
+  while (s.day < target && !seasonOver(s) && !stop?.(s)) s = playDay(s);
+  return s;
 }
 
 /** The margin at which a result stops being a result and becomes a story. */
@@ -527,15 +829,22 @@ function headlines(before: Season, after: Season, played: readonly Result[]): Ne
 
   // 2. A change at the top. Regular season only — the bracket is seeded off
   //    that table and standings() deliberately does not fold playoffs in.
-  if (day < REGULAR_DAYS && day > 0) {
+  if (day < regularDays(before) && day > 0) {
     const was = standings(before)[0]?.abbr;
     const now = standings(after)[0]?.abbr;
     if (was && now && was !== now) note('season', `${now} take over first place.`);
   }
 
-  // 3. The milestones. Each is a fact about the calendar, so each fires once.
-  if (after.day === REGULAR_DAYS) note('season', `Playoffs set: ${seeds(after).join(', ')}.`);
-  if (day === FINAL) {
+  // 3. The milestones.
+  if (after.day === regularDays(after)) note('season', `Playoffs set: ${seeds(after).join(', ')}.`);
+
+  // ⚠️ THE TITLE FIRES ON THE DAY IT WAS WON, NOT ON A DAY NUMBER. It used to
+  // ask "is today the final?", which was answerable while the bracket was two
+  // fixed days long. A round is now a series that can end on any of its nights
+  // — a sweep leaves the rest of the block empty — so the honest question is
+  // whether somebody has just become champion who was not one this morning.
+  // That fires exactly once however the series went.
+  if (!champion(before)) {
     const champ = champion(after);
     if (champ) note('season', `${champ} are champions.`);
   }
@@ -573,8 +882,9 @@ export function standings(s: Season): Standing[] {
       { abbr: t.abbr, w: 0, l: 0, rf: 0, ra: 0, hf: 0, gb: 0, value: clubValue(teamOf(s, t.abbr)) },
     ]),
   );
+  const n = regularDays(s);
   for (const g of s.results) {
-    if (g.day >= REGULAR_DAYS) continue;
+    if (g.day >= n) continue;
     const h = rows.get(g.home);
     const a = rows.get(g.away);
     if (!h || !a) continue; // a result naming a club the league no longer has
@@ -676,7 +986,21 @@ export function loadSeason(): Season | null {
     const s = JSON.parse(raw) as Partial<Season> & { v?: number };
     if (s.v !== VERSION) return null;
     if (typeof s.you !== 'string' || !LEAGUE.some((t) => t.abbr === s.you)) return null;
-    if (typeof s.day !== 'number' || s.day < 0 || s.day > SEASON_END) return null;
+    // ⚠️ THE LENGTH IS READ FIRST, because every other bound below is derived
+    // from it. A blob from before the picker has no `games` and is what it
+    // always was; anything outside the range the builder is willing to lay down
+    // is refused rather than clamped — a season silently shortened under a
+    // player mid-year is worse than one that will not resume.
+    //
+    // ⚠️ THE REST OF THE RULES ARE CLEANED, NOT REFUSED — see cleanRules(). A
+    // garbled parity is a season that plays a bit differently; a garbled length
+    // is a calendar nobody can finish, which is why this one number is still
+    // checked here and thrown out rather than clamped.
+    const rules = cleanRules({ ...(s.rules ?? {}), games: s.rules?.games ?? s.games });
+    const games = s.rules?.games ?? s.games ?? DEFAULT_GAMES;
+    if (!Number.isInteger(games) || games < 2 || games > MAX_GAMES) return null;
+    const end = games + roundsIn(rules.bracket) * rules.series;
+    if (typeof s.day !== 'number' || s.day < 0 || s.day > end) return null;
     if (typeof s.seed !== 'number' || !Number.isFinite(s.seed)) return null;
     if (!s.rosters || LEAGUE.some((t) => !looksLikeTeam(s.rosters![t.abbr]))) return null;
     if (!Array.isArray(s.results)) return null;
@@ -694,6 +1018,9 @@ export function loadSeason(): Season | null {
     // — so unlike the wire it is filtered to the finite numbers it claims to
     // be. A garbled entry costs you the moment it names, never a thrown save.
     const decided = Array.isArray(s.decided) ? s.decided.filter(Number.isFinite) : [];
+    // ...and the same for the scenario ids, filtered to strings. A garbled one
+    // is a scenario that gets to ask a second time, which is the same cost.
+    const seen = Array.isArray(s.seen) ? s.seen.filter((x) => typeof x === 'string') : [];
     // The rest ledger reaches the engine — it decides who takes the ball — so
     // it is filtered to the finite day numbers it claims to hold. A garbled
     // entry costs one arm a day of rest, never a thrown save.
@@ -716,10 +1043,13 @@ export function loadSeason(): Season | null {
       you: s.you,
       day: s.day,
       seed: s.seed,
+      games,
+      rules,
       rosters: s.rosters,
       results: s.results,
       news,
       decided,
+      seen,
       rest,
       stats: cleanBook(s.stats),
     };

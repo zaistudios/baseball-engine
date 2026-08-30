@@ -56,38 +56,58 @@ export const showScale = (v: number): number =>
  * One number for what a hitter is worth.
  *
  * ⚠️ EVERY WEIGHT HERE WAS MEASURED BY scripts/sensitivity.ts, WHICH IS THE
- * ONLY REASON TO TRUST ANY OF THEM. The first cut inherited five weights from
- * an older scoring function and guessed at the two ratings that did not exist
- * when it was written. Measurement — move one rating across a whole roster,
- * play 2,100 games, read the win rate — said three of the seven were wrong,
- * and one of them badly:
+ * ONLY REASON TO TRUST ANY OF THEM — and they were RE-MEASURED on 2026-08-29,
+ * because two things underneath them had moved:
  *
- *   POWER was 0.9 and is worth 1.46. Nearly as much as contact, not half.
- *   VISION was 0.7 and is worth 0.32. It converts whiffs into weak contact,
- *     which is worth real runs but not contact-stat money.
- *   SPEED was 0.8 and is worth ABOUT NOTHING as a linear term — see below.
- *     This single weight is why Los Angeles, the fastest club in the league,
- *     showed up on the pre-game screen as the 4th-best roster and finished
- *     6th over three hundred seasons.
+ *   1. THE LEAGUE IS COMPRESSED NOW. temper() in teams.ts pulls the thirty
+ *      clubs toward each other before anybody plays (see TALENT_SPREAD), so
+ *      every weight below was taken in a different environment from the one
+ *      that produced the old numbers.
+ *   2. THE INSTRUMENT WAS WRONG. sensitivity.ts bumped every rating by a flat
+ *      +0.1, which against the clubs that actually exist is four standard
+ *      deviations of power, six of contact and SIXTEEN of an arm's zone rate —
+ *      every reading taken from a part of the curve no roster occupies, and no
+ *      two ratings read at the same place. It now bumps each rating by two
+ *      sigma of its own between-club spread. See the fourth fault in that
+ *      file's header.
  *
- * ⚠️ SPEED IS A THRESHOLD STAT AND A LINEAR WEIGHT CANNOT SAY SO. Bumping a
- * whole lineup +0.1 is worth nothing measurable; bumping it +0.5 is worth
- * fifteen points of win rate. The difference is EXTRA_BASE_SPEED (1.15 in
- * inning.ts): legs pay in a LUMP when a man crosses it and pay almost nothing
- * either side. So the lump is priced as a lump. Steals and the double play do
- * scale continuously, which is what the small linear term is for.
+ * Measured over 3,480 games a subject, five subjects, per-game run
+ * differential. Weight, and the 95% interval on the run-diff delta it came
+ * from:
  *
- * ponytail: bunt has no term at all. Measured at 0.02 points of win rate, it
- * is a rounding error on a club total — and a weight of zero written out is a
- * weight somebody will "fix" later. It is a real rating that decides real
- * plate appearances; it is just not how you tell two ROSTERS apart.
+ *   power     2.67    +0.520 ± 0.086    <- and it is the biggest lever by far
+ *   contact   1.60     +0.232 ± 0.084   the anchor; see fault 3
+ *   vision    1.18     +0.135 ± 0.085   resolved, but only just
+ *   clutch    0.57     +0.198 ± 0.085
+ *   speed     0.45     +0.148 ± 0.084   resolved, but only just; see below
+ *   bunt      0.01     +0.002 ± 0.084   ⚠ not measurable — no term, see below
+ *
+ * ⚠️ POWER IS THE LEVER, AND MORE SO THAN ANYBODY THOUGHT. It was 0.9 by
+ * guess, then 1.46 by the broken instrument, and it is 2.67 read properly —
+ * two thirds again as much as contact rather than nine tenths of it. This is
+ * the single number in the file most worth not breaking.
+ *
+ * ⚠️ SPEED IS A THRESHOLD STAT AND A LINEAR WEIGHT CANNOT SAY SO. Legs pay in
+ * a LUMP when a man crosses EXTRA_BASE_SPEED (1.15, in inning.ts) and pay
+ * little either side, so the lump is priced as a lump. The two-sigma bump
+ * carries SOME men across that line and not others, which means the 0.45 above
+ * is the combined effect and this instrument cannot split it from the 0.35.
+ * The pair was validated together — against true win rate over 8,700 games it
+ * beat the old pair — but the SPLIT between them is not measured, and a script
+ * that wanted to measure it would have to sweep the threshold itself.
+ *
+ * ponytail: bunt still has no term at all. Measured at two thousandths of a run
+ * with an interval forty times that wide, it is not a rounding error on a club
+ * total, it is nothing — and a weight of zero written out is a weight somebody
+ * will "fix" later. It is a real rating that decides real plate appearances; it
+ * is just not how you tell two ROSTERS apart.
  */
 export const playerValue = (p: Player): number =>
   p.contact * 1.6 +
-  p.power * 1.46 +
-  p.clutch * 0.51 +
-  p.vision * 0.32 +
-  p.speed * 0.1 +
+  p.power * 2.67 +
+  p.clutch * 0.57 +
+  p.vision * 1.18 +
+  p.speed * 0.45 +
   (p.speed >= EXTRA_BASE_SPEED ? 0.35 : 0) +
   gloveOf(p) * 0.3;
 
@@ -99,9 +119,24 @@ export const playerValue = (p: Player): number =>
  * 1.4 on the strength of a note in teams.ts calling a high zone rate the
  * single biggest lever on a staff. That note was true when it was written and
  * is not true now: BREAK did not exist then, and an arm that can miss bats has
- * made throwing strikes far less of a trade. Measured, +0.05 of zone rate buys
- * 0.33 points of win rate against break's 3.33. Twenty to one, the other way
- * round from what this file used to claim.
+ * made throwing strikes far less of a trade.
+ *
+ * Re-measured 2026-08-29 on the compressed league with a per-rating step — see
+ * the note on the hitters above for why both of those changed:
+ *
+ *   break     0.68    +0.145 ± 0.083
+ *   clutch    0.61    +0.107 ± 0.084
+ *   stamina   0.43    -0.004 ± 0.084   ⚠ NOT MEASURED — left where it was
+ *   zoneRate  0.07    +0.012 ± 0.084   ⚠ NOT MEASURED — left where it was
+ *
+ * ⚠️ TWO OF THESE FOUR ARE THE OLD NUMBERS AND THAT IS DELIBERATE. Stamina and
+ * zone rate both came back inside their own error bars, which means the
+ * experiment did not measure them — it sampled them. sensitivity.ts says in its
+ * own footer to raise the game count or leave the weight alone, and pasting a
+ * number in because it printed is exactly the failure that file exists to stop.
+ * Both are between-club spreads of about 0.007, the tightest ratings in the
+ * league, so resolving them needs roughly ten times the games; until somebody
+ * spends that, 0.43 and 0.07 stand.
  *
  * ⚠️ VELOCITY IS WORTH EXACTLY ZERO AND IS NOT PRICED AT ALL. Not "small" —
  * zero, to every decimal, in every simulated game. The AI hitter draws its
@@ -113,8 +148,8 @@ export const playerValue = (p: Player): number =>
  * simulated. See the note in ai.ts.
  */
 export const armValue = (a: Pitcher): number =>
-  (a.clutch ?? 1) * 0.76 +
-  (a.break ?? 1) * 0.73 +
+  (a.clutch ?? 1) * 0.61 +
+  (a.break ?? 1) * 0.68 +
   (a.stamina ?? 1) * 0.43 +
   (a.zoneRate / 0.55) * 0.07;
 

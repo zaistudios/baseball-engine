@@ -49,6 +49,7 @@ import type { Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
 import type { BatterStats } from '../core/hit.ts';
 import { IDENTITIES, type Identity } from './identity.ts';
+import { TALENT_SPREAD } from './tuning.ts';
 
 // ------------------------------------------------------------- the hitters
 
@@ -2472,7 +2473,7 @@ export const starterOf = (t: Team): Pitcher => t.rotation[0]!;
  * before touching the numbers in identity.ts. A tag that disagrees with the
  * paragraph above it is the bug.
  */
-export const LEAGUE: readonly Team[] = [
+const WRITTEN: readonly Team[] = [
   // The big markets. Two clubs each, and the money is the reason they can —
   // though only one of the six is actually spending it. See LAA and LAC.
   { name: 'New York City Empire', abbr: 'NYE', lineup: NYE, rotation: NYE_ARMS, bullpen: NYE_PEN, bench: NYE_BENCH, identity: IDENTITIES.BIG_INNING },
@@ -2517,6 +2518,219 @@ export const LEAGUE: readonly Team[] = [
   { name: 'Texas Wildcats', abbr: 'TEX', lineup: TEX, rotation: TEX_ARMS, bullpen: TEX_PEN, bench: TEX_BENCH, identity: IDENTITIES.HACKERS },
   { name: 'Toronto Travelers', abbr: 'TOR', lineup: TOR, rotation: TOR_ARMS, bullpen: TOR_PEN, bench: TOR_BENCH, identity: IDENTITIES.STEADY },
 ];
+
+// ------------------------------------------------- how far apart they are
+
+/**
+ * THE LADDER, NARROWED. Every club above is written as itself; this pulls the
+ * thirty of them toward each other before anybody plays a game.
+ *
+ * ⚠️ READ THE NOTE ON TALENT_SPREAD IN tuning.ts FIRST — it is where the
+ * measurement lives and where the knob is. The short version: as written, the
+ * ladder ran 72.4% to 30.3%, which is twice and a half real baseball's spread,
+ * and over a full season it produced a champion better than any club that has
+ * ever existed.
+ *
+ * ⚠️ THE CLUB'S MEAN MOVES; THE MAN'S DISTANCE FROM IT DOES NOT. For each
+ * rating, a club's average is pulled toward the league's average, and every
+ * player is then placed at exactly the offset from his own club's average that
+ * teams.ts gave him. Two consequences, and both are the point:
+ *
+ *   1. A lineup still has a three-hitter and a hole at the bottom. Compressing
+ *      raw ratings toward one league mean would have flattened THAT too, and
+ *      the batting order is a decision precisely because the nine men are not
+ *      the same.
+ *   2. The ladder is very nearly preserved — Spearman 0.97 against the league
+ *      as written — but it is NOT preserved exactly, and an earlier draft of
+ *      this comment claimed it was. temper.test.ts caught the claim. Two real
+ *      reasons, both of them things value.ts is deliberately doing:
+ *
+ *        - gloveOf() multiplies range by a BUILD factor, and a machine being
+ *          surer-handed than a human is an identity, not a rung of the talent
+ *          ladder. It does not compress, so a club whose edge is mostly leather
+ *          keeps more of it than one whose edge is mostly bats.
+ *        - playerValue() pays a LUMP at EXTRA_BASE_SPEED rather than a slope,
+ *          so pulling a lineup's legs toward the league average carries some
+ *          men across that line and not others. A threshold cannot be scaled.
+ *
+ *      The two clubs that move furthest are both the fast ones, which is the
+ *      threshold showing its work. Everything the rank is FOR still holds: it
+ *      is computed on the tempered clubs, which are the clubs that play, so the
+ *      card never disagrees with the season.
+ *
+ * ⚠️ IT IS APPLIED ONCE, HERE, AT THE ONE PLACE CLUBS ARE BORN. Everything
+ * downstream — the engine, value.ts, the ratings on the namecard — reads the
+ * tempered club and nothing has to know this happened. Doing it at read time
+ * instead would mean the card and the at-bat could disagree about a man.
+ *
+ * ponytail: a flat scale, not a curve. There is no reason to believe the
+ * distance between the first and second club should compress differently from
+ * the distance between the ninth and tenth, and inventing a curve to say so
+ * would be a shape nobody measured.
+ */
+const BAT_KEYS = ['power', 'contact', 'vision', 'clutch', 'bunt', 'speed'] as const;
+
+/**
+ * The arm ratings that are worth something and their defaults.
+ *
+ * ⚠️ THE DEFAULTS ARE THE ONES THE ENGINE ALREADY USES. Every read site of
+ * these is written `a.break ?? 1` or `a.speedBonus ?? 0`, so an arm with the
+ * field missing IS an arm at the default — tempering writes that value out
+ * explicitly rather than skipping him, or a club of undefineds would be immune
+ * to the compression its rivals got.
+ */
+const ARM_KEYS = {
+  zoneRate: 0.55,
+  break: 1,
+  clutch: 1,
+  stamina: 1,
+  speedBonus: 0,
+} as const;
+
+type ArmKey = keyof typeof ARM_KEYS;
+
+const mean = (xs: readonly number[]): number =>
+  xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;
+
+const armOf = (a: Pitcher, k: ArmKey): number => (a[k] ?? ARM_KEYS[k]) as number;
+
+function temper(written: readonly Team[], k: number): readonly Team[] {
+  if (k === 1) return written;
+
+  // Each club's average at each rating, then the league's average of those.
+  // ⚠️ AVERAGED OVER CLUBS, NOT OVER PLAYERS. A club is one rung of the ladder
+  // however many men it dresses, and a per-player mean would quietly weight a
+  // club with a deeper bench more heavily than one without.
+  const batMid: Record<string, number> = {};
+  for (const key of BAT_KEYS) {
+    batMid[key] = mean(written.map((t) => mean(t.lineup.map((p) => p[key]))));
+  }
+  // ⚠️ THE BENCH IS ITS OWN POPULATION WITH ITS OWN CENTRE, and the first cut
+  // of this got it wrong in a way bench.test.ts caught. That version moved a
+  // club's three reserves by the shift its LINEUP got, reasoning that a pinch
+  // hitter is measured against the man he replaces. What it actually did was
+  // OVERSHOOT: benches vary far less between clubs than nines do, so
+  // subtracting six tenths of a lineup's deviation pushed each bench past the
+  // league average and out the other side, and the spread across the thirty
+  // benches came out WIDER than before compression — and wider than the
+  // compressed lineups, which is the second, hidden talent ladder that test
+  // exists to forbid. Centring the bench on the bench average scales it by the
+  // same k as everything else, which is all that was ever wanted.
+  const benchMid: Record<string, number> = {};
+  for (const key of BAT_KEYS) {
+    const withBench = written.filter((t) => t.bench && t.bench.length > 0);
+    benchMid[key] = mean(withBench.map((t) => mean(t.bench!.map((p) => p[key]))));
+  }
+  const armMid: Record<string, number> = {};
+  for (const key of Object.keys(ARM_KEYS) as ArmKey[]) {
+    armMid[key] = mean(
+      written.map((t) => mean([...t.rotation, ...t.bullpen].map((a) => armOf(a, key)))),
+    );
+  }
+
+  /** Where a club's average sits after the pull, per rating. */
+  const shifted = (clubMean: number, leagueMean: number): number =>
+    leagueMean + (clubMean - leagueMean) * k;
+
+  return written.map((t): Team => {
+    const staff = [...t.rotation, ...t.bullpen];
+
+    const batShift: Record<string, number> = {};
+    for (const key of BAT_KEYS) {
+      const was = mean(t.lineup.map((p) => p[key]));
+      batShift[key] = shifted(was, batMid[key]!) - was;
+    }
+    const armShift: Record<string, number> = {};
+    for (const key of Object.keys(ARM_KEYS) as ArmKey[]) {
+      const was = mean(staff.map((a) => armOf(a, key)));
+      armShift[key] = shifted(was, armMid[key]!) - was;
+    }
+
+    const benchShift: Record<string, number> = {};
+    if (t.bench && t.bench.length > 0) {
+      for (const key of BAT_KEYS) {
+        const was = mean(t.bench.map((p) => p[key]));
+        benchShift[key] = shifted(was, benchMid[key]!) - was;
+      }
+    }
+
+    /** One hitter, moved by whichever group's shift he belongs to. */
+    const bat = (shift: Record<string, number>) => (p: Player): Player => {
+      const out = { ...p };
+      for (const key of BAT_KEYS) out[key] = Math.max(0.05, p[key] + (shift[key] ?? 0));
+      return out;
+    };
+
+    const arm = (a: Pitcher): Pitcher => {
+      const out = { ...a };
+      for (const key of Object.keys(ARM_KEYS) as ArmKey[]) {
+        const v = armOf(a, key) + armShift[key]!;
+        // zoneRate is a share of pitches and the rest are multipliers; both
+        // want a floor, and the share wants a ceiling it already has elsewhere.
+        out[key] = key === 'zoneRate' ? Math.max(0.2, Math.min(0.95, v)) : Math.max(0.05, v);
+      }
+      return out;
+    };
+
+    return {
+      ...t,
+      lineup: t.lineup.map(bat(batShift)),
+      rotation: t.rotation.map(arm),
+      bullpen: t.bullpen.map(arm),
+      ...(t.bench ? { bench: t.bench.map(bat(benchShift)) } : {}),
+    };
+  });
+}
+
+/**
+ * THE LEAGUE A FRANCHISE PLAYS IN, under its own rules. See rules.ts.
+ *
+ * ⚠️ BOTH SETTINGS ARE ROSTER TRANSFORMATIONS, WHICH IS WHY THEY LIVE HERE AND
+ * HAPPEN ONCE. `parity` is temper() above. `offence` is the run environment,
+ * and it is a flat multiplier on every hitter in the league — nobody gains an
+ * edge, the whole scoreboard moves. Doing either per-game would be the same
+ * arithmetic thirty thousand times to answer a question a season answers once,
+ * and would put a knob in the at-bat loop that the pre-game card could not see.
+ *
+ * ⚠️ OFFENCE MOVES THE BATS, NOT THE ARMS, and that is the honest direction for
+ * a knob labelled "run environment". Weakening thirty staffs to raise scoring
+ * would make every ERA in the record book a lie about the pitchers; making the
+ * hitters better says what actually happened in a lively year.
+ *
+ * ⚠️ IT DOES NOT COMPOUND WITH temper(). Compression moves each club's distance
+ * from the league mean; offence scales everybody by the same factor afterwards.
+ * A club that was average stays average, so the ladder is untouched by it.
+ */
+export function leagueUnder(parity: number, offence: number): readonly Team[] {
+  const base = temper(WRITTEN, parity);
+  if (offence === 1) return base;
+  const hit = (p: Player): Player => ({
+    ...p,
+    power: p.power * offence,
+    contact: p.contact * offence,
+  });
+  return base.map((t) => ({
+    ...t,
+    lineup: t.lineup.map(hit),
+    ...(t.bench ? { bench: t.bench.map(hit) } : {}),
+  }));
+}
+
+/**
+ * The thirty clubs at the shipped defaults — what an EXHIBITION plays and what
+ * every instrument in scripts/ measures. A franchise builds its own through
+ * leagueUnder() at kickoff and stores it in Season.rosters; nothing in a
+ * running season reads this.
+ */
+export const LEAGUE: readonly Team[] = temper(WRITTEN, TALENT_SPREAD);
+
+/**
+ * The clubs exactly as teams.ts writes them, compression not applied.
+ *
+ * Exported for scripts/sensitivity.ts and the tests that check tempering did
+ * what it says. Nothing that PLAYS should read this — see temper().
+ */
+export const LEAGUE_AS_WRITTEN = WRITTEN;
 
 /** A club by its three letters. */
 export const club = (abbr: string): Team => LEAGUE.find((t) => t.abbr === abbr)!;

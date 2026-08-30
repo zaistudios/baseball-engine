@@ -91,3 +91,63 @@ export const FOUL_BOOST = 2.7;
  * to switch the whole thing off.
  */
 export const HOME_EDGE = 1.2;
+
+/**
+ * HOW FAR APART THE CLUBS ARE ALLOWED TO BE. A multiplier on every club's
+ * distance from the league's average at each rating: 1 leaves teams.ts exactly
+ * as written, 0 would make all thirty clubs identical.
+ *
+ * ⚠️ WHY THIS EXISTS. Measured over 17,400 games with no compression at all,
+ * the ladder in teams.ts ran from Chicago at 72.4% to Phoenix at 30.3% — a
+ * FORTY-TWO POINT spread in true talent. Real baseball's is about sixteen: the
+ * best clubs are true-talent .580 and the worst are .420, and everything you
+ * see beyond that in a real standings table is luck. Forty-two points is not a
+ * league, it is two leagues playing each other, and over 162 games it produced
+ * a 124-38 champion — better than any team in the history of the sport — and a
+ * .765 winner every single year.
+ *
+ * ⚠️ IT COMPRESSES BETWEEN CLUBS, NOT WITHIN THEM. See temper() in teams.ts:
+ * each club's AVERAGE is pulled toward the league's, and every player keeps his
+ * exact distance from his own club's average. So the stacked club is still
+ * stacked and the thin one is still thin — there is just less daylight between
+ * them — and a lineup still has a star at the top and a hole at the bottom,
+ * which is the half of the spread that makes a batting order worth setting.
+ *
+ * ⚠️ THE LADDER'S ORDER IS UNTOUCHED. This scales distances; it never reorders
+ * anybody. The club teams.ts says is best is still best, which is what keeps
+ * value.ts's rank meaningful and this from being a rewrite of thirty clubs.
+ *
+ * Measured with `node scripts/league.ts 12` — 10,440 games at each value, every
+ * club against every other, home and away, form off. Best club, worst club, and
+ * the standard deviation of TRUE win rate across the thirty:
+ *
+ *   1.00   71.3%  30.6%   sd 11.6   as written: two leagues playing each other
+ *   0.60   63.8%  34.5%   sd  7.5
+ *   0.50   62.5%  34.9%   sd  7.1
+ *   0.40   61.9%  37.6%   sd  6.5
+ *   0.30   63.1%  38.9%   sd  6.3   the curve has flattened; see below
+ *
+ * ⚠️ TUNE ON THE SD, NOT ON THE BEST CLUB. The best and worst rows are a max
+ * and a min over thirty draws and they wobble on noise — 0.30 printing a HIGHER
+ * best club than 0.40 is that wobble, not a reversal. The SD uses all thirty.
+ *
+ * ⚠️ AND THE TABLE ABOVE IS NOT WHAT DECIDED IT. A true-talent round robin is
+ * not a thing anybody sees; a player sees one standings table in September.
+ * `node scripts/season.ts 24 162` plays that out with form.ts running, which is
+ * the combination that ships, and the two knobs have to be read together — form
+ * ADDS about half a point of season SD (see FORM_SWING), so the compression is
+ * set slightly tighter than it would be on its own. At 0.35:
+ *
+ *     best 104-58   (real ~102-60)
+ *     worst 56-106  (real ~58-104)
+ *     win% SD 7.1   (real ~6.8)
+ *     separation 64.7%
+ *
+ * ⚠️ SEPARATION IS NOT A TUNING TARGET AND IT LOOKS LIKE ONE. It is how often
+ * the better roster finishes ahead — but "better" there means better ACCORDING
+ * TO clubValue, and clubValue correlates only about 0.53 with a club's true win
+ * rate (measured over 8,700 games). So a low separation number is mostly
+ * telling you value.ts is an imprecise instrument, not that the league is a
+ * coin flip. Tune the shape on SD; read separation as a floor.
+ */
+export const TALENT_SPREAD = 0.35;

@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { simulateGame } from '../sim.ts';
 import { boxScore, newGame, recordPlay } from '../game.ts';
 import { club } from '../teams.ts';
-import { newSeason, playDay, REGULAR_DAYS } from '../franchise.ts';
+import { newSeason, playDay, regularDays } from '../franchise.ts';
 import {
   EMPTY_BOOK,
   avg,
@@ -269,7 +269,7 @@ describe('a season keeps its own book', () => {
     // Nobody's club, so playDay() simulates the whole card every day.
     let s = newSeason('---', 77);
     expect(s.stats).toBeUndefined();
-    for (let d = 0; d < REGULAR_DAYS; d++) s = playDay(s);
+    for (let d = 0; d < regularDays(s); d++) s = playDay(s);
 
     const book = s.stats!;
     // Fourteen days of a thirty-club league is a lot of baseball, and every

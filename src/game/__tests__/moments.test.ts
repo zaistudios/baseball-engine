@@ -10,11 +10,14 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { newSeason, standings, teamOf, REGULAR_DAYS, loadSeason, saveSeason, type Season } from '../franchise.ts';
-import { momentOn, decide, valueShift, MOMENT_DAYS, FAIR } from '../moments.ts';
+import { newSeason, regularDays, standings, teamOf, loadSeason, saveSeason, type Season } from '../franchise.ts';
+import { momentOn, decide, valueShift, momentDays, FAIR } from '../moments.ts';
 import { clubValue } from '../value.ts';
 import { LEAGUE } from '../teams.ts';
 import { simulateGame } from '../sim.ts';
+
+const GAMES14 = regularDays(newSeason('ALB', 0));
+const DAYS14 = momentDays(newSeason('ALB', 0));
 
 const at = (you: string, day: number, seed = 12345): Season => ({
   ...newSeason(you, seed),
@@ -23,34 +26,34 @@ const at = (you: string, day: number, seed = 12345): Season => ({
 
 describe('when they fire', () => {
   it('gives exactly two moments, both inside the regular season', () => {
-    expect(MOMENT_DAYS).toHaveLength(2);
-    for (const d of MOMENT_DAYS) {
+    expect(DAYS14).toHaveLength(2);
+    for (const d of DAYS14) {
       expect(d).toBeGreaterThan(0);
-      expect(d).toBeLessThan(REGULAR_DAYS);
+      expect(d).toBeLessThan(GAMES14);
     }
   });
 
   it('has nothing to say on an ordinary day', () => {
-    for (let d = 0; d < REGULAR_DAYS; d++) {
-      if (MOMENT_DAYS.includes(d)) continue;
+    for (let d = 0; d < GAMES14; d++) {
+      if (DAYS14.includes(d)) continue;
       expect(momentOn(at('ALB', d), d)).toBeNull();
     }
   });
 
   it('never fires in the bracket', () => {
-    for (let d = REGULAR_DAYS; d < REGULAR_DAYS + 3; d++) {
+    for (let d = GAMES14; d < GAMES14 + 3; d++) {
       expect(momentOn(at('ALB', d), d)).toBeNull();
     }
   });
 
   it('offers the deadline first and the bench second', () => {
-    expect(momentOn(at('ALB', MOMENT_DAYS[0]!))!.headline).toBe('THE DEADLINE');
-    expect(momentOn(at('ALB', MOMENT_DAYS[1]!))!.headline).toBe('THE BENCH');
+    expect(momentOn(at('ALB', DAYS14[0]!))!.headline).toBe('THE DEADLINE');
+    expect(momentOn(at('ALB', DAYS14[1]!))!.headline).toBe('THE BENCH');
   });
 
   it('is the same offer on a reload — it is drawn from the season seed', () => {
-    const a = momentOn(at('MNE', MOMENT_DAYS[0]!, 999));
-    const b = momentOn(at('MNE', MOMENT_DAYS[0]!, 999));
+    const a = momentOn(at('MNE', DAYS14[0]!, 999));
+    const b = momentOn(at('MNE', DAYS14[0]!, 999));
     expect(a!.choices.map((c) => c.label)).toEqual(b!.choices.map((c) => c.label));
   });
 
@@ -59,14 +62,14 @@ describe('when they fire', () => {
     // the offers are not simply constant. "Trades are random" is the ask.
     const seen = new Set<string>();
     for (let seed = 0; seed < 30; seed++) {
-      const m = momentOn(at('MNE', MOMENT_DAYS[0]!, seed));
+      const m = momentOn(at('MNE', DAYS14[0]!, seed));
       if (m) seen.add(m.choices.map((c) => c.label).join('|'));
     }
     expect(seen.size).toBeGreaterThan(1);
   });
 
   it('fires once — the day is marked decided and does not come back', () => {
-    const day = MOMENT_DAYS[0]!;
+    const day = DAYS14[0]!;
     const s = at('ALB', day);
     const m = momentOn(s)!;
     const after = decide(s, m, 0);
@@ -75,13 +78,13 @@ describe('when they fire', () => {
   });
 
   it('does not advance the day — the game still has to be played', () => {
-    const day = MOMENT_DAYS[0]!;
+    const day = DAYS14[0]!;
     const s = at('ALB', day);
     expect(decide(s, momentOn(s)!, 0).day).toBe(day);
   });
 
   it('files a roster line on the wire for whatever you chose', () => {
-    const s = at('ALB', MOMENT_DAYS[0]!);
+    const s = at('ALB', DAYS14[0]!);
     const m = momentOn(s)!;
     for (let i = 0; i < m.choices.length; i++) {
       const after = decide(s, m, i);
@@ -94,7 +97,7 @@ describe('when they fire', () => {
 
   it('offers a real choice, never a single button', () => {
     for (const abbr of LEAGUE.map((t) => t.abbr)) {
-      for (const day of MOMENT_DAYS) {
+      for (const day of DAYS14) {
         const m = momentOn(at(abbr, day));
         if (m) expect(m.choices.length, `${abbr} day ${day}`).toBeGreaterThanOrEqual(2);
       }
@@ -103,7 +106,7 @@ describe('when they fire', () => {
 });
 
 describe('the deadline keeps the league legal and honest', () => {
-  const day = MOMENT_DAYS[0]!;
+  const day = DAYS14[0]!;
 
   it('leaves BOTH clubs with nine hitters and a full staff', () => {
     for (const abbr of LEAGUE.map((t) => t.abbr)) {
@@ -178,7 +181,7 @@ describe('the deadline keeps the league legal and honest', () => {
 });
 
 describe('the bench changes how you play and nothing else', () => {
-  const day = MOMENT_DAYS[1]!;
+  const day = DAYS14[1]!;
 
   it('does not move a single rating', () => {
     const s = at('DET', day);
@@ -248,7 +251,7 @@ describe('a decided season survives a save', () => {
   });
 
   it('round-trips `decided` through localStorage', () => {
-    const s = at('MNE', MOMENT_DAYS[0]!);
+    const s = at('MNE', DAYS14[0]!);
     const after = decide(s, momentOn(s)!, 0);
     saveSeason(after);
     const back = loadSeason()!;
@@ -256,24 +259,24 @@ describe('a decided season survives a save', () => {
     // ...and the traded roster came back with it, or the trade did not happen.
     expect(teamOf(back, 'MNE').lineup.map((p) => p.id))
       .toEqual(teamOf(after, 'MNE').lineup.map((p) => p.id));
-    expect(momentOn(back, MOMENT_DAYS[0]!)).toBeNull();
+    expect(momentOn(back, DAYS14[0]!)).toBeNull();
   });
 
   it('a season saved before moments existed loads as one that owes you both', () => {
     // The forward-compatibility case: no `decided` key at all.
-    const s = at('MNE', MOMENT_DAYS[0]!);
+    const s = at('MNE', DAYS14[0]!);
     const legacy = { ...s } as Partial<Season>;
     delete legacy.decided;
     store._raw.set('asb.season.v1', JSON.stringify({ ...legacy, v: 4 }));
     const back = loadSeason()!;
     expect(back.decided).toEqual([]);
-    expect(momentOn(back, MOMENT_DAYS[0]!)).not.toBeNull();
+    expect(momentOn(back, DAYS14[0]!)).not.toBeNull();
   });
 });
 
 describe('the standings still work after a trade', () => {
   it('re-ranks off the traded rosters, not the league file', () => {
-    const s = at('OKC', MOMENT_DAYS[0]!, 1234);
+    const s = at('OKC', DAYS14[0]!, 1234);
     const m = momentOn(s);
     if (!m) return;
     const after = decide(s, m, 0);
