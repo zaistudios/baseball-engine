@@ -142,7 +142,39 @@ export const SERIES: readonly Choice<'series'>[] = [
 ];
 
 /**
+ * THE BIGGEST BRACKET THIS MANY CLUBS CAN ACTUALLY FILL.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE LEAGUE IS NOT THIRTY CLUBS ANY MORE. An imported
+ * league can be any even number from two up, and a four-club league asked for
+ * an eight-club bracket seeds `standings().slice(0, 8)` — which quietly returns
+ * four — and hands that to pairUp(), which pairs slot `i` with slot `n-1-i`. On
+ * an odd survivor list that pairs the middle club with ITSELF, and the round
+ * never resolves.
+ *
+ * ⚠️ CLAMPED WHERE THE RULES ARE MADE, NOT WHERE THE BRACKET IS DRAWN, and
+ * that is the whole reason it is one function called in two places rather than
+ * a guard inside seeds(). `bracket` is read twice for two different purposes —
+ * roundsIn() lays out the calendar and seeds() lays out the pairings — so a
+ * bracket that shrank at one read site and not the other would give you a
+ * season whose last round has days on the calendar and no games in it, which
+ * ends with no champion.
+ *
+ * Down to the nearest power of two, because a round has to halve.
+ */
+export function bracketFor(wanted: number, clubs: number): number {
+  const cap = Math.max(2, Math.min(wanted, clubs));
+  return 2 ** Math.floor(Math.log2(cap));
+}
+
+/**
  * A trusted Rules out of anything at all.
+ *
+ * `clubs` is how many clubs the league actually has, and passing it clamps the
+ * bracket to one they can fill — see bracketFor(). It is optional because the
+ * bound is a property of a LEAGUE rather than of a rules blob, and the two
+ * places that know the answer both pass it: newSeason() knows the league it is
+ * about to seed rosters from, and loadSeason() knows how many clubs the save
+ * carries. Omit it and the bracket is only checked against the list, as before.
  *
  * ⚠️ IT CLAMPS RATHER THAN REFUSES, AND THAT IS THE OPPOSITE OF loadSeason().
  * A bad `day` or a missing roster means a season that cannot be played and the
@@ -153,7 +185,7 @@ export const SERIES: readonly Choice<'series'>[] = [
  * validates that itself and refuses the save, because a schedule of the wrong
  * length is a standings table nobody can finish.
  */
-export function cleanRules(raw: unknown): Rules {
+export function cleanRules(raw: unknown, clubs?: number): Rules {
   const r = (raw ?? {}) as Partial<Record<keyof Rules, unknown>>;
   const num = (v: unknown, lo: number, hi: number, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
@@ -173,7 +205,10 @@ export function cleanRules(raw: unknown): Rules {
     // odd or it can end level — neither is a property a clamp can enforce, and
     // a league with a six-club bracket would hang the round arithmetic rather
     // than play slightly wrong.
-    bracket: oneOf(r.bracket, BRACKET, DEFAULT_RULES.bracket),
+    bracket: bracketFor(
+      oneOf(r.bracket, BRACKET, DEFAULT_RULES.bracket),
+      clubs ?? Number.POSITIVE_INFINITY,
+    ),
     series: oneOf(r.series, SERIES, DEFAULT_RULES.series),
   };
 }

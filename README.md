@@ -19,6 +19,7 @@ Rebuild in progress. Playable end to end: a full nine-encounter run in the brows
 src/core/
   rng.ts         seeded RNG (mulberry32) — determinism is a hard requirement
   timing.ts      grade(offsetMs) — pure swing grading, no engine underneath
+  delivery.ts    the same, for the mound — when you let go, and what it is worth
   hitTables.ts   outcome probability tables, ported from the prototype
   hit.ts         resolveSwing() — stat, power-swing and location modifiers
   atBat.ts       the count — balls, strikes, walks, fouls, whiff ≠ strikeout
@@ -193,6 +194,45 @@ ALLOWED.** A starter yanked in the fourth hands the game to the pen, so what
 rest buys or spends is **innings from your starter** — measure that. It was
 written when a spent starter's club could give up slightly FEWER runs, because
 relievers had no cross-game rest at all. They do now; see below.
+
+### Bring your own league
+
+**The clubs are not fixed.** `LEAGUE` on the title screen exports the whole
+league as JSON, and whatever you paste back is what the game plays — every
+screen follows: the pickers, the schedule, the standings, the rank on the
+pre-game card. Rename a club, re-rate a shortstop, cut the league to six, write
+thirty of your own.
+
+- **The box is transport, not an editor.** The document is ~230 kB over 8,700
+  lines (`node scripts/leaguedoc.ts`). Fill the box, copy it into something with
+  a search function, paste it back. **You can paste one club on its own** — it
+  goes over the club with the same abbreviation, which is the edit most people
+  actually want.
+- **Anything illegal is refused with the club named**, before a byte is stored:
+  `LAC rotation 1: puts hitters away with a knuckleball he never throws.` The
+  rules are `checkLeague()` in `league.ts`, and **the thirty that ship are
+  checked by the same function** — `teams.test.ts` asserts it rather than
+  keeping a second opinion about what a legal club is.
+- **A rating is refused only when it would break the engine** — not finite, or
+  negative. A 9.0-power hitter makes a silly league, which is your business; a
+  `NaN` makes every average, rate and probability downstream meaningless.
+- **What a league must have, and why:** an even number of clubs, two or more
+  (the schedule is a circle-method round robin, and an odd count pairs a club
+  with itself); exactly nine hitters (the eight fielding positions and the DH
+  are filled from the batting order, so eight men leaves somebody's position
+  unmanned); at least one starter and one reliever; an out pitch a man actually
+  throws; and unique names — **the stat book and the rest table are keyed by
+  name**, so two men called the same thing share one line and one set of legs.
+- **Parity still means what it says.** An imported league goes in where
+  `teams.ts` goes in, so `temper()` applies your chosen parity to it exactly
+  once. BRUTAL is a parity of 1, which is temper() handing back what it was
+  given, untouched.
+- **A franchise already in progress keeps the clubs it started with.** A season
+  owns its rosters, and `loadSeason()` validates a save against those rather
+  than against the current league — so importing is something you do between
+  franchises without losing the one you are in. The playoff bracket is pinned to
+  the league size at kickoff, so a four-club league cannot be asked for an
+  eight-club postseason.
 
 ### Every club plays its own way
 
@@ -400,12 +440,28 @@ the league. They are matched on RECORD, not on a stat line: see `teams.ts` and
 
 | Half | You | Controls |
 |---|---|---|
-| Top | **Pitch.** Pick the pitch and the spot, manage the pen. | `1`–`5` pitch, `W/A/S/D/X` spot, `SPACE` throw, `B` bullpen |
+| Top | **Pitch.** Pick the pitch and the spot, then *throw* it. Manage the pen. | `1`–`5` pitch, `W/A/S/D/X` spot, `SPACE` starts the arm, `SPACE` **again** to let go, `B` bullpen |
 | Bottom | **Hit,** and send runners. | `SPACE` (or click) to start the pitch, `SPACE` to swing, `SPACE` **again** to check it, `S` to steal |
+
+**Both halves are timed now.** The mound used to be a menu — pick, press,
+watch the dice. The second press is the release: a marker sweeps the bar under
+the plate and where you let go of it is your COMMAND on that pitch, feeding
+`pitchToSpot()`'s `control` exactly the way fatigue already did. Painting one
+buys 15% on hitting your spot, a rushed or dragged release costs 18%, and
+letting the arm empty on its own costs 45% — but **a competent release is worth
+exactly 1.0**, which is what every arm in the headless sim throws at, so the
+league you are measured against did not move. The window scales with the arm's
+signature (a painter's is wider, a knuckleballer's narrower) and with the
+difficulty level, same as the swing's. See `core/delivery.ts`.
+
+Under the throw button, **the pitch chart**: what you have thrown this hitter,
+where you called it, where it actually crossed, how it left your hand and what
+it came to. `low away → middle` is the mistake pitch, written down.
 
 ```
 src/game/
   teams.ts   the thirty clubs, their nines and their staffs — EDIT HERE FIRST
+  league.ts  ...or bring your own: export the clubs, edit them, paste them back
   identity.ts how a club PLAYS — eight archetypes, four knobs, no ratings
   rotation.ts who starts, who relieves, and what last night cost each of them
   franchise.ts the season: schedule, standings, the bracket, rosters, save

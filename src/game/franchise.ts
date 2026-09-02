@@ -48,6 +48,7 @@ import {
   DEFAULT_GAMES,
   DEFAULT_RULES,
   MAX_GAMES,
+  bracketFor,
   cleanRules,
   roundsIn,
   winsNeeded,
@@ -268,14 +269,32 @@ export { DEFAULT_GAMES, MAX_GAMES, LENGTHS, DEFAULT_RULES, type Rules } from './
  * season longer than fifty-eight games simply comes round again — which is
  * right: that is how a club ends up facing a division rival six times and
  * somebody across the league four.
+ *
+ * ⚠️ THE CLUBS ARE AN ARGUMENT, NOT `LEAGUE`, AND THAT IS A FIX. This read the
+ * module-level league, so a season's fixtures were laid out from whatever
+ * league was loaded WHEN THE SCHEDULE WAS ASKED FOR rather than from the clubs
+ * the season actually contains. Import a league and resume a franchise and it
+ * would deal a card of teams that were not in it, against results that named
+ * teams it no longer had. The season already owns its rosters — this is the
+ * last place that was still going around them.
+ *
+ * ⚠️ AN EVEN NUMBER OF CLUBS IS REQUIRED, and checkLeague() is what requires
+ * it. The pairing below walks `i` up to `n/2` and pairs it with `n-1-i`; on an
+ * odd count the middle index meets itself and a club is scheduled against
+ * nobody. The thirty that ship are even, so nothing here changed.
  */
-const CACHE = new Map<number, readonly (readonly Matchup[])[]>();
+const CACHE = new Map<string, readonly (readonly Matchup[])[]>();
 
-export function schedule(games: number): readonly (readonly Matchup[])[] {
-  const hit = CACHE.get(games);
+export function schedule(
+  games: number,
+  abbrs: readonly string[],
+): readonly (readonly Matchup[])[] {
+  // Keyed by the clubs as well as the length: two leagues of the same size are
+  // two different schedules, and a cache that could not tell them apart would
+  // hand one season the other's fixtures.
+  const key = `${games}|${abbrs.join(',')}`;
+  const hit = CACHE.get(key);
   if (hit) return hit;
-
-  const abbrs = LEAGUE.map((t) => t.abbr);
   const n = abbrs.length;
   const rot = abbrs.slice(1);
   const days: Matchup[][] = [];
@@ -296,9 +315,20 @@ export function schedule(games: number): readonly (readonly Matchup[])[] {
   }
 
   const out: readonly (readonly Matchup[])[] = days.slice(0, games);
-  CACHE.set(games, out);
+  CACHE.set(key, out);
   return out;
 }
+
+/**
+ * THE CLUBS THIS SEASON IS PLAYED BETWEEN, in the order it was built with.
+ *
+ * ⚠️ NOT SORTED, AND NOT `LEAGUE`. The schedule is dealt off this order, so
+ * sorting it here would deal a different card than the one a franchise already
+ * in progress has been playing. Insertion order survives JSON round-tripping
+ * for keys that are not integer-like — three-letter abbreviations never are —
+ * so a save reopens on the fixtures it was saved on.
+ */
+export const clubsIn = (s: Season): readonly string[] => Object.keys(s.rosters);
 
 /**
  * THE CALENDAR IS ONE CURSOR. `day` indexes the schedule through the regular
@@ -348,7 +378,12 @@ export const newSeason = (
   games: number = DEFAULT_GAMES,
   rules: Rules = DEFAULT_RULES,
 ): Season => {
-  const r: Rules = { ...rules, games };
+  // ⚠️ THE BRACKET IS PINNED TO THE LEAGUE HERE, ONCE. An imported league can
+  // be as small as two clubs, and `bracket` is read both by roundsIn() to lay
+  // out the calendar and by seeds() to lay out the pairings — so it has to be a
+  // number those two can agree on for the whole year, decided against the clubs
+  // this season is actually being built from. See bracketFor().
+  const r: Rules = { ...rules, games, bracket: bracketFor(rules.bracket, LEAGUE.length) };
   return {
     you,
     day: 0,
@@ -541,7 +576,7 @@ function survivors(s: Season, round: number): string[] {
  * and the majority plus the last game is that.
  */
 export function gamesOn(s: Season, day: number = s.day): readonly Matchup[] {
-  if (day < regularDays(s)) return schedule(regularDays(s))[day] ?? [];
+  if (day < regularDays(s)) return schedule(regularDays(s), clubsIn(s))[day] ?? [];
 
   // ⚠️ THERE IS NO BRACKET UNTIL THE SCHEDULE IS PLAYED OUT. seeds() will
   // happily hand back a top four of a table that is all zeroes — sorted on the
@@ -876,10 +911,15 @@ export interface Standing {
  * result in here would let the bracket re-seed itself halfway through.
  */
 export function standings(s: Season): Standing[] {
+  // ⚠️ THE SEASON'S OWN CLUBS, NOT `LEAGUE`. This built its rows from the
+  // module-level league, so a franchise resumed after a league had been
+  // imported produced a table of clubs that were not in it and dropped every
+  // result that named one that was. The season owns its rosters; the standings
+  // are a fold of its results over them.
   const rows = new Map<string, Standing>(
-    LEAGUE.map((t) => [
-      t.abbr,
-      { abbr: t.abbr, w: 0, l: 0, rf: 0, ra: 0, hf: 0, gb: 0, value: clubValue(teamOf(s, t.abbr)) },
+    clubsIn(s).map((abbr) => [
+      abbr,
+      { abbr, w: 0, l: 0, rf: 0, ra: 0, hf: 0, gb: 0, value: clubValue(teamOf(s, abbr)) },
     ]),
   );
   const n = regularDays(s);
@@ -985,7 +1025,29 @@ export function loadSeason(): Season | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as Partial<Season> & { v?: number };
     if (s.v !== VERSION) return null;
-    if (typeof s.you !== 'string' || !LEAGUE.some((t) => t.abbr === s.you)) return null;
+
+    // ⚠️ A SAVE IS CHECKED AGAINST ITS OWN CLUBS, NEVER AGAINST `LEAGUE`, and
+    // this is the fix that makes an importable league safe to import. Both
+    // checks below used to ask the module-level league: is `you` one of its
+    // thirty, and does the save carry a roster for every one of them. So the
+    // first custom league anybody loaded silently refused every franchise in
+    // progress — different abbreviations, no match, `null`, and the CONTINUE
+    // button simply stopped being there with nothing to explain why.
+    //
+    // The season owns its rosters. That is the whole claim in this file's
+    // header, and asking the rosters rather than the league is what makes it
+    // true at the one boundary where it was not.
+    const rosters = s.rosters;
+    if (!rosters || typeof rosters !== 'object' || Array.isArray(rosters)) return null;
+    const abbrs = Object.keys(rosters);
+    // Two clubs minimum and an even number of them — the same bound
+    // checkLeague() holds an imported league to, for the same reason: the
+    // schedule pairs slot `i` with slot `n-1-i`, and an odd count pairs the
+    // middle club with itself. A save is a blob a user can hand-edit, so the
+    // bound is re-checked here rather than assumed from where it came.
+    if (abbrs.length < 2 || abbrs.length % 2 !== 0) return null;
+    if (abbrs.some((abbr) => !looksLikeTeam(rosters[abbr]))) return null;
+    if (typeof s.you !== 'string' || !abbrs.includes(s.you)) return null;
     // ⚠️ THE LENGTH IS READ FIRST, because every other bound below is derived
     // from it. A blob from before the picker has no `games` and is what it
     // always was; anything outside the range the builder is willing to lay down
@@ -996,13 +1058,18 @@ export function loadSeason(): Season | null {
     // garbled parity is a season that plays a bit differently; a garbled length
     // is a calendar nobody can finish, which is why this one number is still
     // checked here and thrown out rather than clamped.
-    const rules = cleanRules({ ...(s.rules ?? {}), games: s.rules?.games ?? s.games });
+    // Clamped against the clubs THIS SAVE has, not against the current league —
+    // a franchise saved in a thirty-club world keeps its eight-club bracket
+    // even if a four-club league has been imported since.
+    const rules = cleanRules(
+      { ...(s.rules ?? {}), games: s.rules?.games ?? s.games },
+      abbrs.length,
+    );
     const games = s.rules?.games ?? s.games ?? DEFAULT_GAMES;
     if (!Number.isInteger(games) || games < 2 || games > MAX_GAMES) return null;
     const end = games + roundsIn(rules.bracket) * rules.series;
     if (typeof s.day !== 'number' || s.day < 0 || s.day > end) return null;
     if (typeof s.seed !== 'number' || !Number.isFinite(s.seed)) return null;
-    if (!s.rosters || LEAGUE.some((t) => !looksLikeTeam(s.rosters![t.abbr]))) return null;
     if (!Array.isArray(s.results)) return null;
     const ok = s.results.every(
       (r) =>
@@ -1045,7 +1112,8 @@ export function loadSeason(): Season | null {
       seed: s.seed,
       games,
       rules,
-      rosters: s.rosters,
+      // Narrowed at the top of this function, where `abbrs` was read off it.
+      rosters,
       results: s.results,
       news,
       decided,

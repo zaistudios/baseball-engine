@@ -49,6 +49,7 @@ import type { Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
 import type { BatterStats } from '../core/hit.ts';
 import { IDENTITIES, type Identity } from './identity.ts';
+import { loadCustomLeague } from './league.ts';
 import { TALENT_SPREAD } from './tuning.ts';
 
 // ------------------------------------------------------------- the hitters
@@ -2702,7 +2703,7 @@ function temper(written: readonly Team[], k: number): readonly Team[] {
  * A club that was average stays average, so the ladder is untouched by it.
  */
 export function leagueUnder(parity: number, offence: number): readonly Team[] {
-  const base = temper(WRITTEN, parity);
+  const base = temper(SOURCE, parity);
   if (offence === 1) return base;
   const hit = (p: Player): Player => ({
     ...p,
@@ -2717,18 +2718,51 @@ export function leagueUnder(parity: number, offence: number): readonly Team[] {
 }
 
 /**
- * The thirty clubs at the shipped defaults — what an EXHIBITION plays and what
- * every instrument in scripts/ measures. A franchise builds its own through
+ * THE CLUBS THIS COPY OF THE GAME PLAYS WITH — yours if you have imported a
+ * league, the thirty written above if you have not.
+ *
+ * ⚠️ IT SITS WHERE `WRITTEN` USED TO, AND BOTH READERS HAD TO MOVE. LEAGUE is
+ * built from it, and so is leagueUnder(), which is what a FRANCHISE seeds
+ * Season.rosters from. Changing only the first would have given you a custom
+ * league on the club picker and the shipped thirty inside the season you then
+ * played — the same clubs on the standings table and different men inside them.
+ *
+ * ⚠️ THE CUSTOM DOCUMENT IS TREATED AS WRITTEN, NOT AS FINISHED. It goes in
+ * exactly where WRITTEN went in, so temper() applies parity to it once, at the
+ * strength the season chose. That is also the answer to "will you mangle my
+ * numbers": BRUTAL is a parity of 1, and temper() returns what it was given
+ * untouched at 1. See the header of league.ts.
+ *
+ * ⚠️ AN UNREADABLE STORED LEAGUE FALLS BACK RATHER THAN THROWING. This is
+ * module-evaluation time on the title screen — there is no UI yet to report to
+ * and nothing to catch a throw — so loadCustomLeague() hands back null for
+ * anything it cannot vouch for and the league screen explains it later.
+ */
+const SOURCE: readonly Team[] = loadCustomLeague() ?? WRITTEN;
+
+/**
+ * The clubs at the shipped defaults — what an EXHIBITION plays and what every
+ * instrument in scripts/ measures. A franchise builds its own through
  * leagueUnder() at kickoff and stores it in Season.rosters; nothing in a
  * running season reads this.
  */
-export const LEAGUE: readonly Team[] = temper(WRITTEN, TALENT_SPREAD);
+export const LEAGUE: readonly Team[] = temper(SOURCE, TALENT_SPREAD);
 
 /**
- * The clubs exactly as teams.ts writes them, compression not applied.
+ * The clubs as the SOURCE writes them, compression not applied — the document
+ * the league screen exports for editing.
  *
- * Exported for scripts/sensitivity.ts and the tests that check tempering did
- * what it says. Nothing that PLAYS should read this — see temper().
+ * ⚠️ THIS AND NOT `LEAGUE` IS WHAT ROUND-TRIPS. Exporting the compressed clubs
+ * and importing them back would apply temper() to numbers it had already moved,
+ * and a league would shrink toward its own mean a little more every time
+ * somebody edited one player in it.
+ */
+export const LEAGUE_SOURCE: readonly Team[] = SOURCE;
+
+/**
+ * The clubs exactly as teams.ts writes them, whatever has been imported over
+ * them. The way back to the shipped league, and the fixed point the tests that
+ * check tempering did what it says are measured against.
  */
 export const LEAGUE_AS_WRITTEN = WRITTEN;
 
@@ -2738,9 +2772,17 @@ export const club = (abbr: string): Team => LEAGUE.find((t) => t.abbr === abbr)!
 /**
  * The default pairing, for everything headless — sim.ts, scripts/balance.ts.
  * The all-human club at home against the all-machine one.
+ *
+ * ⚠️ THEY FALL BACK TO THE FIRST TWO CLUBS, because a custom league has no
+ * reason to contain an ALB or a DET. These are module constants read at import
+ * by sim.ts and by main.ts's opening `newGame`, so an undefined here is a black
+ * screen before anything has had a chance to say why. checkLeague() guarantees
+ * at least two clubs, which is what makes the index safe.
  */
-export const HOME: Team = club('ALB');
-export const AWAY: Team = club('DET');
+const defaultClub = (abbr: string, fallback: number): Team =>
+  LEAGUE.find((t) => t.abbr === abbr) ?? LEAGUE[fallback]!;
+export const HOME: Team = defaultClub('ALB', 0);
+export const AWAY: Team = defaultClub('DET', 1);
 
 /**
  * A player's batting stats, with no chemistry applied.

@@ -23,6 +23,15 @@
  * ROOKIE a setting that improves the opposition. The multiplier travels on
  * SwingInput, which only the human path fills in.
  *
+ * ⚠️ AND IT IS THE MOUND'S WINDOW TOO, SINCE core/delivery.ts. The release is
+ * the same kind of act as the swing — a press measured in milliseconds against
+ * windows — so one difficulty knob scales both, and `assist` is the number it
+ * scales them by. The rule above survives structurally rather than by care:
+ * watch mode never grades a release at all, it throws at 'good' directly, so
+ * there is no path on which a wider window could reach the opposition's arm.
+ * The blurbs below still talk about squaring the ball up because that is the
+ * half a player feels first; both windows move together.
+ *
  * ----------------------------------------------------------------- and then
  *
  * THE CALIBRATION IS NOT A DIFFICULTY. It is the bug fix timing.ts described

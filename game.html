@@ -89,6 +89,11 @@
         letter-spacing: 1px; color: var(--dim);
       }
       .pengo.on { color: var(--bad); border-color: var(--bad); }
+      /* ---- the pitch chart, under the throw button. The same widget as the
+         pen — a list of rows with a label, a name and two readings — so the
+         only rule it needs is a first column narrow enough for a pitch number
+         instead of a word. */
+      .chart .penrow { grid-template-columns: 12px 1fr auto auto; font-size: 10px; gap: 6px; }
       /* ---- the selected arm, in the pen panel and in the rotation picker.
          One rule for both: they are the same widget asking the same question
          about two different lists. */
@@ -192,10 +197,162 @@
       #pre .choices { display: flex; flex-direction: column; gap: 8px; }
       #pre .choice { padding: 12px; line-height: 1.6; }
       #pre .choice b { color: var(--hot); font-weight: 400; letter-spacing: 1px; }
-      #start h2 { font-size: 13px; letter-spacing: 2px; color: var(--hot); font-weight: 400; }
+      /* ---- the league screen's box. It is TRANSPORT for a quarter-megabyte
+         document — fill it, copy it out, edit it somewhere with a search
+         function, paste it back — so it wants to be tall, monospaced and
+         selectable. The body sets user-select:none for the game; a textarea
+         nobody can select from would make the copy step impossible. */
+      #start textarea {
+        width: 100%; min-height: 210px; padding: 8px; resize: vertical;
+        background: #0a0f0c; color: var(--ink); border: 1px solid var(--line);
+        font: 11px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        -webkit-user-select: text; user-select: text;
+      }
+      #start textarea:focus { outline: none; border-color: var(--hot); }
+      /* What the validator had to say. One line per complaint, and it has to
+         stay readable at twenty-five of them. */
+      #start .says {
+        border: 1px solid var(--bad); border-left-width: 3px; padding: 8px 10px;
+        font-size: 11px; line-height: 1.6; color: var(--ink);
+        max-height: 190px; overflow-y: auto;
+      }
       #start .keys { width: 100%; max-width: 820px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
       #start button { text-align: center; padding: 12px 8px; }
       #start button b { color: var(--hot); font-weight: 400; letter-spacing: 1px; }
+
+      /* ================================================================
+         THE MENU, DRESSED AS A BALLPARK.
+
+         ⚠️ IT IS ALL IN THE STYLESHEET AND NOT IN A SPRITE. Every mark below
+         is type, a border or a gradient — no image, no font to fetch — because
+         `npm run export` folds this whole screen into ONE offline html file and
+         an asset that has to be fetched is an asset that is not there when
+         somebody opens it off a USB stick.
+
+         The reference points are the menus these games actually had: RBI's
+         chunky all-caps on a dark field, and MVP 2005's carded team select with
+         the club's colours on it. The one control both of them lean on is the
+         ARROW DIAL — ◀ VALUE ▶ — and that is the widget this screen is built
+         around now. Six settings as six rows of little buttons was a wall you
+         read; six dials is six answers you can see at a glance.
+         ================================================================ */
+
+      /* The mown outfield, and the lights. Two gradients, no image. */
+      #start {
+        background:
+          repeating-linear-gradient(
+            100deg, transparent 0 46px, rgba(190, 255, 170, 0.016) 46px 92px
+          ),
+          radial-gradient(125% 85% at 50% -15%, #17271b 0%, var(--bg) 60%);
+      }
+
+      /* ---- the marquee. The one piece of big type on the screen. */
+      #start h1 {
+        font-size: 30px; letter-spacing: 10px; color: var(--ink);
+        font-weight: 400; text-align: center; line-height: 1.1;
+        text-shadow: 0 2px 0 #000, 0 0 26px rgba(216, 180, 74, 0.18);
+        margin-bottom: -2px;
+      }
+      /* The stitching: two dashed rules in the seam red, the way a ball is
+         seamed. Purely a rule under the title — it is the cheapest mark on this
+         screen and it does more for the theme than anything else here. */
+      #start .seam {
+        width: 100%; max-width: 300px; height: 18px;
+        position: relative; opacity: 0.8; margin: 6px 0 2px;
+      }
+      /* Two parallel arcs, both bowing the same way — which is how the seam
+         actually runs across a ball, and what tells the eye 'baseball' rather
+         than 'dashed rule'. An elliptical border-radius bends a dashed border
+         into a curve; that is the whole trick, and it costs two empty spans. */
+      #start .seam i {
+        position: absolute; left: 0; right: 0; height: 14px;
+        border-bottom: 2px dashed var(--bad);
+        border-radius: 0 0 50% 50% / 0 0 100% 100%;
+      }
+      #start .seam i:first-child { top: 0; }
+      #start .seam i:last-child { top: 6px; }
+
+      /* ---- the prompt, on a scoreboard strip. */
+      #start h2 {
+        font-size: 12px; letter-spacing: 4px; color: var(--hot); font-weight: 400;
+        background: #0a0f0c; border: 1px solid var(--line);
+        padding: 7px 20px; text-align: center;
+      }
+
+      /* ---- THE DIAL. One setting, its current value, and the two arrows that
+         change it. Full width of the grid: a setting is a question, and a
+         question that shares a row with another question reads as neither. */
+      #start .dial {
+        grid-column: 1 / -1; background: var(--panel);
+        border: 1px solid var(--line); border-left: 3px solid #2f3a2a;
+      }
+      #start .dial:hover { border-left-color: var(--hot); }
+      #start .dialhead {
+        font-size: 10px; letter-spacing: 2px; color: var(--dim);
+        padding: 8px 12px 0; text-align: left;
+      }
+      #start .dialbody { display: grid; grid-template-columns: 46px 1fr 46px; }
+      /* The arrows are the control. Big hit area, no border of their own — the
+         dial is the object, these are its two ends. */
+      #start .arrow {
+        background: transparent; border: 0; color: var(--dim);
+        font-size: 17px; padding: 0; line-height: 1; cursor: pointer;
+      }
+      #start .arrow:hover:not(:disabled) { color: var(--hot); background: #1b241d; }
+      #start .arrow:disabled { opacity: 0.2; cursor: default; }
+      #start .dialval { text-align: center; padding: 4px 6px 9px; }
+      #start .dialval b {
+        display: block; font-size: 17px; letter-spacing: 3px;
+        color: var(--hot); font-weight: 400;
+      }
+      #start .dialval span { font-size: 11px; color: var(--dim); line-height: 1.5; }
+      /* Where you are in the list, as bases on a card. Four settings deep is
+         not obvious from one value on its own. */
+      #start .pips { display: flex; gap: 4px; justify-content: center; padding-bottom: 8px; }
+      #start .pips i { width: 12px; height: 3px; background: #2f3a2a; }
+      #start .pips i.on { background: var(--hot); }
+
+      /* ---- THE CLUB CARDS. A cap patch, the name, and what the club IS —
+         which the old grid of thirty identical tiles never said, so picking one
+         was picking a three-letter code out of a hat. */
+      #start .clubcard {
+        display: flex; flex-direction: column; align-items: center; gap: 7px;
+        padding: 12px 8px 11px;
+      }
+      #start .patch {
+        width: 48px; height: 48px; border-radius: 50%; display: grid;
+        place-items: center; font-size: 13px; letter-spacing: 1px;
+        color: #0d1210; font-weight: 700;
+        box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.28), 0 0 0 2px rgba(0, 0, 0, 0.35);
+      }
+      /* A fixed two-line well for the name, so a club called Los Angeles
+         Aqueducts does not stand a row taller than one called Chicago Ivy. */
+      #start .clubcard .nm {
+        color: var(--ink); line-height: 1.35; min-height: 2.7em;
+        display: flex; align-items: center; justify-content: center;
+      }
+      #start .clubcard .who { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
+      #start .clubcard .who b { font-weight: 400; letter-spacing: 1px; }
+
+      /* ---- HOME PLATE. The one button on any screen that starts baseball. */
+      #start .plate {
+        grid-column: 1 / -1; width: 100%; max-width: 340px; margin: 8px auto 0;
+        clip-path: polygon(0 0, 100% 0, 100% 58%, 50% 100%, 0 58%);
+        padding: 16px 12px 42px; background: #1e2a1c;
+        border: 0; color: var(--ink); font-size: 15px; letter-spacing: 3px;
+      }
+      #start .plate:hover { background: #27351f; }
+      #start .plate b { color: var(--hot); }
+      #start .plate .sub {
+        display: block; font-size: 10px; letter-spacing: 2px; color: var(--dim); margin-top: 3px;
+      }
+
+      /* ---- a heading between groups of cards, chalked on. */
+      #start .chalk {
+        grid-column: 1 / -1; font-size: 10px; letter-spacing: 3px; color: var(--dim);
+        text-align: left; padding: 4px 0 0; border-bottom: 1px solid #202a1e;
+        margin-bottom: 2px;
+      }
     </style>
   </head>
   <body>
@@ -221,6 +378,8 @@
     </div>
     <div id="start">
       <h1>ALL-STAR BASEBALL</h1>
+      <!-- The ball's stitching, as two dashed rules. See #start .seam. -->
+      <div class="seam"><i></i><i></i></div>
       <h2></h2>
       <div class="keys"></div>
       <!-- How hard the swing is. Drawn on the mode screen only, and answerable

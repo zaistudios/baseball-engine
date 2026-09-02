@@ -75,10 +75,18 @@
 import { makeRng } from '../core/rng.ts';
 import type { Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
-import { LEAGUE, type Team } from './teams.ts';
+import { type Team } from './teams.ts';
 import { ALL_IDENTITIES, type Identity } from './identity.ts';
 import { playerValue, armValue, clubValue } from './value.ts';
-import { regularDays, standings, teamOf, type NewsItem, type Result, type Season } from './franchise.ts';
+import {
+  clubsIn,
+  regularDays,
+  standings,
+  teamOf,
+  type NewsItem,
+  type Result,
+  type Season,
+} from './franchise.ts';
 import { avg, era, ip, rate, type ArmLine, type BatLine } from './stats.ts';
 
 /**
@@ -345,7 +353,14 @@ const tradeChoice = (you: Team, t: Trade, buyingArm: boolean): Choice => {
 function deadline(s: Season, day: number): Moment | null {
   const you = teamOf(s, s.you);
   const rng = makeRng((s.seed ^ 0x5eed) + day * 7919);
-  const others = LEAGUE.map((t) => teamOf(s, t.abbr)).filter((t) => t.abbr !== s.you);
+  // ⚠️ THE SEASON'S OWN CLUBS, NOT `LEAGUE`. A trade partner has to be a club
+  // that is actually in this franchise: reading the module-level league meant
+  // that once a league could be imported, the deadline would offer you a deal
+  // with somebody who was not in your standings table — and teamOf() would fall
+  // back to a club from the NEW league to build the offer out of.
+  const others = clubsIn(s)
+    .filter((abbr) => abbr !== s.you)
+    .map((abbr) => teamOf(s, abbr));
 
   for (let attempt = 0; attempt < 6; attempt++) {
     const partner = rng.pick(others);

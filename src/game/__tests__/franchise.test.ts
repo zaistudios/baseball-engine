@@ -36,7 +36,7 @@ import {
 import { LEAGUE } from '../teams.ts';
 
 const ABBRS = LEAGUE.map((t) => t.abbr);
-const DAYS = schedule(DEFAULT_GAMES);
+const DAYS = schedule(DEFAULT_GAMES, ABBRS);
 const flat = (d: readonly (readonly Matchup[])[]): Matchup[] => d.flatMap((x) => [...x]);
 
 /** Play a season out, winning or losing every game of yours as told. */
@@ -105,7 +105,7 @@ describe('the schedule', () => {
    * doubled up, or end the year with more home games than road ones.
    */
   it.each(LENGTHS.map((o) => o.games))('is a whole, balanced schedule at %i games', (n) => {
-    const days = schedule(n);
+    const days = schedule(n, ABBRS);
     expect(days).toHaveLength(n);
     for (const [i, day] of days.entries()) {
       expect(day, `day ${i}`).toHaveLength(ABBRS.length / 2);
@@ -121,7 +121,7 @@ describe('the schedule', () => {
   });
 
   it('never asks a club to face itself, even past the rotation wrap', () => {
-    for (const g of flat(schedule(MAX_GAMES))) expect(g.home).not.toBe(g.away);
+    for (const g of flat(schedule(MAX_GAMES, ABBRS))) expect(g.home).not.toBe(g.away);
   });
 });
 
