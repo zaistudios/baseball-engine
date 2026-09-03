@@ -513,6 +513,37 @@
         border: 2px solid var(--line); box-shadow: 3px 3px 0 #000;
       }
       #pre .go kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+
+      /* ---- THE CURSOR ON THE CARD AND THE CALENDAR. The same rule the title
+         screen keeps — one mark, drawn on :focus, moved by the pointer as well
+         as by the d-pad — but it lands on three shapes of different sizes, so
+         it is three marks rather than one. A blinking arrow inside a 104px day
+         cell is a glyph fighting three lines of text for the room.
+
+         See installDpad() in main.ts for what moves it. */
+
+      /* The big buttons: the arrow, as on the title screen. */
+      #pre .go { position: relative; }
+      #pre .go:focus { border-color: var(--hot); outline: none; }
+      #pre .go:focus::before {
+        content: "\25B6"; position: absolute; left: 9px; top: 50%;
+        margin-top: -0.6em; color: var(--hot); font-size: 12px;
+        animation: cursorblink 0.7s steps(1, end) infinite;
+      }
+
+      /* A day cell: its edge and its number. Today's cell is already outlined
+         in the same colour, so the cursor has to be the FILL as well or the two
+         would be one picture whenever the cursor is sitting on today. */
+      #pre button.cal:focus { border-color: var(--hot); background: #1b241d; outline: none; }
+      #pre button.cal:focus .calday { color: var(--hot); }
+
+      /* A picker row: a bar down its leading edge. It cannot be the background
+         or the name, which is what .picked already uses for the row that is
+         SELECTED — the cursor and the selection are two different facts and on
+         this screen they are usually on two different rows. */
+      #pre .penrow[tabindex]:focus {
+        outline: none; box-shadow: inset 3px 0 0 var(--hot); background: #161d18;
+      }
     </style>
   </head>
   <body>

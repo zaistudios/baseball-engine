@@ -1708,6 +1708,168 @@ canvas.addEventListener('pointerdown', (e) => {
   press(' ');
 });
 
+// --------------------------------------------------------------- the d-pad
+
+/**
+ * THE D-PAD — arrows walk a cursor over a screen, ENTER presses what it is on.
+ *
+ * ⚠️ ONE IMPLEMENTATION, THREE SCREENS. The title screen, the pre-game card
+ * and the calendar all want the same thing, and the only hard part of it — the
+ * direction math — is the part that would be copied. Written three times it
+ * would be wrong in three different ways the first time a grid reflowed.
+ *
+ * ⚠️ IT CAPTURES, AND THAT IS THE POINT. The game's own keydown handler is on
+ * the window and A BALL GAME IS LIVE UNDERNEATH EVERY ONE OF THESE OVERLAYS —
+ * SPACE on the title screen was throwing a pitch nobody could see, and G was
+ * cycling the difficulty behind a dial that went on showing the old value. A
+ * capture listener runs before the one on the window: the screen in front owns
+ * the keyboard, which is what being in front means.
+ *
+ * ⚠️ `swallow` IS WHY THAT IS A SETTING AND NOT A RULE. The title screen owns
+ * the WHOLE keyboard — nothing underneath it has any business hearing a key.
+ * The card and the calendar own only the keys the d-pad actually uses, since
+ * both of them still run hotkeys of their own on the bubble (C and L off the
+ * card, ESC out of the calendar) and stopping every key would take those with
+ * it.
+ *
+ * ⚠️ NO CURSOR STATE IN HERE. `document.activeElement` already is one and the
+ * browser moves it for free. Every one of these screens redraws itself by
+ * replacing its own innerHTML, so an index held in this closure would point at
+ * a button that no longer exists.
+ */
+const CURSOR_STOPS = 'button:not(:disabled), [tabindex="0"]';
+
+function installDpad(root: HTMLElement, opts: { swallow: 'all' | 'handled' }): () => void {
+  /** Everything the cursor may sit on, in document order. */
+  const stops = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(CURSOR_STOPS)];
+
+  /**
+   * The nearest stop in a direction, measured off where things are DRAWN
+   * rather than off their order in the document. A grid wraps at whatever
+   * width the window is, so DOM order does not know that the club under this
+   * one is five along; the rectangles do.
+   */
+  const nextIn = (from: HTMLElement, dx: number, dy: number): HTMLElement | undefined => {
+    const a = from.getBoundingClientRect();
+    return stops()
+      .filter((b) => b !== from)
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        const ox = r.left + r.width / 2 - (a.left + a.width / 2);
+        const oy = r.top + r.height / 2 - (a.top + a.height / 2);
+        // How far along the way you asked, and how far off that line it sits.
+        // Off-axis is weighted double so DOWN prefers the cell underneath to
+        // one four columns over on the same row.
+        const along = dx ? ox * dx : oy * dy;
+        return { b, along, score: along + (dx ? Math.abs(oy) : Math.abs(ox)) * 2 };
+      })
+      .filter((c) => c.along > 4)
+      .sort((x, y) => x.score - y.score)[0]?.b;
+  };
+
+  /**
+   * A POINTER MOVES THE CURSOR RATHER THAN LIGHTING A SECOND ONE.
+   *
+   * The cursor is drawn on :focus, so a mouse resting on a card that was not
+   * the focused one would otherwise put two of them on screen — and a console
+   * menu has exactly one. Moving the focus also means a click and the thing
+   * ENTER would press can never be two different buttons.
+   */
+  const onOver = (e: Event): void => {
+    (e.target as HTMLElement).closest<HTMLElement>(CURSOR_STOPS)?.focus({ preventScroll: true });
+  };
+
+  const onKey = (e: KeyboardEvent): void => {
+    // Gone, or hidden behind something else. #start is removed outright when a
+    // game starts; #pre is a permanent element that gets emptied and hidden.
+    if (!root.isConnected || root.style.display === 'none') return;
+    const on = document.activeElement as HTMLElement | null;
+    // A box is a place to type. Leave it — including its arrows.
+    if (on?.tagName === 'TEXTAREA' || on?.tagName === 'INPUT') return;
+
+    const dirs: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+    };
+    const dir = dirs[e.key];
+    const fire = e.key === 'Enter' || e.key === ' ';
+    if (opts.swallow === 'all' || dir || fire) e.stopPropagation();
+
+    const here = on && root.contains(on) && on.matches(CURSOR_STOPS) ? on : null;
+
+    if (dir) {
+      e.preventDefault();
+      // ⚠️ A DIAL IS TURNED, NOT WALKED ACROSS. Its two arrows ARE left and
+      // right, so a cursor sitting on one and pressing the other way would move
+      // between the ends of the same control rather than change it. The redraw
+      // replaces every dial, so the focus is put back by POSITION in the list —
+      // the same reason drawRules() finds its index rather than remembering it.
+      const dial = dir[1] === 0 ? here?.closest('.dial') : null;
+      if (dial) {
+        const which = dir[0] < 0 ? 0 : 1;
+        const at = [...root.querySelectorAll('.dial')].indexOf(dial);
+        dial.querySelectorAll<HTMLButtonElement>('.arrow')[which]?.click();
+        root.querySelectorAll('.dial')[at]?.querySelectorAll<HTMLElement>('.arrow')[which]?.focus();
+        return;
+      }
+      (here ? (nextIn(here, dir[0], dir[1]) ?? here) : stops()[0])?.focus();
+      return;
+    }
+
+    if (fire) {
+      // Nothing under the cursor yet: put it on the screen rather than pressing
+      // something the player cannot see.
+      if (!here) {
+        e.preventDefault();
+        stops()[0]?.focus();
+        return;
+      }
+      // ⚠️ A BUTTON IS PRESSED BY THE BROWSER ITSELF and a row is not — a div
+      // carrying a tabindex has no default action on ENTER. Clicking it here is
+      // what makes the two kinds of stop behave like one control.
+      if (here.tagName !== 'BUTTON') {
+        e.preventDefault();
+        here.click();
+      }
+    }
+  };
+
+  root.addEventListener('pointerover', onOver);
+  addEventListener('keydown', onKey, true);
+  return (): void => {
+    root.removeEventListener('pointerover', onOver);
+    removeEventListener('keydown', onKey, true);
+  };
+}
+
+/**
+ * The d-pad currently listening on #pre, if any.
+ *
+ * ⚠️ ONE SCREEN LIVES IN #pre AT A TIME, so one d-pad may listen on it at a
+ * time. The card redraws itself by re-entering showPregame(), and every door
+ * off it opens another screen into the same element — without a single slot to
+ * put the teardown in, each redraw would leave another capture listener behind,
+ * and the stack of them would go on swallowing arrows on screens that never
+ * asked for a cursor.
+ */
+let preDpad: (() => void) | null = null;
+
+/** Put the cursor on a screen in #pre. `start` is where it lands. */
+function dpadOnPre(start?: HTMLElement | null): void {
+  const el = document.getElementById('pre');
+  dpadOffPre();
+  if (!el) return;
+  preDpad = installDpad(el, { swallow: 'handled' });
+  // preventScroll: the card puts itself back to the top on arrival, and a
+  // cursor landing on a button below the fold must not undo that.
+  (start ?? el.querySelector<HTMLElement>(CURSOR_STOPS))?.focus({ preventScroll: true });
+}
+
+/** Take it off again. Every screen that takes #pre over calls this. */
+function dpadOffPre(): void {
+  preDpad?.();
+  preDpad = null;
+}
+
 // ----------------------------------------------------------------- render
 
 /**
@@ -2871,6 +3033,7 @@ let looping = false;
  * learns the screen was telling the truth.
  */
 function showMoment(s: Season, m: Moment, then: () => void): void {
+  dpadOffPre();
   const el = document.getElementById('pre');
   if (!el) {
     // No overlay in the document. Skip the moment and play the game — a
@@ -3015,7 +3178,7 @@ function lineupPanel(s: Season): string {
         ? `${rate(avg(line))} &middot; ${line.hr}HR ${line.rbi}RBI`
         : '';
       return (
-        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + i + '" style="cursor:pointer">' +
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + i + '" tabindex="0" style="cursor:pointer">' +
         '<span>' + (on ? '&#9656; moving' : String(i + 1)) + '</span>' +
         '<b>' + p.name + formTag(s, p.name) + '</b>' +
         '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(p.power) +
@@ -3049,7 +3212,7 @@ function lineupPanel(s: Season): string {
         ? `${rate(avg(line))} &middot; ${line.hr}HR ${line.rbi}RBI`
         : '';
       return (
-        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" style="cursor:pointer">' +
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" tabindex="0" style="cursor:pointer">' +
         '<span class="dim">' + (on ? '&#9656; moving' : bat.power >= 1.3 ? 'bat' : bat.speed >= 1.25 ? 'legs' : 'platoon') + '</span>' +
         '<b>' + p.name + formTag(s, p.name) + '</b>' +
         '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(bat.power) +
@@ -3101,7 +3264,7 @@ function rotationPanel(s: Season): string {
       const colour = fresh >= 1 ? 'var(--good)' : fresh >= 0.66 ? 'var(--ink)' : 'var(--bad)';
       const on = i === myStarter;
       return (
-        '<div class="penrow' + (on ? ' picked' : '') + '" data-sp="' + i + '" style="cursor:pointer">' +
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-sp="' + i + '" tabindex="0" style="cursor:pointer">' +
         '<span>' + (on ? '&#9656; starting' : '') + '</span><b>' + arm.name + formTag(s, arm.name) + '</b>' +
         '<span class="dim">' + arm.throws + 'HP &middot; BRE ' + showScale(arm.break ?? 1) +
         ' &middot; STA ' + showScale(sta) + '</span>' +
@@ -3167,7 +3330,7 @@ function rotationPanel(s: Season): string {
  * future roster move will be judged by, which is the other reason it wants a
  * home now rather than the day trades land.
  */
-function showPregame(s: Season, m: Matchup): void {
+function showPregame(s: Season, m: Matchup, cursor?: string): void {
   const el = document.getElementById('pre');
   if (!el) {
     // No overlay in the document: play the game rather than stranding them on
@@ -3301,7 +3464,20 @@ function showPregame(s: Season, m: Matchup): void {
    */
   const redraw = (next: Season): void => {
     const at = el.scrollTop;
-    showPregame(next, m);
+    // ⚠️ THE CURSOR SURVIVES THE REDRAW, for the same reason the scroll position
+    // does. Picking a starter redraws the whole card, and a cursor that jumped
+    // back to PLAY BALL every time would make both pickers unusable from the
+    // keyboard after exactly one press. Remembered as the ROW rather than as
+    // the man: after a swap the slot is where you just put somebody, which is
+    // where you are looking.
+    const on = document.activeElement as HTMLElement | null;
+    const sp = on?.dataset['sp'];
+    const lu = on?.dataset['lu'];
+    showPregame(
+      next,
+      m,
+      sp !== undefined ? `[data-sp="${sp}"]` : lu !== undefined ? `[data-lu="${lu}"]` : undefined,
+    );
     el.scrollTop = at;
   };
 
@@ -3312,6 +3488,7 @@ function showPregame(s: Season, m: Matchup): void {
    */
   const leaveCard = (): void => {
     removeEventListener('keydown', onKey);
+    dpadOffPre();
   };
 
   /** Click one of this card's buttons. See onKey. */
@@ -3395,6 +3572,7 @@ function showPregame(s: Season, m: Matchup): void {
     el.style.display = 'none';
     el.innerHTML = '';
     removeEventListener('keydown', onKey);
+    dpadOffPre();
     const youAre: Side = m.home === s.you ? 'home' : 'away';
     const them = youAre === 'home' ? m.away : m.home;
     // Your choice, and the computer's — resolved HERE so the man on the card
@@ -3432,13 +3610,15 @@ function showPregame(s: Season, m: Matchup): void {
   // still listening underneath it: SPACE on the calendar would close the
   // calendar AND throw the first pitch of a game the player did not ask to
   // start. leaveCard() is that, on its own, for the doors that are not go().
+  //
+  // ⚠️ SPACE AND ENTER ARE NOT IN HERE ANY MORE. They used to play the game
+  // from anywhere on the card, which stopped being right the moment the card
+  // grew a cursor: ENTER on THE SCHEDULE would have opened the calendar AND
+  // kicked off the ball game behind it. The d-pad presses what the cursor is
+  // on, and the cursor arrives on PLAY BALL — so the button's own SPACE hint is
+  // still true on the screen you land on. See installDpad().
   function onKey(e: KeyboardEvent): void {
     const k = e.key.toLowerCase();
-    if (e.key === ' ' || e.key === 'Enter') {
-      e.preventDefault();
-      go();
-      return;
-    }
     // The two other doors off this card, both of which the buttons advertise.
     // Routed through the buttons rather than calling the two screens directly,
     // so the key and the click can never take different paths off this card —
@@ -3450,6 +3630,12 @@ function showPregame(s: Season, m: Matchup): void {
   }
   addEventListener('keydown', onKey);
   el.querySelector<HTMLButtonElement>('[data-play]')!.onclick = () => go();
+
+  // The cursor lands on PLAY BALL, or back on the row a redraw took it off.
+  dpadOnPre(
+    (cursor ? el.querySelector<HTMLElement>(cursor) : null) ??
+      el.querySelector<HTMLElement>('[data-play]'),
+  );
 }
 
 /**
@@ -3554,7 +3740,11 @@ function showCalendar(s: Season, back: () => void): void {
     `Pick a day and the ones before it are played for you — your club included.` +
     `</div>` +
     `<div class="calgrid">${days.join('')}</div>` +
-    `<button class="go" data-back="1">BACK TO THE CARD <kbd>SPACE</kbd></button>` +
+    // ⚠️ ESC, NOT SPACE, AND THE HINT HAD TO CHANGE WITH IT. SPACE presses
+    // what the cursor is on now, and on this screen the cursor starts on today
+    // — so a button still advertising SPACE would be pointing at a key that
+    // plays a ball game.
+    `<button class="go" data-back="1">BACK TO THE CARD <kbd>ESC</kbd></button>` +
     `</div>`;
   el.style.display = 'flex';
   el.scrollTop = 0;
@@ -3563,9 +3753,10 @@ function showCalendar(s: Season, back: () => void): void {
     el.style.display = 'none';
     el.innerHTML = '';
     removeEventListener('keydown', onKey);
+    dpadOffPre();
   };
   function onKey(e: KeyboardEvent): void {
-    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+    if (e.key === 'Escape') {
       e.preventDefault();
       leave();
       back();
@@ -3583,6 +3774,16 @@ function showCalendar(s: Season, back: () => void): void {
       skipTo(Number(b.dataset['day']));
     };
   });
+
+  // ⚠️ THE CURSOR STARTS ON TODAY, not on day one. Day one is usually months
+  // behind you and is not a door at all; today is the only cell that plays
+  // rather than skips, and it is the cell somebody opening this screen is
+  // looking for. A finished season has no today, so the last door will do.
+  dpadOnPre(
+    el.querySelector<HTMLElement>('button.cal.now') ??
+      el.querySelector<HTMLElement>('button.cal') ??
+      el.querySelector<HTMLElement>('[data-back]'),
+  );
 }
 
 /** A round's name in two or three characters, for a calendar cell. */
@@ -3679,6 +3880,7 @@ function skipTo(day: number): void {
  * panels. What it does not get is nothing at all, which is what it got before.
  */
 function showStats(s: Season | null, box: StatBook | null, back: () => void): void {
+  dpadOffPre();
   const el = document.getElementById('pre');
   if (!el) return back();
 
@@ -3881,6 +4083,7 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
  * the end of a franchise.
  */
 function showCareer(back: () => void): void {
+  dpadOffPre();
   const el = document.getElementById('pre');
   if (!el) return back();
 
@@ -4613,114 +4816,8 @@ function pregame(): void {
     kickOff(mine, picked, 'home');
   });
 
-  /**
-   * THE D-PAD. Arrows walk a cursor over whatever this screen is showing and
-   * ENTER presses what it is on — because a console menu you can only click is
-   * a console menu with a mouse in it, and the screen is dressed as a console
-   * menu now. See the cursor rule in game.html.
-   *
-   * ⚠️ IT CAPTURES, AND THAT IS THE POINT. The game's own keydown handler is
-   * already on the window and A BALL GAME IS LIVE UNDERNEATH THIS OVERLAY —
-   * so SPACE on the title screen was throwing a pitch nobody could see, and G
-   * was cycling the difficulty behind a dial that went on showing the old
-   * value. A capture listener runs before the one on the window and stops the
-   * event there: the screen in front owns the keyboard, which is what being in
-   * front means.
-   *
-   * ⚠️ NO CURSOR STATE UP HERE. `document.activeElement` already is one, the
-   * browser moves it for free, and every draw() replaces the buttons — an index
-   * kept in this closure would point at a button that no longer exists.
-   */
-  const buttons = (): HTMLButtonElement[] => [
-    ...el.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
-  ];
-
-  /**
-   * The nearest button in a direction, measured off where things are DRAWN
-   * rather than off their order in the document. The grid wraps at whatever
-   * width the window is, so DOM order does not know that the club under this
-   * one is five along; the rectangles do.
-   */
-  const nextIn = (from: HTMLElement, dx: number, dy: number): HTMLElement | undefined => {
-    const a = from.getBoundingClientRect();
-    return buttons()
-      .filter((b) => b !== from)
-      .map((b) => {
-        const r = b.getBoundingClientRect();
-        const ox = r.left + r.width / 2 - (a.left + a.width / 2);
-        const oy = r.top + r.height / 2 - (a.top + a.height / 2);
-        // How far along the way you asked, and how far off that line it sits.
-        // Off-axis is weighted double so DOWN prefers the cell underneath to
-        // one four columns over on the same row.
-        const along = dx ? ox * dx : oy * dy;
-        return { b, along, score: along + (dx ? Math.abs(oy) : Math.abs(ox)) * 2 };
-      })
-      .filter((c) => c.along > 4)
-      .sort((x, y) => x.score - y.score)[0]?.b;
-  };
-
-  /**
-   * A POINTER MOVES THE CURSOR RATHER THAN LIGHTING A SECOND ONE.
-   *
-   * The cursor was drawn on :hover as well as on :focus, so resting a mouse on
-   * any card that was not the focused one put two of them on screen at once.
-   * Moving the focus is the fix rather than dropping the hover style: it keeps
-   * ONE selection whichever hand is driving, and it means a click and the thing
-   * ENTER would press can never be two different buttons.
-   */
-  el.addEventListener('pointerover', (e) => {
-    const btn = (e.target as HTMLElement).closest('button');
-    if (btn && !btn.disabled) btn.focus({ preventScroll: true });
-  });
-
-  addEventListener(
-    'keydown',
-    (e) => {
-      if (!el.isConnected) return; // the screen has been taken away; game on
-      const on = document.activeElement as HTMLElement | null;
-      // The league box is a place to type. Leave it — including its arrows.
-      if (on?.tagName === 'TEXTAREA') return;
-      // Everything else on this screen belongs to this screen. See above.
-      e.stopPropagation();
-
-      const dirs: Record<string, [number, number]> = {
-        ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
-      };
-      const dir = dirs[e.key];
-      const here = on && el.contains(on) && on.tagName === 'BUTTON' ? on : null;
-
-      if (dir) {
-        e.preventDefault();
-        // ⚠️ A DIAL IS TURNED, NOT WALKED ACROSS. Its two arrows ARE left and
-        // right, so a cursor sitting on one and pressing the other way would
-        // move between the ends of the same control rather than change it.
-        // The redraw replaces every dial, so the focus is put back by POSITION
-        // in the list — the same reason drawRules() finds its index rather
-        // than remembering it.
-        const dial = dir[1] === 0 ? here?.closest('.dial') : null;
-        if (dial) {
-          const which = dir[0] < 0 ? 0 : 1;
-          const at = [...el.querySelectorAll('.dial')].indexOf(dial);
-          dial.querySelectorAll<HTMLButtonElement>('.arrow')[which]?.click();
-          el.querySelectorAll('.dial')
-            [at]?.querySelectorAll<HTMLElement>('.arrow')
-            [which]?.focus();
-          return;
-        }
-        (here ? (nextIn(here, dir[0], dir[1]) ?? here) : buttons()[0])?.focus();
-        return;
-      }
-
-      if (e.key === 'Enter' || e.key === ' ') {
-        // A focused button is pressed by the browser itself. This is only the
-        // first press, when the cursor is not on the screen yet.
-        if (here) return;
-        e.preventDefault();
-        buttons()[0]?.focus();
-      }
-    },
-    true,
-  );
+  // The title screen owns the whole keyboard while it is up. See installDpad.
+  installDpad(el, { swallow: 'all' });
 
   drawn();
 }
