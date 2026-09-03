@@ -1669,6 +1669,17 @@ function press(key: string): void {
 }
 
 addEventListener('keydown', (e) => {
+  // ⚠️ A BOX IS FOR TYPING IN. This listener preventDefaults every key it
+  // knows and it knows most of the alphabet, so with the league screen's
+  // textarea focused, typing `{"abbr":"OKC"}` put `{"":"O"}` in the box and
+  // squared the hitter to bunt on the way past. Paste still worked, which is
+  // exactly why it shipped: filling that box by hand is the one path nobody
+  // tried. Guarded here rather than in the league screen, because every future
+  // field on any screen has the same problem and deserves the same answer.
+  const into = e.target as HTMLElement | null;
+  if (into && (into.tagName === 'TEXTAREA' || into.tagName === 'INPUT' || into.isContentEditable)) {
+    return;
+  }
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
   // ⚠️ A HELD KEY IS ONE ACT, NOT THIRTY. The browser repeats keydown while a
   // key is down, and SPACE is now the key that both STARTS a delivery and ends
@@ -4421,6 +4432,24 @@ function pregame(): void {
       LEAGUE.map((c, n) => (c === mine ? '' : clubCard(c, n))).join('');
   };
 
+  /**
+   * Draw, and put the cursor on the first thing drawn.
+   *
+   * ⚠️ A CONSOLE MENU IS NEVER POINTING AT NOTHING, and that is a rule about
+   * what ENTER means rather than about how it looks. Without this the first
+   * press only woke the cursor and the second one pressed whatever it had
+   * woken onto — so ENTER did two different things depending on whether you
+   * had touched the d-pad yet, and on the club screen the second of them
+   * starts a franchise over the one you have saved.
+   *
+   * preventScroll, because putting the cursor on the first club must not yank
+   * a list somebody has scrolled back up to the top of.
+   */
+  const drawn = (): void => {
+    draw();
+    el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+  };
+
   const start = (): void => {
     el.remove();
     nextGame();
@@ -4449,7 +4478,7 @@ function pregame(): void {
     if (go === 'book') {
       // The title screen stays underneath; the book hands control straight back
       // to it, so this is a look rather than a step.
-      showCareer(() => draw());
+      showCareer(() => drawn());
       return;
     }
     if (go === 'resume') {
@@ -4460,7 +4489,7 @@ function pregame(): void {
     if (go === 'exhibition' || go === 'franchise' || go === 'league') {
       mode = go;
       leagueSays = [];
-      draw();
+      drawn();
       return;
     }
 
@@ -4476,7 +4505,7 @@ function pregame(): void {
       if (lg === 'back') {
         mode = null;
         leagueSays = [];
-        draw();
+        drawn();
       } else if (lg === 'fill') {
         // ⚠️ LEAGUE_SOURCE, NOT LEAGUE. The played clubs have had parity
         // applied; the source is what an import goes back in as. Filling the
@@ -4496,7 +4525,7 @@ function pregame(): void {
         if (problems === null) location.reload();
         else {
           leagueSays = problems;
-          draw();
+          drawn();
         }
       }
       return;
@@ -4529,7 +4558,7 @@ function pregame(): void {
     }
     if (go === 'start') {
       ruled = true;
-      draw();
+      drawn();
       return;
     }
 
@@ -4545,7 +4574,7 @@ function pregame(): void {
     }
     if (!mine) {
       mine = picked;
-      draw();
+      drawn();
       return;
     }
     // Exhibition: you are the home club, so you bat last.
@@ -4553,7 +4582,102 @@ function pregame(): void {
     kickOff(mine, picked, 'home');
   });
 
-  draw();
+  /**
+   * THE D-PAD. Arrows walk a cursor over whatever this screen is showing and
+   * ENTER presses what it is on — because a console menu you can only click is
+   * a console menu with a mouse in it, and the screen is dressed as a console
+   * menu now. See the cursor rule in game.html.
+   *
+   * ⚠️ IT CAPTURES, AND THAT IS THE POINT. The game's own keydown handler is
+   * already on the window and A BALL GAME IS LIVE UNDERNEATH THIS OVERLAY —
+   * so SPACE on the title screen was throwing a pitch nobody could see, and G
+   * was cycling the difficulty behind a dial that went on showing the old
+   * value. A capture listener runs before the one on the window and stops the
+   * event there: the screen in front owns the keyboard, which is what being in
+   * front means.
+   *
+   * ⚠️ NO CURSOR STATE UP HERE. `document.activeElement` already is one, the
+   * browser moves it for free, and every draw() replaces the buttons — an index
+   * kept in this closure would point at a button that no longer exists.
+   */
+  const buttons = (): HTMLButtonElement[] => [
+    ...el.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+  ];
+
+  /**
+   * The nearest button in a direction, measured off where things are DRAWN
+   * rather than off their order in the document. The grid wraps at whatever
+   * width the window is, so DOM order does not know that the club under this
+   * one is five along; the rectangles do.
+   */
+  const nextIn = (from: HTMLElement, dx: number, dy: number): HTMLElement | undefined => {
+    const a = from.getBoundingClientRect();
+    return buttons()
+      .filter((b) => b !== from)
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        const ox = r.left + r.width / 2 - (a.left + a.width / 2);
+        const oy = r.top + r.height / 2 - (a.top + a.height / 2);
+        // How far along the way you asked, and how far off that line it sits.
+        // Off-axis is weighted double so DOWN prefers the cell underneath to
+        // one four columns over on the same row.
+        const along = dx ? ox * dx : oy * dy;
+        return { b, along, score: along + (dx ? Math.abs(oy) : Math.abs(ox)) * 2 };
+      })
+      .filter((c) => c.along > 4)
+      .sort((x, y) => x.score - y.score)[0]?.b;
+  };
+
+  addEventListener(
+    'keydown',
+    (e) => {
+      if (!el.isConnected) return; // the screen has been taken away; game on
+      const on = document.activeElement as HTMLElement | null;
+      // The league box is a place to type. Leave it — including its arrows.
+      if (on?.tagName === 'TEXTAREA') return;
+      // Everything else on this screen belongs to this screen. See above.
+      e.stopPropagation();
+
+      const dirs: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+      };
+      const dir = dirs[e.key];
+      const here = on && el.contains(on) && on.tagName === 'BUTTON' ? on : null;
+
+      if (dir) {
+        e.preventDefault();
+        // ⚠️ A DIAL IS TURNED, NOT WALKED ACROSS. Its two arrows ARE left and
+        // right, so a cursor sitting on one and pressing the other way would
+        // move between the ends of the same control rather than change it.
+        // The redraw replaces every dial, so the focus is put back by POSITION
+        // in the list — the same reason drawRules() finds its index rather
+        // than remembering it.
+        const dial = dir[1] === 0 ? here?.closest('.dial') : null;
+        if (dial) {
+          const which = dir[0] < 0 ? 0 : 1;
+          const at = [...el.querySelectorAll('.dial')].indexOf(dial);
+          dial.querySelectorAll<HTMLButtonElement>('.arrow')[which]?.click();
+          el.querySelectorAll('.dial')
+            [at]?.querySelectorAll<HTMLElement>('.arrow')
+            [which]?.focus();
+          return;
+        }
+        (here ? (nextIn(here, dir[0], dir[1]) ?? here) : buttons()[0])?.focus();
+        return;
+      }
+
+      if (e.key === 'Enter' || e.key === ' ') {
+        // A focused button is pressed by the browser itself. This is only the
+        // first press, when the cursor is not on the screen yet.
+        if (here) return;
+        e.preventDefault();
+        buttons()[0]?.focus();
+      }
+    },
+    true,
+  );
+
+  drawn();
 }
 
 pregame();

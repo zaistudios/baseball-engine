@@ -221,23 +221,28 @@
       #start button b { color: var(--hot); font-weight: 400; letter-spacing: 1px; }
 
       /* ================================================================
-         THE MENU, DRESSED AS A BALLPARK.
+         THE MENU, DRESSED AS A CARTRIDGE.
 
-         ⚠️ IT IS ALL IN THE STYLESHEET AND NOT IN A SPRITE. Every mark below
-         is type, a border or a gradient — no image, no font to fetch — because
-         `npm run export` folds this whole screen into ONE offline html file and
-         an asset that has to be fetched is an asset that is not there when
-         somebody opens it off a USB stick.
+         ⚠️ STILL NOT ONE IMAGE, AND STILL NO FONT TO FETCH. Every mark below
+         is type, a border or a hard-stop fill, for the same reason the
+         ballpark version was: `npm run export` folds this screen into ONE
+         offline html file, and an asset that has to be fetched is an asset
+         that is not there when somebody opens it off a USB stick. A webfont is
+         the obvious way to get 8-bit type and it is precisely the thing this
+         screen cannot have.
 
-         The reference points are the menus these games actually had: RBI's
-         chunky all-caps on a dark field, and MVP 2005's carded team select with
-         the club's colours on it. The one control both of them lean on is the
-         ARROW DIAL — ◀ VALUE ▶ — and that is the widget this screen is built
-         around now. Six settings as six rows of little buttons was a wall you
-         read; six dials is six answers you can see at a glance.
+         WHICH IS FINE, BECAUSE THE FONT IS NOT WHAT MAKES A CONSOLE MENU LOOK
+         LIKE ONE. In the order it actually matters: a black outline round the
+         title with one hard coloured shadow under it; a double-ruled window
+         round the prompt; a BLINKING cursor beside whatever is selected; flat
+         fills and square corners with no blur anywhere; and scanlines over the
+         lot. Not one of those is a typeface.
+
+         The furniture stays the ballpark's — the seam, the cap patch, home
+         plate. Old console, new game.
          ================================================================ */
 
-      /* The mown outfield, and the lights. Two gradients, no image. */
+      /* The field, the lights, and the glass in front of them. */
       #start {
         background:
           repeating-linear-gradient(
@@ -245,20 +250,34 @@
           ),
           radial-gradient(125% 85% at 50% -15%, #17271b 0%, var(--bg) 60%);
       }
+      /* SCANLINES, on the glass rather than on the page — fixed, so they do
+         not scroll away under thirty club cards. pointer-events:none, or a
+         layer drawn over the whole screen eats every click on it. */
+      #start::after {
+        content: ""; position: fixed; inset: 0; z-index: 2; pointer-events: none;
+        background: repeating-linear-gradient(
+          to bottom, rgba(0, 0, 0, 0.24) 0 1px, transparent 1px 3px
+        );
+      }
 
-      /* ---- the marquee. The one piece of big type on the screen. */
+      /* ---- the marquee. Outlined on all eight sides in black so it holds its
+         shape at any size, and dropped once into the seam red. No blur: a soft
+         glow is the one thing that would give the whole trick away. */
       #start h1 {
-        font-size: 30px; letter-spacing: 10px; color: var(--ink);
-        font-weight: 400; text-align: center; line-height: 1.1;
-        text-shadow: 0 2px 0 #000, 0 0 26px rgba(216, 180, 74, 0.18);
-        margin-bottom: -2px;
+        font-size: 32px; letter-spacing: 9px; color: var(--ink);
+        font-weight: 700; text-align: center; line-height: 1.15;
+        margin-bottom: 2px;
+        text-shadow:
+          2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000,
+          2px 2px 0 #000, -2px 2px 0 #000, 2px -2px 0 #000, -2px -2px 0 #000,
+          5px 5px 0 var(--bad);
       }
       /* The stitching: two dashed rules in the seam red, the way a ball is
          seamed. Purely a rule under the title — it is the cheapest mark on this
          screen and it does more for the theme than anything else here. */
       #start .seam {
         width: 100%; max-width: 300px; height: 18px;
-        position: relative; opacity: 0.8; margin: 6px 0 2px;
+        position: relative; opacity: 0.8; margin: 8px 0 2px;
       }
       /* Two parallel arcs, both bowing the same way — which is how the seam
          actually runs across a ball, and what tells the eye 'baseball' rather
@@ -272,44 +291,88 @@
       #start .seam i:first-child { top: 0; }
       #start .seam i:last-child { top: 6px; }
 
-      /* ---- the prompt, on a scoreboard strip. */
+      /* ---- the prompt, in the double-ruled window every console menu draws
+         its text in: a line, a gap of background, and a second line. One
+         border and one box-shadow, no image. */
       #start h2 {
         font-size: 12px; letter-spacing: 4px; color: var(--hot); font-weight: 400;
-        background: #0a0f0c; border: 1px solid var(--line);
-        padding: 7px 20px; text-align: center;
+        background: #000; border: 2px solid var(--ink);
+        box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink);
+        padding: 8px 22px; text-align: center; margin: 6px 0 8px;
       }
+
+      /* ---- EVERY CARD ON THIS SCREEN IS A SPRITE: a two-pixel edge, a flat
+         fill, and one hard shadow down and to the right. No radius, no
+         gradient, no blur, and nothing that moves when you point at it — the
+         selection is a cursor, not an animation. */
+      #start button {
+        text-align: center; padding: 12px 8px;
+        border: 2px solid var(--line); background: #16201a;
+        box-shadow: 3px 3px 0 #000;
+        position: relative;
+      }
+      #start button b { color: var(--hot); font-weight: 700; letter-spacing: 1px; }
+      #start button:hover:not(:disabled),
+      #start button:focus { border-color: var(--hot); outline: none; }
+
+      /* THE CURSOR, AND IT BLINKS — which is the whole difference between a
+         highlighted row and a console menu. steps(1) so it is on or it is off
+         and never anything in between.
+
+         ⚠️ :focus, NOT :focus-visible. draw() puts the cursor on the first
+         button of every screen it draws, and a browser is entitled to decide a
+         programmatic focus does not deserve a focus RING — which would leave
+         ENTER pressing something the player cannot see. This screen's cursor is
+         not a ring, it is the selection, so it is always drawn.
+
+         ⚠️ DIRECT CHILDREN OF THE GRID ONLY. A dial's two arrows are buttons
+         too, and a cursor inside the control it is pointing at reads as a
+         glyph somebody left behind. */
+      #start .keys > button:hover:not(:disabled)::before,
+      #start .keys > button:focus::before {
+        content: "\25B6"; position: absolute; left: 5px; top: 50%;
+        margin-top: -0.6em; color: var(--hot); font-size: 12px;
+        animation: cursorblink 0.7s steps(1, end) infinite;
+      }
+      @keyframes cursorblink { 50% { opacity: 0; } }
 
       /* ---- THE DIAL. One setting, its current value, and the two arrows that
          change it. Full width of the grid: a setting is a question, and a
-         question that shares a row with another question reads as neither. */
+         question that shares a row with another question reads as neither.
+         The thick left edge is the console list marker — it lights when the
+         cursor is anywhere in the row, which on this screen means either arrow
+         has the focus. */
       #start .dial {
         grid-column: 1 / -1; background: var(--panel);
-        border: 1px solid var(--line); border-left: 3px solid #2f3a2a;
+        border: 2px solid var(--line); border-left: 6px solid #2f3a2a;
+        box-shadow: 3px 3px 0 #000;
       }
-      #start .dial:hover { border-left-color: var(--hot); }
+      #start .dial:hover, #start .dial:focus-within { border-left-color: var(--hot); }
       #start .dialhead {
         font-size: 10px; letter-spacing: 2px; color: var(--dim);
         padding: 8px 12px 0; text-align: left;
       }
-      #start .dialbody { display: grid; grid-template-columns: 46px 1fr 46px; }
-      /* The arrows are the control. Big hit area, no border of their own — the
-         dial is the object, these are its two ends. */
+      #start .dialbody { display: grid; grid-template-columns: 52px 1fr 52px; }
+      /* The arrows are the control. Big hit area, no border and no shadow of
+         their own — the dial is the sprite, these are its two ends. */
       #start .arrow {
-        background: transparent; border: 0; color: var(--dim);
-        font-size: 17px; padding: 0; line-height: 1; cursor: pointer;
+        background: transparent; border: 0; box-shadow: none; color: var(--dim);
+        font-size: 19px; padding: 0; line-height: 1; cursor: pointer;
       }
-      #start .arrow:hover:not(:disabled) { color: var(--hot); background: #1b241d; }
+      #start .arrow:hover:not(:disabled),
+      #start .arrow:focus { color: var(--hot); background: #1b241d; outline: none; }
       #start .arrow:disabled { opacity: 0.2; cursor: default; }
       #start .dialval { text-align: center; padding: 4px 6px 9px; }
       #start .dialval b {
         display: block; font-size: 17px; letter-spacing: 3px;
-        color: var(--hot); font-weight: 400;
+        color: var(--hot); font-weight: 700;
+        text-shadow: 2px 2px 0 #000;
       }
       #start .dialval span { font-size: 11px; color: var(--dim); line-height: 1.5; }
-      /* Where you are in the list, as bases on a card. Four settings deep is
-         not obvious from one value on its own. */
-      #start .pips { display: flex; gap: 4px; justify-content: center; padding-bottom: 8px; }
-      #start .pips i { width: 12px; height: 3px; background: #2f3a2a; }
+      /* Where you are in the list, as square lamps rather than bars. Four
+         settings deep is not obvious from one value on its own. */
+      #start .pips { display: flex; gap: 5px; justify-content: center; padding-bottom: 9px; }
+      #start .pips i { width: 7px; height: 7px; background: #2f3a2a; }
       #start .pips i.on { background: var(--hot); }
 
       /* ---- THE CLUB CARDS. A cap patch, the name, and what the club IS —
@@ -320,10 +383,16 @@
         padding: 12px 8px 11px;
       }
       #start .patch {
-        width: 48px; height: 48px; border-radius: 50%; display: grid;
+        width: 48px; height: 48px; display: grid;
         place-items: center; font-size: 13px; letter-spacing: 1px;
         color: #0d1210; font-weight: 700;
-        box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.28), 0 0 0 2px rgba(0, 0, 0, 0.35);
+        /* A CIRCLE THE WAY A SPRITE DRAWS ONE — corners cut off, not rounded
+           off. A 48px anti-aliased circle is the one shape on this screen that
+           would read as CSS rather than as a cap, and an octagon costs the same
+           one line border-radius did. The hard band along the bottom is the
+           shading a two-colour sprite gets. */
+        clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+        box-shadow: inset 0 -7px 0 rgba(0, 0, 0, 0.3);
       }
       /* A fixed two-line well for the name, so a club called Los Angeles
          Aqueducts does not stand a row taller than one called Chicago Ivy. */
@@ -332,16 +401,21 @@
         display: flex; align-items: center; justify-content: center;
       }
       #start .clubcard .who { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
-      #start .clubcard .who b { font-weight: 400; letter-spacing: 1px; }
+      #start .clubcard .who b { font-weight: 700; letter-spacing: 1px; }
 
-      /* ---- HOME PLATE. The one button on any screen that starts baseball. */
+      /* ---- HOME PLATE. The one button on any screen that starts baseball.
+         drop-shadow rather than box-shadow because the shadow has to follow the
+         clip-path — a box shadow would draw the rectangle the plate was cut out
+         of and give the shape away. */
       #start .plate {
-        grid-column: 1 / -1; width: 100%; max-width: 340px; margin: 8px auto 0;
+        grid-column: 1 / -1; width: 100%; max-width: 340px; margin: 10px auto 0;
         clip-path: polygon(0 0, 100% 0, 100% 58%, 50% 100%, 0 58%);
         padding: 16px 12px 42px; background: #1e2a1c;
-        border: 0; color: var(--ink); font-size: 15px; letter-spacing: 3px;
+        border: 0; box-shadow: none; color: var(--ink);
+        font-size: 15px; letter-spacing: 3px;
+        filter: drop-shadow(4px 4px 0 #000);
       }
-      #start .plate:hover { background: #27351f; }
+      #start .plate:hover, #start .plate:focus { background: #27351f; }
       #start .plate b { color: var(--hot); }
       #start .plate .sub {
         display: block; font-size: 10px; letter-spacing: 2px; color: var(--dim); margin-top: 3px;
@@ -353,6 +427,88 @@
         text-align: left; padding: 4px 0 0; border-bottom: 1px solid #202a1e;
         margin-bottom: 2px;
       }
+
+      /* ---- the line along the bottom of every cartridge's title screen. It
+         earns its place twice over: the controls are the half nobody would
+         guess (this screen has a d-pad now — see the handler in main.ts), and a
+         menu with nothing under it looks unfinished on a tall monitor. */
+      #start .copy {
+        display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+        font-size: 10px; letter-spacing: 3px; color: var(--dim);
+        padding-top: 6px;
+      }
+
+      /* ================================================================
+         THE FACE. Press Start 2P — CodeMan38, SIL Open Font License 1.1
+         (https://openfontlicense.org). Latin only: 12 kB, which is the block
+         the menu needs rather than the sixty of every alphabet.
+
+         ⚠️ EMBEDDED, NOT FETCHED, AND THAT IS THE WHOLE REASON IT IS ALLOWED
+         HERE. The rule the rest of this stylesheet keeps is that nothing on
+         this screen may need the network, because `npm run export` folds the
+         game into ONE html file that gets opened off a USB stick. A <link> to
+         a font service breaks that; sixteen kilobytes of base64 sitting in the
+         file does not. It costs about 6% of the export and it is the one thing
+         CSS genuinely could not fake — every other 8-bit mark on this screen
+         is a border or a shadow, but type is type.
+
+         ⚠️ ONE LONG LINE, ON PURPOSE. A data: URL is a single CSS token and
+         cannot be wrapped. Scroll past it; there is nothing to read.
+         ================================================================ */
+      @font-face {
+        font-family: "Press Start 2P";
+        font-style: normal;
+        font-weight: 400;
+        font-display: block;
+        src: url(data:font/woff2;base64,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) format("woff2");
+      }
+
+      /* WHAT THE PIXEL FACE IS FOR, AND WHAT IT IS NOT. Every glyph in it is
+         drawn on an eight-by-eight grid, which is what makes it read as a
+         cartridge and also what makes it hopeless for prose — "Los Angeles
+         Aqueducts" in an 8px bitmap is three lines of stairs. So it gets the
+         FURNITURE: the marquee, the prompt, the answer on a dial, the letters
+         on a cap, and the line along the bottom. Everything somebody actually
+         reads stays in the mono stack the rest of the game is set in.
+
+         Every size below is smaller than the rule it overrides, because this
+         face draws about a third bigger than a monospace at the same px. */
+      /* > b, not b: the club rank ("STACKED · BIG INNING") lives in a span
+         inside the card, and setting THAT in an 8x8 face wrapped every third
+         card onto an extra line and left the grid ragged. A title that is a
+         direct child of a button is furniture; anything deeper is prose. */
+      #start h1, #start h2, #start .dialval b, #start button > b,
+      #start .patch, #start .copy {
+        font-family: "Press Start 2P", ui-monospace, monospace;
+      }
+      /* clamp, because 17 characters of an 8x8 face is a wide marquee and a
+         phone is not. */
+      #start h1 { font-size: clamp(13px, 3.4vw, 25px); letter-spacing: 3px; line-height: 1.4; }
+      #start h2 { font-size: 10px; letter-spacing: 2px; padding: 10px 20px; }
+      #start button > b { font-size: 9px; letter-spacing: 0; line-height: 1.8; }
+      #start .dialval b { font-size: 13px; letter-spacing: 1px; line-height: 1.5; }
+      #start .patch { font-size: 10px; letter-spacing: 0; }
+      #start .copy { font-size: 8px; letter-spacing: 1px; }
+
+      /* ---- AND THE SEAM INTO THE REST OF THE GAME. The card, the calendar
+         and the box score are not the title screen and must not become it —
+         they are tables, and a table set in an 8x8 face is unreadable. What
+         they take is the two marks that say "same game": the prompt in its
+         double-ruled window, and the one button on the screen that starts
+         baseball. Everything else there stays exactly as it was. */
+      #pre h2 {
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 10px; letter-spacing: 2px; line-height: 1.6;
+        background: #000; border: 2px solid var(--ink);
+        box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink);
+        padding: 9px 18px; align-self: center; text-align: center;
+      }
+      #pre .go {
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 11px; letter-spacing: 1px; line-height: 1.6;
+        border: 2px solid var(--line); box-shadow: 3px 3px 0 #000;
+      }
+      #pre .go kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
     </style>
   </head>
   <body>
@@ -385,6 +541,9 @@
       <!-- How hard the swing is. Drawn on the mode screen only, and answerable
            again all game from the strip under the scoreboard. -->
       <div class="keys levels"></div>
+      <!-- The cartridge line. The controls half is the only place the d-pad is
+           advertised; see the keydown handler in pregame(). -->
+      <div class="copy"><span>ARROWS MOVE &middot; ENTER SELECTS</span><span>&copy; 2026 ZAI STUDIOS</span></div>
     </div>
     <!-- Filled and shown by showPregame() before every franchise game. Empty
          and hidden in an exhibition, which has no standings to stand on. -->

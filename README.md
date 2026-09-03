@@ -97,6 +97,40 @@ The game opens on a **start screen** with two modes:
   club is the home team, so you bat last and can win it in the ninth.
 - **Franchise** — pick the club you run and play its schedule.
 
+### The title screen is a cartridge
+
+**It is a console menu now, and that is a control scheme as much as a look.**
+Arrows walk a blinking cursor over whatever the screen is showing, ENTER
+presses it, and left/right on a dial turns it — so the whole of mode, rules,
+difficulty and thirty clubs is reachable without a mouse. The cursor is put on
+the first thing on every screen that draws, because a console menu is never
+pointing at nothing: without that, ENTER means "wake the cursor" on its first
+press and "start a franchise over the one you have saved" on its second.
+
+⚠️ **THE MENU CAPTURES THE KEYBOARD, AND IT HAD TO.** A ball game is live
+underneath this overlay, and the game's own key handler is on the window — so
+SPACE on the title screen threw a pitch nobody could see and G cycled the
+difficulty behind a dial that went on showing the old value. The screen in
+front owns the keyboard now, which is what being in front means.
+
+⚠️ **AND THE GAME NO LONGER EATS WHAT YOU TYPE.** That same handler
+`preventDefault`s every key it knows, which is most of the alphabet — so
+typing `{"abbr":"OKC"}` into the league box put `{"":"O"}` in it and squared
+the hitter to bunt on the way past. **The import box could only ever be pasted
+into**, and paste is exactly why nobody found it. Any text field is now the
+field's, not the game's.
+
+The look is a stylesheet and one font, no images. Borders, hard shadows,
+scanlines and a blinking cursor do most of it; the type is **Press Start 2P**
+(CodeMan38, [SIL Open Font License 1.1](https://openfontlicense.org)), embedded
+as base64 rather than linked. That is the rule the screen cannot break —
+`npm run export` folds everything into ONE file to be opened off a USB stick,
+so a font that has to be fetched is a font that is not there. It costs 19 kB of
+a 295 kB export and it is the one 8-bit mark CSS could not fake. It is used for
+the FURNITURE only — the marquee, the prompt, the value on a dial, the letters
+on a cap — because a club called Los Angeles Aqueducts set in an 8×8 face is
+three lines of stairs.
+
 ### Franchise
 
 **One year, sixteen games, a champion at the end of it.**
