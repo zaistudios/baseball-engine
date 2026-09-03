@@ -1594,7 +1594,7 @@ function press(key: string): void {
     return;
   }
 
-  if (phase === 'over' && key === 'b' && season) {
+  if (phase === 'over' && key === 'b') {
     showBox();
     return;
   }
@@ -2359,9 +2359,10 @@ function renderControls(): void {
     const label =
       season && !seasonOver(season) ? (yourGame(season) ? 'Next game' : 'Watch it out') : null;
     const next = label ? `<button data-next="1">${label} <kbd>N</kbd></button>` : '';
-    // The box score, which only exists in a franchise: an exhibition has no
-    // season to put the game in and no leaders to compare it against.
-    const box = season ? '<button data-box="1">Box score <kbd>B</kbd></button>' : '';
+    // ⚠️ AN EXHIBITION HAS ONE TOO. It has no season to compare the night
+    // against, which is why this used to be a franchise-only button — but the
+    // night itself was fully scored the whole time. See showStats().
+    const box = '<button data-box="1">Box score <kbd>B</kbd></button>';
     // The book is offered on the screen where the season ENDED, which is the
     // one moment it is about — see showCareer().
     const bookBtn =
@@ -3666,8 +3667,18 @@ function skipTo(day: number): void {
  * of the game that just ended and it is gone when you leave. Keeping fourteen
  * of them would be weight in the save to re-show a game the player watched;
  * everything that has to survive the night is already in `Season.stats`.
+ *
+ * ⚠️ `s` IS NULLABLE BECAUSE AN EXHIBITION IS A REAL BALL GAME. Every at-bat
+ * in the engine goes through recordAtBat() whether or not there is a season
+ * around it — see stats.ts — so a one-off game finishes holding a complete box
+ * score, and the only thing standing between the player and it was this
+ * function wanting a Season for three things: the day to date it, the club
+ * names, and the year to print rates against. The first two have answers
+ * without a season (the game itself knows who is playing) and the third
+ * honestly does not, so an exhibition gets the night's numbers and no league
+ * panels. What it does not get is nothing at all, which is what it got before.
  */
-function showStats(s: Season, box: StatBook | null, back: () => void): void {
+function showStats(s: Season | null, box: StatBook | null, back: () => void): void {
   const el = document.getElementById('pre');
   if (!el) return back();
 
@@ -3693,9 +3704,21 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
       })
       .join('');
 
-  const armRows = (rows: { name: string; line: ArmLine }[], decisions: boolean): string =>
+  const armRows = (
+    rows: { name: string; line: ArmLine }[],
+    decisions: boolean,
+    rates?: StatBook,
+  ): string =>
     rows
       .map((r) => {
+        // ⚠️ THE SAME SPLIT THE HITTERS GET, and it was missing here. batRows()
+        // has always taken the season book so a box score reads "2 for 4, and
+        // he is hitting .312" — the game on the left, the year on the right.
+        // The arms were printing an ERA folded from the three innings in this
+        // one column set, so one table was making two different claims: 13.50
+        // beside a man carrying a 2.81. Counting columns are the night's; rate
+        // columns are the season's; that is what a box score has always been.
+        const year = rates?.arm[r.name] ?? r.line;
         // In a box score the decision is a letter beside the name; over a season
         // it is a record, and W-L is the column everyone reads first.
         const mark = r.line.w ? ' <b style="color:var(--good)">W</b>' : r.line.l ? ' <b style="color:var(--bad)">L</b>' : '';
@@ -3704,7 +3727,7 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
           (decisions ? `<td>${r.line.w}-${r.line.l}</td>` : '') +
           `<td>${ip(r.line.outs)}</td><td>${r.line.h}</td><td>${r.line.r}</td><td>${r.line.er}</td>` +
           `<td>${r.line.bb}</td><td>${r.line.k}</td>` +
-          `<td class="tot">${era(r.line).toFixed(2)}</td><td>${whip(r.line).toFixed(2)}</td></tr>`
+          `<td class="tot">${era(year).toFixed(2)}</td><td>${whip(year).toFixed(2)}</td></tr>`
         );
       })
       .join('');
@@ -3721,6 +3744,10 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
   const clubs = (b: StatBook): string[] => [
     ...new Set(Object.values(b.bat).map((l) => l.tm)),
   ];
+  // Whose name goes on the panel. The season owns its rosters; an exhibition
+  // has only the two clubs on the field, which are the two in this box score.
+  const named = (abbr: string): string =>
+    (s ? teamOf(s, abbr) : abbr === game.home.abbr ? game.home : game.away).name;
   const boxPanels = box
     ? clubs(box)
         .map((abbr) => {
@@ -3732,10 +3759,11 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
             .map(([name, line]) => ({ name, line }));
           return (
             panel(
-              `${teamOf(s, abbr).name.toUpperCase()} — BATTING`,
+              `${named(abbr).toUpperCase()} — BATTING`,
               // The rates are the season's, not the night's. See batRows().
-              head(BAT) + `<tbody>${batRows(bats, s.stats)}</tbody>`,
-            ) + panel(`${abbr} — PITCHING`, head(ARM) + `<tbody>${armRows(arms, false)}</tbody>`)
+              // Without a season they are the night's, which is all there is.
+              head(BAT) + `<tbody>${batRows(bats, s?.stats)}</tbody>`,
+            ) + panel(`${abbr} — PITCHING`, head(ARM) + `<tbody>${armRows(arms, false, s?.stats)}</tbody>`)
           );
         })
         .join('')
@@ -3748,7 +3776,7 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
   // and "0.00" are different claims over 26 at-bats and over 300, and in a
   // fourteen-game season they are ALWAYS over the small number — a board that
   // prints the rate alone is asking the player to trust a sample he cannot see.
-  const book = s.stats;
+  const book = s?.stats;
   const board = (
     title: string,
     rows: { name: string; line: { tm: string } }[],
@@ -3786,8 +3814,10 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
   // ---- and your own club, everybody, in the order they bat. This is the one
   // list where a man hitting .180 matters as much as the league leader does:
   // he is in YOUR lineup and you can move him. See lineupPanel().
-  const you = teamOf(s, s.you);
-  const mine = book
+  const you = s ? teamOf(s, s.you) : null;
+  const mine = !s || !you
+    ? ''
+    : book
     ? panel(
         `${you.name.toUpperCase()} — THE YEAR SO FAR`,
         head(BAT) + `<tbody>${batRows(clubBatting(book, you.lineup.map((p) => p.name)))}</tbody>`,
@@ -3800,7 +3830,7 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
             true,
           )}</tbody>`,
       )
-    : '<div class="panel dim">No games played yet.</div>';
+      : '<div class="panel dim">No games played yet.</div>';
 
   // ⚠️ A BOX SCORE IS LABELLED WITH THE NIGHT IT IS OF, WHICH IS YESTERDAY.
   // finalize() has already handed the result to playDay(), and playDay advances
@@ -3808,15 +3838,17 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
   // and the box score of the one you just finished was headed "GAME 8 OF 28"
   // while being the box score of game seven. The leaders screen is opened from
   // the card and is about today; the box is only ever opened from the final.
-  const on = box ? s.day - 1 : s.day;
+  const on = box && s ? s.day - 1 : s?.day ?? 0;
   el.innerHTML =
     `<div class="wrap">` +
-    `<h1>${dayLabel(s, on)}</h1>` +
+    `<h1>${s ? dayLabel(s, on) : 'EXHIBITION'}</h1>` +
     `<h2>${box ? 'FINAL — THE BOX SCORE' : 'LEAGUE LEADERS'}</h2>` +
     boxPanels +
     leaderBoards +
     mine +
-    `<button class="go" data-back="1">${box ? 'ON TO THE NEXT ONE' : 'BACK TO THE CARD'} <kbd>SPACE</kbd></button>` +
+    `<button class="go" data-back="1">${
+      !s ? 'BACK TO THE FINAL' : box ? 'ON TO THE NEXT ONE' : 'BACK TO THE CARD'
+    } <kbd>SPACE</kbd></button>` +
     `</div>`;
   el.style.display = 'flex';
   el.scrollTop = 0;
@@ -4020,7 +4052,6 @@ function kickOff(
  * your click on the way past would be worse than no screen.
  */
 function showBox(): void {
-  if (!season) return;
   showStats(season, boxScore(game), () => render());
 }
 
@@ -4627,6 +4658,20 @@ function pregame(): void {
       .filter((c) => c.along > 4)
       .sort((x, y) => x.score - y.score)[0]?.b;
   };
+
+  /**
+   * A POINTER MOVES THE CURSOR RATHER THAN LIGHTING A SECOND ONE.
+   *
+   * The cursor was drawn on :hover as well as on :focus, so resting a mouse on
+   * any card that was not the focused one put two of them on screen at once.
+   * Moving the focus is the fix rather than dropping the hover style: it keeps
+   * ONE selection whichever hand is driving, and it means a click and the thing
+   * ENTER would press can never be two different buttons.
+   */
+  el.addEventListener('pointerover', (e) => {
+    const btn = (e.target as HTMLElement).closest('button');
+    if (btn && !btn.disabled) btn.focus({ preventScroll: true });
+  });
 
   addEventListener(
     'keydown',

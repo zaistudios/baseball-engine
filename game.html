@@ -312,7 +312,6 @@
         position: relative;
       }
       #start button b { color: var(--hot); font-weight: 700; letter-spacing: 1px; }
-      #start button:hover:not(:disabled),
       #start button:focus { border-color: var(--hot); outline: none; }
 
       /* THE CURSOR, AND IT BLINKS — which is the whole difference between a
@@ -327,8 +326,13 @@
 
          ⚠️ DIRECT CHILDREN OF THE GRID ONLY. A dial's two arrows are buttons
          too, and a cursor inside the control it is pointing at reads as a
-         glyph somebody left behind. */
-      #start .keys > button:hover:not(:disabled)::before,
+         glyph somebody left behind.
+
+         ⚠️ AND HOVER DOES NOT DRAW ONE. It used to, which put TWO cursors on
+         screen the moment a mouse rested on a card that was not the focused
+         one — a console menu has exactly one. The pointer MOVES the cursor
+         instead; see the pointerover handler in pregame(). One selection,
+         whichever hand is driving. */
       #start .keys > button:focus::before {
         content: "\25B6"; position: absolute; left: 5px; top: 50%;
         margin-top: -0.6em; color: var(--hot); font-size: 12px;
