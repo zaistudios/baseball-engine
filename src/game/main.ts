@@ -2399,11 +2399,23 @@ function renderControls(): void {
     // Squaring up is legal between pitches only, so the button is live in
     // 'idle' and reads as a stance the rest of the time.
     const bstat = statsOf(currentBatter(game)).bunt;
+    // ⚠️ AND IT ONLY SAYS "MOVES THE RUNNER" WHEN ONE ACTUALLY MOVES. The
+    // sacrifice in inning.ts is gated on fewer than two outs, and there has to
+    // be somebody to move — so with two down, or with the bases empty, the line
+    // was promising a sacrifice the engine will not give. What a bunt is in
+    // that state is a bunt for a hit: BUNT_HIT is 11%, which is the real offer.
+    const sacrifice = game.outs < 2 && game.bases.some((b) => b !== null);
     const buntBtn =
       `<button style="margin-top:8px;width:100%;text-align:center" data-bunt="1"` +
       `${phase === 'idle' ? '' : ' disabled'} class="${bunting ? 'on' : ''}">` +
       `${bunting ? 'SQUARED TO BUNT' : 'BUNT'} — ${showScale(bstat)} <kbd>B</kbd><br>` +
-      `<kbd>${bunting ? 'offers at strikes only · foul with 2K is out' : 'moves the runner, costs the out'}</kbd></button>`;
+      `<kbd>${
+        bunting
+          ? 'offers at strikes only · foul with 2K is out'
+          : sacrifice
+            ? 'moves the runner, costs the out'
+            : 'for a hit — no sacrifice on from here'
+      }</kbd></button>`;
 
     // The number and the record, together. A record you cannot see is not a
     // record — it is the steal button with no odds on it all over again.
@@ -3779,9 +3791,16 @@ function showStats(s: Season, box: StatBook | null, back: () => void): void {
       )
     : '<div class="panel dim">No games played yet.</div>';
 
+  // ⚠️ A BOX SCORE IS LABELLED WITH THE NIGHT IT IS OF, WHICH IS YESTERDAY.
+  // finalize() has already handed the result to playDay(), and playDay advances
+  // the cursor — so `s.day` on this screen is the game you are about to play
+  // and the box score of the one you just finished was headed "GAME 8 OF 28"
+  // while being the box score of game seven. The leaders screen is opened from
+  // the card and is about today; the box is only ever opened from the final.
+  const on = box ? s.day - 1 : s.day;
   el.innerHTML =
     `<div class="wrap">` +
-    `<h1>${dayLabel(s)}</h1>` +
+    `<h1>${dayLabel(s, on)}</h1>` +
     `<h2>${box ? 'FINAL — THE BOX SCORE' : 'LEAGUE LEADERS'}</h2>` +
     boxPanels +
     leaderBoards +
