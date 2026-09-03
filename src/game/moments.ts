@@ -668,9 +668,9 @@ interface Scenario {
  *
  * ⚠️ ORDER IS THE TIE-BREAK AND IT IS DELIBERATE. Several of these are usually
  * true at once — a club on a losing run generally has a man slumping too — so
- * the list is sorted by how much the moment is ABOUT something. The deadline
- * and the manager are scheduled events that happen to every club; they go
- * last, so an earned scenario takes the day ahead of a calendar one.
+ * the list is sorted by how much the moment is ABOUT something. The two on the
+ * calendar are not in this list at all: they have one day each and are checked
+ * first on it. See DATED.
  *
  * ⚠️ TRADE-OFFS ONLY, WHICH IS THE RULE THIS FILE WAS BUILT ON. Not one of
  * these hands you value for having played well — the slump trades a better
@@ -687,15 +687,33 @@ interface Scenario {
  * (a skid, the deadline, the manager) keep bare ids: those are once a year by
  * nature.
  *
- * ⚠️ THE LAST TWO KEEP THEIR FIXED DAYS ON PURPOSE. A quiet season — no
+ * ⚠️ THE DATED PAIR KEEP THEIR FIXED DAYS ON PURPOSE. A quiet season — no
  * slumps, no rotation muddle — would otherwise ask you nothing at all, and a
  * franchise mode whose one decision layer can silently never appear is worse
  * than one that is occasionally on rails.
  */
-const SCENARIOS: readonly Scenario[] = [
+const EARNED: readonly Scenario[] = [
   { id: 'slump', offer: (s, d) => (inWindow(s, d) ? slump(s, d) : null) },
   { id: 'rotation', offer: (s, d) => (inWindow(s, d) ? rotation(s, d) : null) },
   { id: 'skid', offer: (s, d) => (inWindow(s, d) ? skid(s, d) : null) },
+];
+
+/**
+ * THE TWO ON THE CALENDAR, AND THEY GET THEIR DAY.
+ *
+ * ⚠️ THEY USED TO BE THE LAST TWO ROWS OF ONE LIST, WHICH TOOK THE DAY AWAY
+ * FROM THEM. Each of these offers on exactly ONE day of the year, and momentOn
+ * returns the first scenario that offers anything — so a man hitting .180 on
+ * the deadline itself took the day, and the deadline was gone for good. It is
+ * not rare: measured over forty twenty-eight-game seasons the trade was asked
+ * in 18 of them. A scenario with one day to fire on cannot also be last in the
+ * queue, and the note below has said all along that the whole reason these two
+ * are dated is that a season must never be able to ask you nothing.
+ *
+ * For the same reason they are checked BEFORE restBetween(): a slump three days
+ * earlier must not be able to eat the only deadline of the year either.
+ */
+const DATED: readonly Scenario[] = [
   { id: 'deadline', offer: (s, d) => (d === momentDays(s)[0] ? deadline(s, d) : null) },
   { id: 'bench', offer: (s, d) => (d === momentDays(s)[1] ? bench(s, d) : null) },
 ];
@@ -717,6 +735,13 @@ export function momentOn(s: Season, day: number = s.day): Moment | null {
   if (day >= regularDays(s)) return null;
   if ((s.decided ?? []).includes(day)) return null;
 
+  const used = new Set(s.seen ?? []);
+  // The two dated ones own their day — see DATED. Checked before the earned
+  // scenarios AND before the rest gate, because either one could take the only
+  // day of the year they have.
+  const dated = firstOf(DATED, s, day, used);
+  if (dated) return dated;
+
   // ⚠️ THE FRONT OFFICE DOES NOT RING EVERY MORNING. See restBetween().
   const last = Math.max(-Infinity, ...(s.decided ?? []));
   if (day - last < restBetween(s)) return null;
@@ -726,8 +751,17 @@ export function momentOn(s: Season, day: number = s.day): Moment | null {
   // slumping — `slump:Ed Mancuso` — so a DIFFERENT hitter going cold in August
   // is a different question and gets asked. The scenario itself filters out
   // subjects it has already raised, so this is a backstop rather than the rule.
-  const used = new Set(s.seen ?? []);
-  for (const sc of SCENARIOS) {
+  return firstOf(EARNED, s, day, used);
+}
+
+/** The first scenario in a list with something to say that has not been said. */
+function firstOf(
+  list: readonly Scenario[],
+  s: Season,
+  day: number,
+  used: ReadonlySet<string>,
+): Moment | null {
+  for (const sc of list) {
     const m = sc.offer(s, day);
     if (m && !used.has(m.id)) return m;
   }
