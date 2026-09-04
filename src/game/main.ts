@@ -4186,7 +4186,7 @@ function showCareer(back: () => void): void {
     : `<div class="panel dim">Nothing in the book yet. Finish a franchise and it lands here.</div>`;
 
   el.innerHTML =
-    `<div class="wrap"><h1>ALL-STAR BASEBALL</h1><h2>THE RECORD BOOK</h2>` +
+    `<div class="wrap"><h1>BASEDBALL</h1><h2>THE RECORD BOOK</h2>` +
     summary +
     recordPanel +
     table +
@@ -4256,8 +4256,8 @@ function kickOff(
   );
 
   elTitle.textContent = season
-    ? `ALL-STAR BASEBALL — ${season.you} FRANCHISE · ${dayLabel(season)}`
-    : 'ALL-STAR BASEBALL — EXHIBITION';
+    ? `BASEDBALL — ${season.you} FRANCHISE · ${dayLabel(season)}`
+    : 'BASEDBALL — EXHIBITION';
   phase = youBat() ? 'idle' : 'calling';
   elBanner.textContent = '';
   render();
@@ -4538,7 +4538,7 @@ function pregame(): void {
    * something you do BETWEEN franchises without losing the one you are in.
    */
   const drawLeague = (): void => {
-    prompt.textContent = 'YOUR LEAGUE';
+    prompt.textContent = 'IMPORT OR EXPORT';
     const status = leagueStatus();
     const ladder = [...LEAGUE].sort((a, b) => clubValue(b) - clubValue(a));
     const deepest = ladder[0];
@@ -4563,9 +4563,11 @@ function pregame(): void {
 
     grid.innerHTML =
       `<div class="dim" style="grid-column:1/-1;line-height:1.7">${where}<br>` +
-      'Fill the box, copy it into a text editor, change what you like and paste it back. ' +
-      'You can paste <b>one club</b> on its own too — it goes over the club with the same ' +
-      'abbreviation.<br>A franchise already in progress keeps the clubs it started with.' +
+      'This is the league as a document — fill the box and copy it out to keep a league or ' +
+      'hand it to somebody, paste one back to load it. You can paste <b>one club</b> on its ' +
+      'own too — it goes over the club with the same abbreviation.<br>' +
+      'To change a club, <b>EDIT A CLUB</b> is the screen for it. ' +
+      'A franchise already in progress keeps the clubs it started with.' +
       '</div>' +
       said +
       `<div style="grid-column:1/-1"><textarea id="leaguebox" spellcheck="false" ` +
@@ -4646,10 +4648,17 @@ function pregame(): void {
         )
         .join('');
 
+    const notes = leagueSays.length
+      ? `<div class="says" style="grid-column:1/-1">${leagueSays
+          .map((p) => `<div>${escapeText(p)}</div>`)
+          .join('')}</div>`
+      : '';
+
     // ---- the club picker.
     if (editClub === null) {
       prompt.textContent = 'EDIT A CLUB';
       grid.innerHTML =
+        notes +
         `<div class="dim" style="grid-column:1/-1;line-height:1.7">` +
         'Pick a club. Everything you change is kept in memory until you press ' +
         '<b>SAVE THE LEAGUE</b>, which checks the whole thing the same way a paste is ' +
@@ -4664,6 +4673,8 @@ function pregame(): void {
         `<div class="edbar" style="grid-column:1/-1">` +
         `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
         `</button>` +
+        `<button data-ed-go="paste"><b>IMPORT OR EXPORT</b><br>` +
+        `the whole league as JSON — drops changes</button>` +
         `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
       return;
     }
@@ -4713,12 +4724,6 @@ function pregame(): void {
         '</div>'
       );
     };
-
-    const notes = leagueSays.length
-      ? `<div class="says" style="grid-column:1/-1">${leagueSays
-          .map((p) => `<div>${escapeText(p)}</div>`)
-          .join('')}</div>`
-      : '';
 
     grid.innerHTML =
       notes +
@@ -4835,16 +4840,16 @@ function pregame(): void {
       const status = leagueStatus();
       const leagueSub =
         status === 'custom'
-          ? `yours — ${LEAGUE.length} clubs`
+          ? `your own clubs — ${LEAGUE.length} of them`
           : status === 'broken'
-            ? 'the stored one will not read'
-            : `the ${LEAGUE.length} that shipped`;
+            ? 'the league you stored will not read'
+            : `names, ratings and rosters — ${LEAGUE.length} clubs`;
       grid.innerHTML =
         resume +
         card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
         card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
         book +
-        card('league', 'LEAGUE', leagueSub);
+        card('league', 'CUSTOMIZE', leagueSub);
       return;
     }
     if (mode === 'league') {
@@ -4868,7 +4873,12 @@ function pregame(): void {
       `<div class="chalk">${
         mine ? `WHO ${escapeText(mine.abbr)} PLAYS` : `${LEAGUE.length} CLUBS · ROSTER RANK AND HOW THEY PLAY`
       }</div>` +
-      LEAGUE.map((c, n) => (c === mine ? '' : clubCard(c, n))).join('');
+      LEAGUE.map((c, n) => (c === mine ? '' : clubCard(c, n))).join('') +
+      // ⚠️ THE SAME data-go THE MODE SCREEN USES. This is the screen where
+      // somebody decides they want a different club rather than a different
+      // one of these thirty, and it was a dead end — the editor was reachable
+      // only from a card two screens back.
+      (mine ? '' : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters'));
   };
 
   /**
@@ -4991,6 +5001,16 @@ function pregame(): void {
     if (go === 'exhibition' || go === 'franchise' || go === 'league') {
       mode = go;
       leagueSays = [];
+      // ⚠️ CUSTOMIZE LANDS ON THE EDITOR, NOT ON THE JSON BOX. The box came
+      // first and so it was the front door for a while, which meant the answer
+      // to "can I rename my club" was "export a quarter-megabyte document".
+      // The editor is the customization; the box is transport for a league you
+      // want to keep or hand to somebody, and it is one button away.
+      if (go === 'league') {
+        editing = workingCopy(LEAGUE_SOURCE);
+        editClub = null;
+        editWho = null;
+      }
       drawn();
       return;
     }
@@ -5049,9 +5069,18 @@ function pregame(): void {
       const at = editClub;
 
       if (ed === 'back') {
+        // The editor is the front door now, so BACK is out to the modes rather
+        // than back to the box behind it.
         editing = null;
         editClub = null;
         editWho = null;
+        mode = null;
+        leagueSays = [];
+      } else if (ed === 'paste') {
+        editing = null;
+        editClub = null;
+        editWho = null;
+        leagueSays = [];
       } else if (ed === 'clubs') {
         editClub = null;
         editWho = null;

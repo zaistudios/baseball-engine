@@ -82,7 +82,7 @@ async function main() {
   const rng = makeRng(seedFromString(SEED));
   let match = newMatch(INNINGS_PER_MATCH);
 
-  write(`\n  ALL-STAR BASEBALL — terminal at-bat\n`);
+  write(`\n  BASEDBALL — terminal at-bat\n`);
   write(`  facing ${pitcher.name} — ${pitcher.blurb}\n`);
   write(`  ${DIVISION} #${MATCH} · seed ${SEED}${SLOW > 1 ? ' · SLOW' : ''}\n`);
   write(`  SPACE swings, T takes, S sends the runner, Ctrl-C quits.\n`);

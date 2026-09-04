@@ -55,7 +55,7 @@ npm run export  # fold it into ONE html file you can play offline
 npm run release # ...and ship that file as a GitHub release
 ```
 
-`npm run export` writes **`dist/baseball-engine-v<version>.html`** — the whole
+`npm run export` writes **`dist/basedball-v<version>.html`** — the whole
 game in a single 231 kB file with nothing external in it. Double-click it, put it
 on a USB stick, email it to yourself. It is a classic script at the end of
 `<body>` rather than a module, because browsers refuse to fetch ES modules
@@ -231,17 +231,21 @@ relievers had no cross-game rest at all. They do now; see below.
 
 ### Bring your own league
 
-**The clubs are not fixed.** `LEAGUE` on the title screen exports the whole
-league as JSON, and whatever you paste back is what the game plays — every
-screen follows: the pickers, the schedule, the standings, the rank on the
-pre-game card. Rename a club, re-rate a shortstop, cut the league to six, write
-thirty of your own.
+**The clubs are not fixed.** `CUSTOMIZE` on the title screen — and on the club
+picker, where somebody actually decides they want a different club — opens the
+editor: names, ratings, identities and all four roster lists, club by club.
+Whatever it saves is what the game plays, and every screen follows: the
+pickers, the schedule, the standings, the rank on the pre-game card. Rename a
+club, re-rate a shortstop, cut the league to six, write thirty of your own.
 
-- **The box is transport, not an editor.** The document is ~230 kB over 8,700
-  lines (`node scripts/leaguedoc.ts`). Fill the box, copy it into something with
-  a search function, paste it back. **You can paste one club on its own** — it
-  goes over the club with the same abbreviation, which is the edit most people
-  actually want.
+- **The editor is the way in; the box is transport.** `IMPORT OR EXPORT` behind
+  it hands you the league as JSON — ~230 kB over 8,700 lines
+  (`node scripts/leaguedoc.ts`) — to keep a league, hand it to somebody, or
+  bulk-edit it somewhere with a search function. **You can paste one club on its
+  own**, and it goes over the club with the same abbreviation.
+- **Both go through the same gate.** The editor serialises what it built and
+  hands it to `saveCustomLeague()` exactly like a paste, so a mouse-made club is
+  held to the rules a typed one is and there is one storage path.
 - **Anything illegal is refused with the club named**, before a byte is stored:
   `LAC rotation 1: puts hitters away with a knuckleball he never throws.` The
   rules are `checkLeague()` in `league.ts`, and **the thirty that ship are
@@ -789,7 +793,7 @@ npm run dev     # then open http://localhost:5173
 npm run demo    # check + build + fold it all into ONE html file
 ```
 
-`npm run demo` writes `dist/all-star-baseball-v<version>.html` (the roguelike) — the version
+`npm run demo` writes `dist/basedball-roguelike-v<version>.html` (the roguelike) — the version
 comes from package.json, so it is `v1.1.0` today — the entire game
 in a single file with nothing external in it. Double-click it to play offline,
 drag it into itch.io, or drop it on any static host. It also writes

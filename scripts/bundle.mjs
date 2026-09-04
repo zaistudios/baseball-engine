@@ -23,8 +23,8 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
  * wrong would ship a confident, working, entirely different game.
  */
 const page = process.argv[2] ?? 'index';
-const NAMES = { index: 'all-star-baseball', game: 'baseball-engine' };
-const TITLES = { index: 'All-Star Baseball', game: 'Baseball Engine' };
+const NAMES = { index: 'basedball-roguelike', game: 'basedball' };
+const TITLES = { index: 'Basedball Roguelike', game: 'Basedball' };
 if (!NAMES[page]) {
   throw new Error(`unknown page ${page}`);
 }

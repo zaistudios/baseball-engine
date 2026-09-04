@@ -77,7 +77,7 @@ const steps = [
   ['git', ['tag', '-a', tag, '-m', tag]],
   ['git', ['push', 'origin', tag]],
   ['gh', ['release', 'create', tag, file,
-    '--title', `${tag} — Baseball Engine`,
+    '--title', `${tag} — Basedball`,
     '--generate-notes',
     // The one line the notes must not lose. Generated notes are appended
     // under it, so the commit log still tells the story.
