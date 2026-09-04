@@ -44,19 +44,43 @@ console.log(`after   ${pct(after,'single')}  ${pct(after,'double')}  ${pct(after
 console.log(`real     65.0   20.0    2.0   13.0`);
 
 // --- what does the gap distance actually look like?
-const gaps: number[] = [];
+//
+// ⚠️ BROKEN OUT BY OUTCOME, AND THAT IS THE WHOLE POINT OF THIS BLOCK. Every
+// threshold in placement.ts is set against ITS OWN population, because they do
+// not share one: a ground ball dies in an infield where four men stand close
+// together and never lands more than about 50ft from anybody, while a fly ball
+// routinely lands 90ft from the nearest glove. Read off the pooled row instead
+// and you get TRIPLE_GAP_FT sitting above the ceiling of the triples (which
+// deleted every three-bagger in the game), or one shared HOLE_FT that can only
+// ever convert fly balls.
+//
+// The comments on GAP_FT, AT_HIM_FT, TRIPLE_GAP_FT, ROBBED_FT and HOLE_FT all
+// send the reader here. This is the table they mean.
+const seen: Record<string, number[]> = {};
 const rng2 = makeRng(7);
-for (let i = 0; i < 40000; i++) {
+for (let i = 0; i < 120000; i++) {
   const h = resolveSwing({
     offsetMs: rng2.range(-90, 90),
     pitchType: ALL_PITCH_TYPES[rng2.int(0, 4)]!,
     stats: { power: 0.7 + rng2.next() * 0.9, contact: 0.7 + rng2.next() * 0.6, clutch: 1 },
     foulBoost: FOUL_BOOST,
   }, rng2);
-  if (!isHit(h.outcome)) continue;
-  gaps.push(place(h).gapFt);
+  if (h.outcome === 'foul' || h.outcome === 'foul_out' || h.outcome === 'strikeout') continue;
+  (seen[h.outcome] ??= []).push(place(h).gapFt);
+  if (isHit(h.outcome)) (seen['ALL HITS'] ??= []).push(place(h).gapFt);
 }
-gaps.sort((a, b) => a - b);
-const q = (p: number) => gaps[Math.floor(gaps.length * p)]!.toFixed(0);
+
+const QS = [0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98];
 console.log('');
-console.log(`gapFt on hits: p10 ${q(0.1)}  p25 ${q(0.25)}  p50 ${q(0.5)}  p75 ${q(0.75)}  p90 ${q(0.9)}  p97 ${q(0.97)}`);
+console.log(
+  'gapFt by outcome'.padEnd(14) + '     n' + QS.map((p) => `p${Math.round(p * 100)}`.padStart(6)).join(''),
+);
+for (const k of ['single', 'double', 'triple', 'home_run', 'ground_out', 'line_out', 'popup', 'ALL HITS']) {
+  const g = (seen[k] ?? []).slice().sort((a, b) => a - b);
+  if (g.length === 0) continue;
+  console.log(
+    k.padEnd(14) +
+      String(g.length).padStart(6) +
+      QS.map((p) => g[Math.floor(g.length * p)]!.toFixed(0).padStart(6)).join(''),
+  );
+}
