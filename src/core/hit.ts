@@ -381,6 +381,49 @@ const LAUNCH_ANGLE: Record<Outcome, readonly [number, number]> = {
 export const DIRECTION_DEG_PER_MS = 45 / 80;
 
 /**
+ * HOW FAR AN INSIDE PITCH PULLS THE BALL, and an outside one pushes it.
+ *
+ * ⚠️ THIS IS THE TERM THAT WAS MISSING, and its absence was the reason every
+ * ball in the game went to centre field. Direction used to be timing and
+ * NOTHING ELSE, which sounds reasonable until you notice what it implies: the
+ * better you time a pitch, the closer to zero your offset, and therefore the
+ * straighter you hit it. Measured over 99k balls in play the spray on a home
+ * run was p10 -8° / p90 +8° — tighter than the spray on a ground out — and
+ * three men (CF, SS, 2B) fielded 86% of everything hit.
+ *
+ * Real baseball works the other way round. A ball squared up is pulled or
+ * pushed by WHERE IT WAS, not by how late you were: you get the barrel out in
+ * front of one on the hands and hook it, you let one on the outer half travel
+ * and serve it the other way. That is a fact about the pitch, not about the
+ * swing, so it survives perfect timing — which is exactly what the timing term
+ * cannot do.
+ *
+ * ⚠️ IT IS BATTER-RELATIVE ALREADY. `AXES` calls a location 'in' or 'away'
+ * from the hitter's point of view, so this term is signed in "pull degrees"
+ * and the existing left-handed flip below turns pull into the right field it
+ * is for a lefty. Do not add a second hand check here.
+ *
+ * 13° is set against the fielder share rather than against a spray chart: it
+ * is the smallest value that gets the corner outfielders and the corner
+ * infielders a real share of the work without emptying the middle.
+ */
+export const LOCATION_PULL_DEG = 18;
+
+/**
+ * How much the same pitch in the same spot varies from swing to swing.
+ *
+ * Two men can hit the identical pitch at the identical millisecond and put it
+ * forty feet apart — where on the barrel it caught, how the hands worked, what
+ * the ball did last. Without a noise term the two feeder terms above are
+ * deterministic and the spray chart comes out as three thin spokes.
+ *
+ * ⚠️ IT IS A REAL RNG DRAW, so it SHIFTS THE STREAM — see the ordering note in
+ * resolveSwing(). Every seeded season in the project replays differently after
+ * this, which is the price of the feature and not a bug in it.
+ */
+export const SPRAY_DEG = 12;
+
+/**
  * ⚠️ WHICH WAY IS "PULLED" DEPENDS ON WHICH SIDE HE HITS FROM.
  *
  * Fixed 2026-08-20. `direction` was `offsetMs * DIRECTION_DEG_PER_MS` with no
@@ -394,8 +437,25 @@ export const DIRECTION_DEG_PER_MS = 45 / 80;
  * overhead replay, and nothing read it for RESULTS until defense.ts started
  * deciding who fields the ball.
  */
-export function directionFor(offsetMs: number, batterHand: Hand = 'R'): number {
-  const pulled = offsetMs * DIRECTION_DEG_PER_MS;
+export function directionFor(
+  offsetMs: number,
+  batterHand: Hand = 'R',
+  /** Where the pitch was. Defaults to dead centre, which adds nothing. */
+  location: PitchLocation = 'middle',
+  /** This swing's share of SPRAY_DEG, pre-rolled by the caller. */
+  sprayDeg = 0,
+): number {
+  const [, side] = AXES[location];
+  // ⚠️ PULLED IS NEGATIVE HERE. Negative degrees is left field (see web/plot.ts)
+  // and a right-handed hitter pulls to left, which is why the timing term reads
+  // the way it does: early is a negative offset and early is pulled. So an
+  // INSIDE pitch subtracts. Writing this the intuitive way round — "inside, so
+  // add" — jams a righty and sends it to right field, which is backwards, and
+  // it hides in the aggregate because the two hands cancel.
+  const pulled =
+    offsetMs * DIRECTION_DEG_PER_MS +
+    (side === 'in' ? -LOCATION_PULL_DEG : side === 'away' ? LOCATION_PULL_DEG : 0) +
+    sprayDeg;
   const signed = batterHand === 'L' ? -pulled : pulled;
   return Math.max(-45, Math.min(signed, 45));
 }
@@ -594,19 +654,42 @@ export function applyLocation(probs: OutcomeTable, location: PitchLocation): Out
   for (const k of keys) p[k] *= mults[k]!;
   return normalize(p);
 }
+/**
+ * How hard each kind of ball leaves the bat, before timing and power.
+ *
+ * ⚠️ EVERY ROW EXCEPT `home_run` WAS RAISED WHEN powerVelocity() WAS SOFTENED,
+ * and the two changes are one change. The old power term was worth up to +44%,
+ * so these numbers were never what the ball actually left at — they were the
+ * bottom of a range that the multipliers carried into real territory and then
+ * past it, into MAX_EXIT_VELOCITY. Cutting the multiplier without raising the
+ * table dropped the median GROUND BALL to 66mph, which plot.ts turns into a
+ * 111-foot roller: measured, the pitcher went from fielding 3.9% of everything
+ * in play to 11.6%, because half the ground balls now died before they reached
+ * the middle infield.
+ *
+ * So these are set where the ball should ACTUALLY be, and the multipliers are
+ * a nudge around them rather than the thing that gets them there. Sanity check
+ * against real averages, after a typical timing grade and average power:
+ *
+ *   ground ball 86   line drive 93   fly out 89   popup 78
+ *   single 88        double 98       triple 97    home run 103
+ *
+ * `home_run` is the one row that did not move: it was already at the real
+ * number, which is exactly why every home run in the game used to saturate.
+ */
 const EXIT_VELOCITY: Record<Outcome, number> = {
   strikeout: 0,
-  popup: 65,
-  ground_out: 75,
-  line_out: 95,
-  foul: 70,
+  popup: 83,
+  ground_out: 90,
+  line_out: 90,
+  foul: 77,
   // Never read on the normal path — a caught foul keeps the velocity its
   // `foul` roll gave it. See LAUNCH_ANGLE.foul_out.
-  foul_out: 62,
-  single: 85,
-  double: 95,
-  triple: 100,
-  home_run: 110,
+  foul_out: 69,
+  single: 82,
+  double: 86,
+  triple: 84,
+  home_run: 91,
 };
 
 /**
@@ -618,6 +701,50 @@ const EXIT_VELOCITY: Record<Outcome, number> = {
  * on their own; nothing was capping the product.
  */
 const MAX_EXIT_VELOCITY = 122;
+
+/**
+ * SWING-TO-SWING SPREAD ON THE VELOCITY, and it exists to get the ball OFF THE
+ * CEILING.
+ *
+ * ⚠️ MEASURED. The three multipliers above compound hard — a 1.5-power hitter
+ * on perfect timing asks for 110 × 1.1 × 1.4 = 169mph — so MAX_EXIT_VELOCITY
+ * was not a rare safety net, it was the answer. Across 99k balls in play the
+ * MEDIAN exit velocity of a double, a triple and a home run was all 122, the
+ * cap itself, and singles came in at 110. Everything well struck left the bat
+ * at the same speed.
+ *
+ * plot.ts turns velocity into distance, so a pinned velocity is a pinned
+ * distance: every home run measured 460 feet, which is the OTHER clamp in
+ * plot.ts, and every double died at the wall. The two ceilings were stacked and
+ * the whole population sat on top of them.
+ *
+ * This is a plain multiplicative spread, centred BELOW 1 so the product clears
+ * the cap on most swings instead of on all of them. It changes no outcome — the
+ * table has already spoken by the time this is drawn — so the only thing it
+ * moves is how far the ball is drawn and whether describePlay() calls it hard.
+ */
+const EV_SPREAD_LO = 0.9;
+const EV_SPREAD_HI = 1.1;
+
+/**
+ * WHAT POWER IS WORTH OFF THE BAT, and it is far less than it was.
+ *
+ * ⚠️ THIS WAS `0.8 + power * 0.4` AND IT WAS THE REASON NOTHING GOT UNDER THE
+ * CAP. Power runs to about 1.6 on a real card, so that expression asked for a
+ * 44% velocity bonus — a slugger hitting the ball half again as hard as an
+ * average man. Nobody does that. The gap between the hardest-hitting team in
+ * baseball and the softest is about six miles an hour, call it 7%.
+ *
+ * With the old slope every well-struck ball multiplied past MAX_EXIT_VELOCITY
+ * and came back as exactly 122, so power stopped buying anything at the top of
+ * the range and every home run travelled the same distance.
+ *
+ * ⚠️ POWER STILL DOES ITS REAL JOB SOMEWHERE ELSE. applyPower() moves the
+ * OUTCOME TABLE — a strong hitter hits more home runs — which is where the
+ * rating is supposed to pay off. This term only decides how hard the ball that
+ * was already called a home run left the bat, and it should be a nudge.
+ */
+const powerVelocity = (power: number): number => 0.88 + power * 0.14;
 
 const VELOCITY_BY_TIMING: Record<TimingGrade, number> = {
   perfect: 1.1,
@@ -801,9 +928,17 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
   const launchAngle = loAngle === hiAngle ? loAngle : rng.range(loAngle, hiAngle);
   const exitVelocity = Math.min(
     MAX_EXIT_VELOCITY,
-    EXIT_VELOCITY[rolled] * VELOCITY_BY_TIMING[timing] * (0.8 + stats.power * 0.4),
+    EXIT_VELOCITY[rolled] *
+      VELOCITY_BY_TIMING[timing] *
+      powerVelocity(stats.power) *
+      rng.range(EV_SPREAD_LO, EV_SPREAD_HI),
   );
-  const fair = directionFor(input.offsetMs, input.batterHand);
+  const fair = directionFor(
+    input.offsetMs,
+    input.batterHand,
+    location,
+    rng.range(-SPRAY_DEG, SPRAY_DEG),
+  );
 
   // A foul goes outside the lines, and a soft steep one gets caught.
   const foul = rolled === 'foul';

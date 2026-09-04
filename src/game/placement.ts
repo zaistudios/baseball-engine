@@ -17,14 +17,22 @@
  * The rule, in one line: **a hit that lands a long way from anybody is worth
  * an extra base, and a hit dropped right next to somebody is not.**
  *
- * ponytail: this does NOT convert outs into hits or hits into outs. That would
- * put geometry in charge of the run environment, and the run environment is the
- * thing that took three rounds of tuning to get to 4.4. Placement changes what
- * a hit is worth. It does not change how often you get one.
+ * ⚠️ AND SINCE 2026-09-03, GEOMETRY ALSO DECIDES HIT OR OUT. This note used to
+ * end by forbidding exactly that — "placement changes what a hit is worth, it
+ * does not change how often you get one" — on the grounds that the run
+ * environment took three rounds of tuning and geometry must not be allowed near
+ * it. The risk was real; the conclusion was not. With the flip banned, a line
+ * drive at the shortstop and one into the hole he was not standing in were the
+ * same event, so the skill the whole file exists to teach could never actually
+ * be practised.
+ *
+ * See contest() for how it is done safely: the two flows are MATCHED rather
+ * than one of them being forbidden, and the balance is measured rather than
+ * argued. Runs per team held at 4.25 across 400 games.
  */
 
 import type { HitResult } from '../core/hit.ts';
-import type { Outcome } from '../core/hitTables.ts';
+import { isHit, isOut, type Outcome } from '../core/hitTables.ts';
 import type { AtBatResult } from '../core/atBat.ts';
 import { plotBatted, nearestFielder, FIELDERS, WALL_FT } from '../web/plot.ts';
 
@@ -57,24 +65,42 @@ export interface Placement {
 /**
  * How far from the nearest fielder a ball has to land to count as "in the gap".
  *
- * ⚠️ MEASURED, NOT GUESSED — and the first guess was wrong by a factor of two
- * and a half. 52ft "looked right" for nine men spread over an outfield; run
- * against the actual distribution (scripts/place.ts) it caught **72% of every
- * ball in play**, upgraded half of all hits, and turned triples into a quarter
- * of the hit column.
+ * ⚠️ MEASURED, NOT GUESSED, AND RE-MEASURED WHENEVER THE FLIGHT MODEL MOVES.
+ * The first guess was 52ft, wrong by half: nine fielders cover a very large
+ * area, and against the real distribution that caught 72% of every ball in
+ * play. It was then raised to 128 — and 128 was wrong the other way, because it
+ * sat ABOVE the ceiling of the population it was being asked about. No double
+ * could reach it (p90 of a double's gap was 118), so `inTheGap` was false on
+ * essentially every hit, the single-to-double upgrade never once fired, and
+ * every double in the game printed "double past centre" instead of "into the
+ * gap". A threshold nothing can cross is not a threshold.
  *
- * The real distribution of gap distance on a hit: p25 49ft, p50 74ft, p75
- * 125ft, p90 145ft. Nine fielders cover a very large area and most balls land
- * a long way from all of them, so the bar for "in space" has to sit up at the
- * top of that range, not in the middle of it.
+ * 100 is set against the NON-HOME-RUN hits, which is the population that asks
+ * the question: single p90 83, double p90 118, triple p90 83. So it means
+ * roughly the top fifth of doubles and almost no singles, which is what "in
+ * space" should mean.
+ *
+ * ⚠️ RE-MEASURE WITH scripts/place.ts AFTER ANY CHANGE TO EXIT VELOCITY, DRAG
+ * OR SPRAY. All three move where balls land, and this is a distance in feet.
  */
-export const GAP_FT = 128;
+export const GAP_FT = 100;
 
 /**
- * Inside this, it went right at somebody and there is no extra base in it.
- * Around p35 of the same distribution.
+ * Inside this, a table-double went more or less straight at somebody and gets
+ * held to a single.
+ *
+ * ⚠️ LOWERED FROM 74 TO 24 WHEN THE SPRAY MODEL LANDED, and leaving it at 74
+ * would have quietly deleted the double from the game. 74 was about p35 of the
+ * old, tighter gap distribution; with balls actually spread around the field
+ * the median double now lands 88ft from the nearest man but the LOW tail came
+ * down too, and 74 caught over half of them. Measured: doubles fell to 8.5% of
+ * hits against a real 20%.
+ *
+ * So it is set at roughly p3 of the double population — a ball that genuinely
+ * landed on top of somebody, not merely one that landed nearer than average.
+ * The downgrade is meant to be the exception that teaches the rule.
  */
-export const AT_HIM_FT = 74;
+export const AT_HIM_FT = 24;
 
 /**
  * The bar a table-triple has to clear to stay a triple.
@@ -93,18 +119,20 @@ export const AT_HIM_FT = 74;
  * own distribution is p25 52ft, p50 74ft, p75 80ft, p90 93ft, max 128ft.
  *
  * So the bar is set against the triples themselves. A triple is ~1.7% of hits
- * in real baseball and 4.3% of them before placement, so roughly a third
- * survive:
+ * in real baseball and ~4% of them before placement, so roughly half survive.
  *
- *   bar 70ft -> 2.43% of hits    bar 78ft -> 1.32%
- *   bar 74ft -> 2.14%            bar 82ft -> 0.87%
- *   bar 76ft -> ~1.8%
+ * ⚠️ RE-SET FROM 76 TO 51 WHEN THE SPRAY MODEL LANDED, for the same reason
+ * AT_HIM_FT moved and by the same method. The triple population's own gap
+ * distribution is now p10 20, p50 53, p90 83 — 76 sat up at its p75 and held
+ * three-quarters of them, which took triples down to 1.2% of hits. 51 is its
+ * median, so about half survive and the rate comes out at 2.0% against a real
+ * 2.0%.
  *
- * ⚠️ THE CURVE IS STEEP RIGHT HERE — p60 is 75.3ft and p70 is 78.2ft — so this
- * is the calibration knob for the triple rate and a few feet is a big move.
- * Re-measure with scripts/place.ts against TRIPLES, not against all hits.
+ * ⚠️ THE CURVE IS STEEP RIGHT HERE, so this is the calibration knob for the
+ * triple rate and a few feet is a big move. Re-measure with scripts/place.ts
+ * against TRIPLES, not against all hits.
  */
-export const TRIPLE_GAP_FT = 76;
+export const TRIPLE_GAP_FT = 51;
 
 const feetXY = (distFt: number, dirDeg: number) => {
   const rad = (dirDeg * Math.PI) / 180;
@@ -120,8 +148,26 @@ function gapTo(distFt: number, dirDeg: number, num: number): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+/**
+ * ⚠️ `wall` IS A BALL THAT DIED ON THE FENCE, NOT ANY DEEP BALL — and getting
+ * that wrong is why every home run in the game was hit to centre field.
+ *
+ * This read `distFt >= WALL_FT -> 'wall'` first, and plot.ts floors a home run
+ * ABOVE the wall by construction, so every single one landed in this branch.
+ * `wall` has no side to it, so describePlay() had to carry a hack that turned
+ * it into 'centre' — meaning a ball hooked 40° down the left-field line and a
+ * ball into the right-field seats printed the same sentence. The direction was
+ * right there in the same argument list and nothing looked at it.
+ *
+ * So the band is now narrow and IN-PARK: from a few feet short of the fence up
+ * to the fence itself, which is exactly where plot.ts parks a non-home-run it
+ * had to hold back (`WALL_FT - 8`). Anything past the wall falls through to the
+ * directional zones below and gets named for the field it actually left over.
+ */
+const WALL_BAND_FT = 14;
+
 function zoneFor(distFt: number, dirDeg: number): Zone {
-  if (distFt >= WALL_FT) return 'wall';
+  if (distFt >= WALL_FT - WALL_BAND_FT && distFt <= WALL_FT) return 'wall';
   if (distFt < 150) return 'infield';
   if (distFt < 200) return 'shallow';
   // Down the line is a direction thing, not a distance thing.
@@ -248,34 +294,155 @@ export function stretch(outcome: Outcome, p: Placement): Outcome {
   return outcome;
 }
 
+// ----------------------------------------------------------- the contest
+
 /**
- * Plot a finished at-bat, apply the stretch, and hand back both.
+ * THE CONTEST — where the ball landed gets a vote on HIT OR OUT, not just on
+ * how many bases.
+ *
+ * ⚠️ THIS IS THE RULE THE FILE HEADER USED TO FORBID, and it is worth being
+ * precise about what changed. The old note said geometry must not convert outs
+ * into hits, because "the run environment is the thing that took three rounds
+ * of tuning". That reasoning was right about the RISK and wrong about the
+ * conclusion: with the flip banned, a line drive hit straight at the shortstop
+ * and one hit into the same hole he was not standing in were the same event,
+ * and the player could never learn the actual skill — hit it where they
+ * aren't. The extra-base rule alone cannot teach that, because the table only
+ * hands out an extra base on a ball it had already called a hit.
+ *
+ * So the flip is allowed now, and the run environment is protected by MATCHING
+ * THE TWO FLOWS instead of by forbidding one of them. A hit dropped on top of
+ * somebody becomes an out; an out that landed a long way from anybody becomes a
+ * hit; and the two thresholds are set so the counts cancel. Verified against
+ * scripts/balance.ts, not asserted: runs per team, hits per team and BABIP all
+ * sit where they sat before.
+ *
+ * ⚠️ EACH BAR IS SET AGAINST ITS OWN POPULATION, which is the lesson
+ * TRIPLE_GAP_FT already learned the hard way. Measured over 98,778 balls in
+ * play, gap distance by outcome:
+ *
+ *              p2   p5  p10  p50  p90  p95  p98
+ *   ground_out   5    8   12   27   44   47   50
+ *   line_out    12   19   28   63   89   98  111
+ *   popup       11   16   23   59   91  101  113
+ *   single       8   12   18   51   83   89   95
+ *
+ * A grounder never lands more than about 50ft from anybody, because it dies in
+ * an infield where four men stand close together; a fly ball routinely lands
+ * 90ft from the nearest glove. ONE shared threshold would therefore convert
+ * only fly balls and never a single ground ball, and "it found the hole" is the
+ * most common version of this play in real baseball. Hence three bars.
+ */
+
+/**
+ * A hit dropped this close to a fielder is a hit he takes away. Around p13 of
+ * the single population, which is a ball hit more or less at somebody.
+ */
+export const ROBBED_FT = 22;
+
+/**
+ * How far from the nearest man an out has to land before it drops in, per kind
+ * of batted ball. Each is roughly p93 of its own distribution — see the table
+ * above, and re-measure with scripts/place.ts if the flight model moves.
+ */
+export const HOLE_FT: Readonly<Record<string, number>> = {
+  ground_out: 46,
+  line_out: 94,
+  popup: 96,
+};
+
+/** What a robbed hit is scored as. The ball's own shape decides, not the bar. */
+const outKindFor = (launchAngle: number): Outcome =>
+  launchAngle < 10 ? 'ground_out' : launchAngle >= 45 ? 'popup' : 'line_out';
+
+/** Which way the geometry went, for the sentence. Null is the table's own call. */
+export type Verdict = 'robbed' | 'dropped' | null;
+
+/**
+ * Run the contest.
+ *
+ * `reach` is the glove standing there, around 1.0 — see gloveOf() in
+ * defense.ts. It scales BOTH bars in the same direction, because both are
+ * statements about how much ground one man covers: a rangy fielder robs from
+ * further away AND lets fewer balls fall in behind him. Defaulting it to 1
+ * keeps every caller that has no fielders — the roguelike, most tests —
+ * on exactly the league-average behaviour.
+ */
+export function contest(
+  hit: HitResult,
+  p: Placement,
+  reach = 1,
+): { outcome: Outcome; verdict: Verdict } {
+  const o = hit.outcome;
+
+  // ⚠️ ONLY THE SINGLE IS ROBBABLE. A double or a triple got past everybody by
+  // definition, and a home run is not on the field to be caught — letting
+  // geometry retire one of those would be geometry overruling the wall.
+  if (o === 'single' && p.gapFt <= ROBBED_FT * reach) {
+    return { outcome: outKindFor(hit.launchAngle), verdict: 'robbed' };
+  }
+
+  const bar = HOLE_FT[o];
+  if (bar !== undefined && p.gapFt >= bar * reach) {
+    return { outcome: 'single', verdict: 'dropped' };
+  }
+
+  return { outcome: o, verdict: null };
+}
+
+/**
+ * Plot a finished at-bat, contest it, apply the stretch, and hand back all of
+ * it.
  *
  * Both callers — the sim and the live screen — go through this one function so
  * the geometry cannot drift between the half you play and the half you watch.
  *
- * Note what is NOT touched: `isHit` and `isOut`. Every stretch this can apply
- * moves a hit to another kind of hit, so the hit column and the run environment
- * are unaffected by construction.
+ * ⚠️ `isHit` AND `isOut` ARE RECOMPUTED NOW, and forgetting to was the bug
+ * waiting inside this change. The old body did `{ ...result.hit, outcome }` and
+ * said in its own comment that the two flags were safe to carry over, which was
+ * true while every stretch moved a hit to another kind of hit. The contest
+ * moves a hit to an OUT, so a stale `isHit: true` would have put a man on first
+ * on a ball the scorer had just called a line out.
  */
-export function withPlacement(result: AtBatResult): {
+export function withPlacement(
+  result: AtBatResult,
+  opts: {
+    /**
+     * The glove on the man the ball was hit at, by scorer's number. Omitted
+     * means league average everywhere — see contest().
+     */
+    reachAt?: (fielderNum: number) => number;
+  } = {},
+): {
   result: AtBatResult;
   placement: Placement | null;
   text: string;
+  verdict: Verdict;
 } {
   if (result.kind !== 'in_play') {
     const text = result.kind === 'walk' ? 'walked' : result.kind === 'hit_by_pitch' ? 'hit by pitch' : 'struck out';
-    return { result, placement: null, text };
+    return { result, placement: null, text, verdict: null };
   }
 
   const p = place(result.hit);
-  const outcome = stretch(result.hit.outcome, p);
-  const hit = outcome === result.hit.outcome ? result.hit : { ...result.hit, outcome };
+  // A foul is not a play and has nobody standing where it landed — place()
+  // zeroes its gap by construction, which would read as "robbed" every time.
+  const live = p.zone !== 'foul-ground';
+  const { outcome: contested, verdict } = live
+    ? contest(result.hit, p, opts.reachAt?.(p.fielderNum) ?? 1)
+    : { outcome: result.hit.outcome, verdict: null as Verdict };
+
+  const outcome = stretch(contested, p);
+  const hit =
+    outcome === result.hit.outcome
+      ? result.hit
+      : { ...result.hit, outcome, isHit: isHit(outcome), isOut: isOut(outcome) };
 
   return {
     result: { kind: 'in_play', hit },
     placement: p,
-    text: describePlay(outcome, hit, p),
+    text: describePlay(outcome, hit, p, verdict),
+    verdict,
   };
 }
 
@@ -294,6 +461,29 @@ const ZONE_WORDS: Record<Zone, string> = {
   'foul-ground': 'foul ground',
 };
 
+/**
+ * Where it went, as a phrase that can follow a verb — and it takes the
+ * PREPOSITION, because one zone needs to supply its own.
+ *
+ * `down-the-line` is a direction band rather than a place, and it catches both
+ * corners, so the table above can only call it "down the line". Every sentence
+ * built from it came out as "double into down the line" — which nobody noticed
+ * while direction was pure timing and 0.3% of balls reached a corner. The pull
+ * term in hit.ts now sends them there several times a game.
+ *
+ * The fix is not to name the side and stop, because "home run to down the
+ * left-field line" is just as wrong. English wants "down the line" to REPLACE
+ * the preposition rather than follow it, so the caller hands its preposition in
+ * and this zone swallows it.
+ *
+ * ponytail: one zone gets a special case because one zone needs one. The other
+ * eight name a place and take any preposition you give them.
+ */
+const whereWords = (p: Placement, prep: 'to' | 'into'): string =>
+  p.zone === 'down-the-line'
+    ? `down the ${p.dirDeg < 0 ? 'left' : 'right'}-field line`
+    : `${prep} ${ZONE_WORDS[p.zone]}`;
+
 const POSITION_WORD: Record<number, string> = {
   1: 'the pitcher', 2: 'the catcher', 3: 'first', 4: 'second', 5: 'third',
   6: 'short', 7: 'left', 8: 'center', 9: 'right',
@@ -304,22 +494,55 @@ const POSITION_WORD: Record<number, string> = {
  * finally gets told WHERE it went, which is the information they need to learn
  * that pulling everything into the shift is why they keep making outs.
  */
-export function describePlay(outcome: Outcome, hit: HitResult, p: Placement): string {
+export function describePlay(
+  outcome: Outcome,
+  hit: HitResult,
+  p: Placement,
+  /**
+   * Whether the geometry overruled the table — see contest().
+   *
+   * ⚠️ THE SENTENCE IS THE WHOLE POINT OF THE CONTEST. A flip the player is not
+   * told about is indistinguishable from the RNG being unkind, and a mechanic
+   * that cannot be noticed cannot be learned. "robbed by short" and "found a
+   * hole past third" are the two lines that teach where the men are standing.
+   */
+  verdict: Verdict = null,
+): string {
   const who = POSITION_WORD[p.fielderNum] ?? 'somebody';
   const hard = hit.exitVelocity >= 95;
 
+  if (verdict === 'robbed') {
+    return hit.launchAngle < 10
+      ? `robbed by ${who}, a step to his left`
+      : `robbed by ${who} on the run`;
+  }
+  if (verdict === 'dropped') {
+    // ⚠️ IT NAMES THE MAN, NOT THE ZONE, and that is a grammar fix as much as a
+    // design one. Built from whereWords() this read "dropped in into shallow
+    // outfield" — the zone phrase brings its own preposition — and worse,
+    // "dropped in into the wall" for a ball that fell in front of the fence.
+    // The fielder is also the more useful half: the whole lesson of a ball that
+    // drops is WHO it dropped in front of.
+    return p.zone === 'infield'
+      ? `single, found a hole past ${who}`
+      : `single, dropped in front of ${who}`;
+  }
+
   switch (outcome) {
     case 'home_run':
-      return `home run to ${ZONE_WORDS[p.zone === 'wall' ? 'center' : p.zone]}, ${Math.round(p.distFt)} feet`;
+      // No `wall` special case any more — zoneFor() reserves that band for a
+      // ball that stayed in the park, so a home run always carries the field it
+      // was hit to. See WALL_BAND_FT.
+      return `home run ${whereWords(p, 'to')}, ${Math.round(p.distFt)} feet`;
     case 'triple':
-      return `triple into ${ZONE_WORDS[p.zone]}`;
+      return `triple ${whereWords(p, 'into')}`;
     case 'double':
       return p.inTheGap
-        ? `double into ${ZONE_WORDS[p.zone]}`
+        ? `double ${whereWords(p, 'into')}`
         : `double past ${who}`;
     case 'single':
       if (p.zone === 'infield') return `infield single past ${who}`;
-      return hard ? `single, lined into ${ZONE_WORDS[p.zone]}` : `single to ${ZONE_WORDS[p.zone]}`;
+      return hard ? `single, lined ${whereWords(p, 'into')}` : `single ${whereWords(p, 'to')}`;
     case 'line_out':
       return hard ? `lined out hard to ${who}` : `lined out to ${who}`;
     case 'popup':

@@ -47,7 +47,7 @@ import {
 } from './game.ts';
 import { statsOf, HOME, AWAY } from './teams.ts';
 import { fatigue, shouldRelieve } from './bullpen.ts';
-import { fieldBall } from './defense.ts';
+import { fieldBall, reachOf } from './defense.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
@@ -199,15 +199,17 @@ export function playAiAtBat(
     return { ...forced, atBat: { pitches, kind: 'strikeout', guesses, bunt: bunted } };
   }
 
-  // Where it landed decides what the hit is worth. See placement.ts.
-  const result = withPlacement(ab.result!).result;
+  // Where it landed decides whether it is a hit at all, and what it is worth.
+  // See placement.ts — the contest needs the glove of whoever it was hit at.
+  const align = fieldingAlignment(g);
+  const result = withPlacement(ab.result!, { reachAt: reachOf(align) }).result;
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =
     result.kind === 'in_play'
       ? fieldBall(
           result.hit,
-          fieldingAlignment(g),
+          align,
           { batterSpeed: batter.speed, forceAtFirst: g.bases[0] !== null, outs: g.outs },
           rng,
         )

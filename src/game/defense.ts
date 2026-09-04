@@ -177,6 +177,25 @@ export function fieldBall(
 }
 
 /**
+ * The glove standing at a scorer's number, for placement.ts's contest().
+ *
+ * ⚠️ IT IS A CLOSURE RATHER THAN AN IMPORT, and that is a layering decision.
+ * placement.ts is geometry and knows nothing about rosters; teaching it about
+ * Alignment and gloveOf would drag the whole roster model into a file whose job
+ * is measuring distances. So it asks a question — "how much ground does number
+ * 6 cover" — and this answers it.
+ *
+ * The fallback of 1 is league average, which is what an eight-man club or a
+ * test with no alignment should get.
+ */
+export const reachOf =
+  (a: Alignment) =>
+  (fielderNum: number): number => {
+    const p = a[POSITION_BY_NUMBER[fielderNum] ?? 'P'];
+    return p ? gloveOf(p) : 1;
+  };
+
+/**
  * The catcher's arm, for the running game.
  *
  * Exported here rather than in baserunning because it is a DEFENSIVE property —

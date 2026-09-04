@@ -233,10 +233,24 @@ describe('the stretch', () => {
   });
 });
 
-describe('placement does not change the run environment', () => {
-  it('a hit stays a hit and an out stays an out', () => {
+/**
+ * ⚠️ THIS BLOCK USED TO ASSERT THE OPPOSITE — "a hit stays a hit and an out
+ * stays an out" — and that assertion was the design being tested, not a safety
+ * net around it. contest() deliberately breaks it. What has to hold now is the
+ * weaker and more useful thing: the flip happens in BOTH directions, the two
+ * directions cancel, and nothing downstream is left holding a stale flag.
+ */
+describe('the contest lets geometry decide, without moving the run environment', () => {
+  /** One shared sample, so the three assertions below describe the same runs. */
+  const sample = () => {
     const rng = makeRng(21);
-    for (let i = 0; i < 4000; i++) {
+    let robbed = 0;
+    let dropped = 0;
+    let checked = 0;
+    const badFlag: string[] = [];
+    const robbedExtraBase: string[] = [];
+
+    for (let i = 0; i < 8000; i++) {
       const h = resolveSwing(
         {
           offsetMs: rng.range(-85, 85),
@@ -246,11 +260,53 @@ describe('placement does not change the run environment', () => {
         },
         rng,
       );
-      if (h.outcome === 'foul') continue;
+      if (h.outcome === 'foul' || h.outcome === 'foul_out') continue;
+      checked++;
+
       const out = withPlacement({ kind: 'in_play', hit: h });
       if (out.result.kind !== 'in_play') throw new Error('kind changed');
-      expect(isHit(out.result.hit.outcome)).toBe(isHit(h.outcome));
+      const after = out.result.hit;
+
+      // The flag and the outcome must never disagree. Getting this wrong puts
+      // a man on first on a ball the scorer just called a line out — it was the
+      // live bug in the first draft of contest(), because the old body carried
+      // `isHit` across unchanged and was RIGHT to while every flip was hit-to-hit.
+      if (after.isHit !== isHit(after.outcome)) badFlag.push(`${h.outcome}->${after.outcome}`);
+
+      if (out.verdict === 'robbed') {
+        robbed++;
+        // Only a single is robbable. A double or a triple got past everybody by
+        // definition and a home run is not on the field to be caught.
+        if (h.outcome !== 'single') robbedExtraBase.push(h.outcome);
+      }
+      if (out.verdict === 'dropped') dropped++;
     }
+    return { robbed, dropped, checked, badFlag, robbedExtraBase };
+  };
+
+  it('flips balls both ways, and never leaves isHit disagreeing with the outcome', () => {
+    const s = sample();
+    expect(s.badFlag).toEqual([]);
+    expect(s.robbed).toBeGreaterThan(0);
+    expect(s.dropped).toBeGreaterThan(0);
+  });
+
+  it('only ever takes a SINGLE away — never a double, triple or home run', () => {
+    expect(sample().robbedExtraBase).toEqual([]);
+  });
+
+  /**
+   * The whole safety argument for allowing the flip at all. The two flows are
+   * matched by construction (see ROBBED_FT and HOLE_FT, both measured against
+   * their own populations), so the hit column comes out where it went in.
+   *
+   * The tolerance is deliberately loose — this is a guard against one side
+   * being switched off or retuned into the weeds, not a re-derivation of the
+   * calibration. scripts/balance.ts is what actually holds the run environment.
+   */
+  it('takes away about as many hits as it gives', () => {
+    const { robbed, dropped, checked } = sample();
+    expect(Math.abs(robbed - dropped) / checked).toBeLessThan(0.015);
   });
 
   it('passes non-contact results straight through', () => {

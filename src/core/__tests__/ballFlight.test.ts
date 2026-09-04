@@ -8,7 +8,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveSwingSeeded, DIRECTION_DEG_PER_MS, type PitchLocation } from '../hit.ts';
+import {
+  resolveSwingSeeded,
+  directionFor,
+  DIRECTION_DEG_PER_MS,
+  LOCATION_PULL_DEG,
+  SPRAY_DEG,
+  type PitchLocation,
+} from '../hit.ts';
 import { ALL_OUTCOMES, type Outcome } from '../hitTables.ts';
 
 /** Roll seeds until the wanted outcome shows up. Real rolls, not stubs. */
@@ -46,8 +53,52 @@ describe('direction', () => {
     expect(resolveSwingSeeded({ offsetMs: 60, pitchType: 'fastball' }, 3).direction).toBeGreaterThan(0);
   });
 
-  it('goes up the middle when the timing is dead on', () => {
-    expect(resolveSwingSeeded({ offsetMs: 0, pitchType: 'fastball' }, 3).direction).toBe(0);
+  /**
+   * ⚠️ THIS TEST USED TO ASSERT `direction === 0` ON PERFECT TIMING, and that
+   * assertion was the bug rather than the guard against it.
+   *
+   * Direction was timing and nothing else, so being on time MEANT being dead
+   * centre — which implies the better you hit a ball the straighter it goes.
+   * Measured over 99k balls in play, the spray on a home run came out tighter
+   * than the spray on a ground out, and CF, SS and 2B fielded 86% of
+   * everything. The corner outfielders got 3% each.
+   *
+   * The contract now is about the PURE function: with no spray rolled and a
+   * pitch down the middle, on-time contact is still centre — the timing term is
+   * unchanged and untouched by any of this. What moves it off centre is where
+   * the pitch was, and a random draw the caller makes.
+   */
+  it('goes up the middle on a pitch down the middle, dead on, with no spray', () => {
+    // `toBeCloseTo` rather than `toBe`, because the left-handed mirror negates
+    // and JavaScript's -0 is not Object.is-equal to 0.
+    expect(directionFor(0, 'R', 'middle', 0)).toBeCloseTo(0);
+    expect(directionFor(0, 'L', 'middle', 0)).toBeCloseTo(0);
+  });
+
+  it('pulls an inside pitch and pushes an outside one, however good the timing', () => {
+    // Negative is left field. A righty hooks the ball on his hands to left and
+    // serves the one on the outer half to right; a lefty does the mirror image.
+    expect(directionFor(0, 'R', 'inside', 0)).toBe(-LOCATION_PULL_DEG);
+    expect(directionFor(0, 'R', 'outside', 0)).toBe(LOCATION_PULL_DEG);
+    expect(directionFor(0, 'L', 'inside', 0)).toBe(LOCATION_PULL_DEG);
+    expect(directionFor(0, 'L', 'outside', 0)).toBe(-LOCATION_PULL_DEG);
+  });
+
+  it('sprays the same pitch around, centred on where it would have gone', () => {
+    const dirs = [];
+    for (let seed = 1; seed <= 400; seed++) {
+      const r = resolveSwingSeeded({ offsetMs: 0, pitchType: 'fastball', location: 'middle' }, seed);
+      if (r.outcome !== 'strikeout' && r.outcome !== 'foul' && r.outcome !== 'foul_out') {
+        dirs.push(r.direction);
+      }
+    }
+    expect(dirs.length).toBeGreaterThan(50);
+    const mean = dirs.reduce((a, b) => a + b, 0) / dirs.length;
+    expect(Math.abs(mean)).toBeLessThan(2);
+    // It is a spread, not a constant, and it stays inside the declared width.
+    expect(Math.max(...dirs)).toBeGreaterThan(3);
+    expect(Math.min(...dirs)).toBeLessThan(-3);
+    expect(Math.max(...dirs.map(Math.abs))).toBeLessThanOrEqual(SPRAY_DEG);
   });
 
   it('spreads the contact window across the whole field', () => {

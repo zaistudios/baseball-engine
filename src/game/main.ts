@@ -137,7 +137,7 @@ import {
 } from './franchise.ts';
 import { armCondition, fatigue, hasRelief, openedBy, ZONE_FATIGUE_PENALTY } from './bullpen.ts';
 import { autoCaller, manageBench, manageBullpen, rollLoose, runTheBases } from './sim.ts';
-import { fieldBall } from './defense.ts';
+import { fieldBall, reachOf } from './defense.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { knob } from './identity.ts';
@@ -1224,8 +1224,10 @@ function showFoul(runnerSpeed: number): boolean {
 
 /** The count says the at-bat is done. Fold it into the game. */
 function finishAtBat(): void {
-  // Where it landed decides what the hit is worth AND what the scorer says.
-  const placed = withPlacement(atBat.result!);
+  // Where it landed decides whether it is a hit at all, what it is worth, AND
+  // what the scorer says. The contest needs the glove of whoever it was hit at.
+  const align = fieldingAlignment(game);
+  const placed = withPlacement(atBat.result!, { reachAt: reachOf(align) });
   const result = placed.result;
   const batter = currentBatter(game);
 
@@ -1234,7 +1236,7 @@ function finishAtBat(): void {
     result.kind === 'in_play'
       ? fieldBall(
           result.hit,
-          fieldingAlignment(game),
+          align,
           { batterSpeed: batter.speed, forceAtFirst: game.bases[0] !== null, outs: game.outs },
           rng,
         )

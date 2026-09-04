@@ -300,6 +300,55 @@ function besideBag(cam: Cam, bag: { x: number; y: number }): { x: number; y: num
 const bagAt = (cam: Cam, i: number): { x: number; y: number } =>
   basePoint(i > 2 ? -1 : i, cam.centre.x, cam.centre.y, cam.baseR);
 
+/**
+ * How many bags the batter finishes on.
+ *
+ * ⚠️ THE REPLAY USED TO STOP HIM AT FIRST ON EVERY BALL IN PLAY, whatever the
+ * scoreboard said. drawRace() drew one leg — home to first — unconditionally,
+ * so a double, a triple and a home run all ended with the hitter standing on
+ * first base while the banner over him read HOME RUN. It is the single most
+ * visible way the picture contradicted the result.
+ */
+/**
+ * How many times a ground ball bounces on its way out, and how fast the hops
+ * flatten off.
+ *
+ * Three is what a chopper through the infield actually does before it is
+ * fielded; the decay is what makes the last one a skid rather than a hop.
+ */
+const HOPS = 3;
+
+/**
+ * The height of a ground ball at a point in its travel, 0 to 1, as a series of
+ * decaying bounces.
+ *
+ * ponytail: `|sin|` and a falling envelope, not a restitution model. Nothing
+ * downstream reads this — it scales a radius by a few pixels — and a real
+ * coefficient of restitution would need the ball's speed, the angle it struck
+ * at and what the infield dirt is like, to move a dot by two pixels.
+ */
+const hop = (k: number): number =>
+  Math.abs(Math.sin(k * HOPS * Math.PI)) * (1 - k) ** 1.5 * 0.45;
+
+export const basesFor = (outcome: Outcome): number =>
+  outcome === 'home_run' ? 4 : outcome === 'triple' ? 3 : outcome === 'double' ? 2 : 1;
+
+/**
+ * Where a runner is after covering `bases` bags, following the basepath rather
+ * than cutting across the diamond.
+ *
+ * `bases` is fractional and runs 0 (in the box) to 4 (across the plate). The
+ * corner is the whole point — a man going first to third runs two legs, and
+ * lerping straight from first to third would send him through the pitcher.
+ */
+export function pathPoint(cam: Cam, bases: number): { x: number; y: number } {
+  const leg = Math.max(0, Math.min(3, Math.floor(bases)));
+  const k = Math.max(0, Math.min(1, bases - leg));
+  const a = bagAt(cam, leg - 1);
+  const b = bagAt(cam, leg);
+  return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+}
+
 export function drawOverhead(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
@@ -454,18 +503,43 @@ export function drawOverhead(
   if (r.outcome === 'home_run') kBall = Math.max(0, t / r.plot.hangMs);
   else if (r.error && over > 0) kBall = k + Math.min(0.22, over * 0.22);
 
+  // ⚠️ A GROUND BALL SLOWS DOWN AND A BALL IN THE AIR DOES NOT. Both used to
+  // cross the field at a constant rate, which is the detail that made a
+  // six-hopper through the infield read like a laser: the dot left the bat and
+  // arrived at the shortstop at the same speed the whole way. Friction is most
+  // of what a grounder looks like, so it gets an ease-out — quick out of the
+  // box, dying as it reaches somebody. The arrival time is unchanged, so the
+  // chaser still meets it exactly where and when he did.
+  if (r.plot.ground) kBall = 1 - (1 - kBall) ** 2;
+
   const at = overheadPoint(r.plot.distFt * kBall, r.direction, cam.home, cam.pxPerFt);
-  ctx.strokeStyle = 'rgba(244,244,232,0.3)';
+
+  // ⚠️ A TRAIL, NOT A TETHER. This was a flat 30%-alpha line from home plate to
+  // the ball, held at full strength for the whole play — so a home run dragged
+  // a four-hundred-foot rubber band behind it that never faded, and the eye
+  // read the line rather than the ball. A gradient that dies out toward the
+  // plate says the same thing about where the ball came from while leaving the
+  // ball itself the brightest thing on the field.
+  const trail = ctx.createLinearGradient(cam.home.x, cam.home.y, at.x, at.y);
+  trail.addColorStop(0, 'rgba(244,244,232,0)');
+  trail.addColorStop(0.7, 'rgba(244,244,232,0.09)');
+  trail.addColorStop(1, 'rgba(244,244,232,0.4)');
+  ctx.strokeStyle = trail;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(cam.home.x, cam.home.y);
   ctx.lineTo(at.x, at.y);
   ctx.stroke();
 
-  // A fly ball rises and falls; a grounder is flat. From above that is the
-  // ball's SIZE, not its height — which is the whole reason this view can
-  // reuse one coordinate and still tell a popup from a chopper.
-  const lift = r.plot.ground ? 0 : Math.sin(k * Math.PI);
+  // A fly ball rises and falls; a grounder HOPS. From above both are the ball's
+  // SIZE, not its height — which is the whole reason this view can reuse one
+  // coordinate and still tell a popup from a chopper.
+  //
+  // ⚠️ THE GROUNDER USED TO BE PERFECTLY FLAT — `ground ? 0 : ...` — and a dot
+  // sliding across the dirt at a fixed size is the one thing on this field that
+  // looks like a cursor rather than a baseball. Real ground balls bounce, each
+  // hop lower than the last, and that shape is legible even at four pixels.
+  const lift = r.plot.ground ? hop(kBall) : Math.sin(k * Math.PI);
   const ballR = 3.5 + lift * 4.5;
   if (lift > 0.05) {
     // Its shadow stays on the grass, so the arc is legible from overhead.
@@ -591,7 +665,6 @@ function drawRace(
   // which is both what happens and what stops a pointless dot finishing a race
   // that was decided in the air.
   const caught = !r.plot.ground && !r.safe;
-  const runK = Math.min(caught ? 0.55 : 1, t / runMs);
 
   // Everyone who was already on. They break with the pitch and take the whole
   // race to get where inning.ts has already put them.
@@ -657,8 +730,20 @@ function drawRace(
     }
   }
 
-  // The batter, down the line.
-  drawRunnerDot(ctx, { x: home.x + (first.x - home.x) * runK, y: home.y + (first.y - home.y) * runK });
+  // The batter, running it out as far as the scoreboard says he got.
+  //
+  // ⚠️ THE PACE IS THE TRIP, NOT THE LEG. `runMs` is the race to FIRST and it
+  // is the only clock raceTiming() models, because the only play it has to keep
+  // honest is the one at first. Multiplying it by the bags gives the natural
+  // pace — but on a home run that is 4 × 1400ms against a replay that is over
+  // in 3.8 seconds, and he would be cut off rounding third. So the trip is
+  // capped to land him on the bag just before the camera cuts back, which on a
+  // long ball reads as the trot it should be.
+  const bases = basesFor(r.outcome);
+  const tripMs =
+    bases === 1 ? runMs : Math.min(runMs * bases, replayLength(r) - REPLAY_FADE_MS);
+  const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
+  drawRunnerDot(ctx, pathPoint(cam, tripK * bases));
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.

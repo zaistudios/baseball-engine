@@ -23,17 +23,73 @@ export const WALL_FT = 400;
 export const BASE_FT = 90;
 
 /**
- * Drag, as one number.
+ * The furthest anyone hits one, and it is a CEILING rather than a target.
  *
- * Vacuum range at 110mph and 30° is about 700ft. Real balls hit that hard go
- * roughly 400. 0.57 is that ratio, applied flat.
+ * ⚠️ IT USED TO BE `WALL_FT + 60` = 460, AND THAT NUMBER WAS THE GAME'S ONLY
+ * HOME RUN. Measured over 10k home runs the distance was p10 446, p50 460,
+ * p90 460 — the median WAS the clamp, so the play-by-play read "home run to
+ * centre field, 460 feet" over and over, eight times in one nine-inning game.
+ * Two ceilings were stacked: MAX_EXIT_VELOCITY in hit.ts pinned the velocity,
+ * and then this pinned what the velocity could do with it.
  *
- * ponytail: a real drag model integrates over the flight and depends on spin,
- * air density and the seams. This is one multiply, it puts a well-struck home
- * run just over a 400ft wall, and no one watching a 2-second replay can tell
- * the difference.
+ * hit.ts now spreads the velocity (EV_SPREAD_LO/HI), which is what actually
+ * fixed the pile-up. This is set out at the real record — 505 feet — so that
+ * it is a bound on the absurd rather than the shape of the distribution.
  */
-const DRAG = 0.57;
+const MAX_CARRY_FT = 505;
+
+/**
+ * How far a home run the parabola came up short on is drawn.
+ *
+ * ⚠️ IT IS NOT A CONSTANT, AND MAKING IT ONE JUST MOVES THE PILE. The table
+ * decides a home run before any of this runs, so it will sometimes call one on
+ * a ball the flight model would land on the warning track — a 105mph ball at
+ * the flat end of the launch band computes 377 feet. Those all have to be
+ * pushed over the fence, and a fixed `WALL_FT + 4` put 12% of every home run
+ * in the game at exactly 404 feet: the same repeated-number problem the 460
+ * ceiling had, just at the other end.
+ *
+ * So the shove scales with how hard it was actually struck. A ball that just
+ * snuck out reads 402; one hit 122mph that the single-multiplier drag model
+ * under-rated reads 426. Both are honest — this is the case where the picture
+ * is being reconciled to a verdict already in the book, and the velocity is the
+ * only real information available to do it with.
+ */
+const justOut = (exitVelocityMph: number): number =>
+  WALL_FT + 2 + Math.max(0, exitVelocityMph - 95) * 0.9;
+
+/**
+ * Drag, as one number: the share of the vacuum range a real ball keeps.
+ *
+ * ⚠️ RAISED FROM 0.57 WHEN hit.ts STOPPED SATURATING THE VELOCITY CAP, and the
+ * two changes belong together.
+ *
+ * 0.57 was calibrated to put "110mph at 30°" on a 400-foot wall, which is
+ * arithmetically exact — but 110 was not a well-struck ball in the old engine.
+ * It was the FLOOR of a population that MAX_EXIT_VELOCITY had squashed flat
+ * onto 122. Now that a home run leaves the bat at a realistic 95-115, the old
+ * constant carried a real 103mph/28° ball just 335 feet, which is a warning
+ * track out rather than a home run.
+ *
+ * ⚠️ AND IT IS NO LONGER ONE NUMBER, because one number cannot fit both ends.
+ * Air resistance costs a 115mph ball proportionally more than a 95mph one, so a
+ * flat ratio tuned to make an average home run travel 400 feet then sends the
+ * hardest-hit 10% past 500 — measured, 9.4% of home runs landed on the 505-foot
+ * ceiling, which is the same repeated number the old 460 clamp produced, moved
+ * twenty percent further out.
+ *
+ * So the ratio falls with velocity. Anchored at 100mph and sloped so that
+ * 103mph/28° carries 400 feet and 114mph/28° carries 450 rather than 475.
+ *
+ * ponytail: a real model integrates over the flight and depends on spin, air
+ * density and the seams. This is a straight line through two points, and no one
+ * watching a 2-second replay can tell the difference.
+ */
+const DRAG_AT_100 = 0.696;
+const DRAG_PER_MPH = 0.0051;
+
+const dragFor = (exitVelocityMph: number): number =>
+  Math.max(0.55, Math.min(0.78, DRAG_AT_100 - (exitVelocityMph - 100) * DRAG_PER_MPH));
 
 /** ft/s per mph, and gravity in ft/s². */
 const FPS_PER_MPH = 1.467;
@@ -158,6 +214,28 @@ export const FOUL_LINE_DEG = 45;
 export const FOUL_MAX_FT = 250;
 
 /**
+ * The same ceiling, tightened as the ball goes round the back — and it is a
+ * HARD CAP rather than another multiplier, on purpose.
+ *
+ * ⚠️ ADDED BECAUSE foulCarry() ALONE IS COUPLED TO THE FLIGHT MODEL, and that
+ * coupling broke when DRAG was retuned. The old carry was a fraction of a range
+ * the parabola produced, so raising drag by 16% raised the ball behind the
+ * catcher by 16% too: a foul straight back went from 48 feet to 66, and the
+ * overhead camera only has about 48 feet of room behind home plate. A picture
+ * that is correct only while an unrelated constant does not move is a test
+ * waiting to fail, and foul.test.ts duly failed.
+ *
+ * The constraint being expressed is the CAMERA, not the physics — so it is
+ * stated in feet, where the camera lives, and nothing upstream can push through
+ * it. 250 down the line, 38 at the backstop.
+ */
+const foulMaxFt = (dirDeg: number): number => {
+  const span = FOUL_MAX_DEG_DRAWN - FOUL_LINE_DEG;
+  const back = Math.max(0, Math.min(1, (Math.abs(dirDeg) - FOUL_LINE_DEG) / span));
+  return FOUL_MAX_FT + (38 - FOUL_MAX_FT) * back;
+};
+
+/**
  * ⚠️ A FOUL HIT STRAIGHT BACK DOES NOT TRAVEL, and the range formula does not
  * know that. Physically the bat has reversed most of the ball's energy rather
  * than redirecting it — that is WHY it went backwards — so the ball that ends
@@ -201,7 +279,12 @@ export function plotBatted(
     // and a ball that never leaves the dirt is not "hanging" at all. The 0.72
     // is what makes it scurry, and it is measured against the same curve every
     // other ball uses.
-    const rolled = Math.max(50, Math.min(240, exitVelocityMph * 1.7));
+    // ⚠️ 1.7 BECAME 1.42 WHEN THE EXIT VELOCITY TABLE WAS RAISED. Both numbers
+    // put the median ground ball about 140 feet from the plate, which is where
+    // the middle infield stands; the old one did it from a median of 82mph and
+    // this one from 95. Left alone it walked every grounder out to 162 feet,
+    // behind the shortstop, and the corner infielders stopped getting any.
+    const rolled = Math.max(50, Math.min(240, exitVelocityMph * 1.6));
     // A foul chopper dies against the screen or trickles into the coach's box;
     // it does not run 200ft the way a fair one down the line does.
     const distFt = foul ? Math.max(18, rolled * foulCarry(directionDeg) * 0.6) : rolled;
@@ -210,7 +293,7 @@ export function plotBatted(
 
   const v = exitVelocityMph * FPS_PER_MPH;
   const rad = (launchAngleDeg * Math.PI) / 180;
-  let distFt = ((v * v * Math.sin(2 * rad)) / G) * DRAG;
+  let distFt = ((v * v * Math.sin(2 * rad)) / G) * dragFor(exitVelocityMph);
 
   if (launchAngleDeg < LINER_ANGLE) distFt += exitVelocityMph * ROLL_PER_MPH;
 
@@ -228,7 +311,7 @@ export function plotBatted(
   // WALL_FT - 8, which is a double off the fence and reads like one.
   distFt =
     outcome === 'home_run'
-      ? Math.max(distFt, WALL_FT + 14)
+      ? Math.max(distFt, justOut(exitVelocityMph))
       : Math.min(distFt, WALL_FT - 8);
 
   // ⚠️ THE FOUL CLAMP COMES BEFORE THE FAIR ONE, and it has a much lower floor.
@@ -236,11 +319,11 @@ export function plotBatted(
   // in the batter's box — and wrong for the pop straight up that the catcher
   // takes four strides for.
   if (foul) {
-    distFt = Math.max(18, Math.min(FOUL_MAX_FT, distFt * foulCarry(directionDeg)));
+    distFt = Math.max(18, Math.min(foulMaxFt(directionDeg), distFt * foulCarry(directionDeg)));
     return { distFt, hangMs: airHang(exitVelocityMph, launchAngleDeg, true), ground: false };
   }
 
-  distFt = Math.max(60, Math.min(WALL_FT + 60, distFt));
+  distFt = Math.max(60, Math.min(MAX_CARRY_FT, distFt));
   return { distFt, hangMs: airHang(exitVelocityMph, launchAngleDeg, false), ground: false };
 }
 
