@@ -137,6 +137,28 @@ import {
 } from './franchise.ts';
 import { armCondition, fatigue, hasRelief, openedBy, ZONE_FATIGUE_PENALTY } from './bullpen.ts';
 import { autoCaller, manageBench, manageBullpen, rollLoose, runTheBases } from './sim.ts';
+import {
+  ARM_FIELDS,
+  ARSENAL_FIELDS,
+  CLUB_FIELDS,
+  GROUPS,
+  HITTER_FIELDS,
+  IDENTITY_FIELDS,
+  addPerson,
+  coerce,
+  groupOf,
+  movePerson,
+  removePerson,
+  replaceClub,
+  valueOf,
+  withArsenalShare,
+  withClubField,
+  withIdentityField,
+  withPersonField,
+  workingCopy,
+  type Field,
+  type Group,
+} from './editor.ts';
 import { fieldBall, reachOf } from './defense.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
@@ -1679,7 +1701,17 @@ addEventListener('keydown', (e) => {
   // tried. Guarded here rather than in the league screen, because every future
   // field on any screen has the same problem and deserves the same answer.
   const into = e.target as HTMLElement | null;
-  if (into && (into.tagName === 'TEXTAREA' || into.tagName === 'INPUT' || into.isContentEditable)) {
+  // ⚠️ SELECT IS IN THIS LIST NOW. The club editor is the first screen in the
+  // game with a dropdown on it, and a focused <select> is driven with the arrow
+  // keys and the letter keys — the same letters this handler preventDefaults.
+  // Without it, typing "s" to jump to "slugger" squares the hitter to bunt.
+  if (
+    into &&
+    (into.tagName === 'TEXTAREA' ||
+      into.tagName === 'INPUT' ||
+      into.tagName === 'SELECT' ||
+      into.isContentEditable)
+  ) {
     return;
   }
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
@@ -4336,6 +4368,18 @@ function pregame(): void {
   let box = leagueStatus() === 'broken' ? (storedLeagueText() ?? '') : '';
 
   /**
+   * THE EDITOR'S THREE NULLABLE LOCALS, which are its whole navigation — same
+   * pattern as `mode` and `mine` above, and for the same reason.
+   *
+   * `editing` null means the editor is closed; non-null is a deep working copy
+   * of LEAGUE_SOURCE that survives moving between clubs and is thrown away by
+   * BACK. `editClub` null is the club picker. `editWho` null is nobody expanded.
+   */
+  let editing: Team[] | null = null;
+  let editClub: number | null = null;
+  let editWho: { group: Group; index: number } | null = null;
+
+  /**
    * ⚠️ EVERY PIECE OF THIS SCREEN IS SOMEBODY ELSE'S TEXT. A club name, a bio,
    * a parser's complaint about a paste — all of it is written by whoever is
    * holding the keyboard and all of it is going into innerHTML, which is the
@@ -4531,11 +4575,167 @@ function pregame(): void {
       `</button>` +
       `<button data-lg="use"><b>USE WHAT IS IN THE BOX</b><br>checked before anything is kept` +
       `</button>` +
+      `<button data-lg="edit"><b>EDIT A CLUB</b><br>names, ratings and rosters, without the JSON` +
+      `</button>` +
       (status === 'none'
         ? ''
         : `<button data-lg="shipped"><b>BACK TO THE SHIPPED LEAGUE</b><br>` +
           `drops the one you imported</button>`) +
       `<button data-lg="back"><b>BACK</b><br>nothing is changed</button>`;
+  };
+
+  /**
+   * THE CLUB EDITOR — the same customization the paste box does, with the JSON
+   * taken off the front of it.
+   *
+   * ⚠️ IT SAVES THROUGH saveCustomLeague() LIKE ANY OTHER PASTE, and that is
+   * the whole architecture of this screen. Nothing here validates, nothing here
+   * writes to localStorage, and nothing here knows what a legal club is. It
+   * edits a deep copy, serialises it, and hands it to the same gate a typed
+   * document goes through — so an edit made with the mouse is held to exactly
+   * the rules a hand-written one is, and there is still one storage path. When
+   * the save is refused, the complaints land in `leagueSays` and are drawn by
+   * this screen in the same red block the paste box uses.
+   *
+   * ⚠️ THE WORKING COPY IS OF LEAGUE_SOURCE, NOT LEAGUE, for the reason FILL
+   * THE BOX takes the source: the played clubs have had parity applied, and
+   * editing those would compress every rating a second time on the way back in.
+   *
+   * ponytail: three nullable locals ARE the navigation, same as the screen this
+   * hangs off. No router, no breadcrumb, no dirty flag — leaving without saving
+   * drops the working copy, which is what a cancel is.
+   */
+  const drawEditor = (): void => {
+    const league = editing!;
+
+    // ---- the field row. One function for all four kinds, because they differ
+    // only in which element they render into the same labelled cell.
+    const control = (f: Field, on: Record<string, unknown>, at: string): string => {
+      const v = escapeText(valueOf(on, f));
+      const id = `${at} data-key="${escapeText(f.key)}"`;
+      if (f.kind === 'choice') {
+        return (
+          `<select ${id}>` +
+          (f.choices ?? [])
+            .map(
+              (c) =>
+                `<option value="${escapeText(c)}"${c === valueOf(on, f) ? ' selected' : ''}>` +
+                `${escapeText(c)}</option>`,
+            )
+            .join('') +
+          '</select>'
+        );
+      }
+      if (f.kind === 'number') {
+        return (
+          `<input type="number" ${id} value="${v}" min="${f.min ?? 0}" ` +
+          `max="${f.max ?? 99}" step="${f.step ?? 0.01}">`
+        );
+      }
+      // A bio and a blurb are sentences; a name is a word. Same element, but
+      // the long one gets the whole row so it is not typed through a slot.
+      return `<input type="text" ${id} value="${v}"${f.kind === 'line' ? ' class="wide"' : ''}>`;
+    };
+
+    const rows = (fields: readonly Field[], on: Record<string, unknown>, at: string): string =>
+      fields
+        .map(
+          (f) =>
+            `<label class="edrow${f.kind === 'line' ? ' wide' : ''}">` +
+            `<span>${escapeText(f.label)}</span>${control(f, on, at)}</label>`,
+        )
+        .join('');
+
+    // ---- the club picker.
+    if (editClub === null) {
+      prompt.textContent = 'EDIT A CLUB';
+      grid.innerHTML =
+        `<div class="dim" style="grid-column:1/-1;line-height:1.7">` +
+        'Pick a club. Everything you change is kept in memory until you press ' +
+        '<b>SAVE THE LEAGUE</b>, which checks the whole thing the same way a paste is ' +
+        'checked, and reloads.</div>' +
+        league
+          .map(
+            (c, n) =>
+              `<button data-ed-go="club" data-index="${n}"><b>${escapeText(c.abbr)}</b><br>` +
+              `${escapeText(c.name)}</button>`,
+          )
+          .join('') +
+        `<div class="edbar" style="grid-column:1/-1">` +
+        `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
+        `</button>` +
+        `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
+      return;
+    }
+
+    const club = league[editClub]!;
+    prompt.textContent = `${club.abbr} — EDIT`;
+
+    // ---- one roster list, with the open man's fields under his own row.
+    const list = (g: (typeof GROUPS)[number]): string => {
+      const people = (club[g.key] ?? []) as unknown as readonly Record<string, unknown>[];
+      const body = people
+        .map((who, i) => {
+          const open = editWho?.group === g.key && editWho.index === i;
+          const at = `data-ed="person" data-group="${g.key}" data-index="${i}"`;
+          const head =
+            `<div class="edman${open ? ' open' : ''}">` +
+            `<button data-ed-go="who" data-group="${g.key}" data-index="${i}">` +
+            `${i + 1}. ${escapeText(String(who['name'] ?? '—'))}</button>` +
+            `<button class="edtiny" data-ed-go="up" data-group="${g.key}" data-index="${i}"` +
+            `${i === 0 ? ' disabled' : ''}>▲</button>` +
+            `<button class="edtiny" data-ed-go="down" data-group="${g.key}" data-index="${i}"` +
+            `${i === people.length - 1 ? ' disabled' : ''}>▼</button>` +
+            `<button class="edtiny" data-ed-go="del" data-group="${g.key}" data-index="${i}"` +
+            `${people.length <= g.min ? ' disabled' : ''}>✕</button>` +
+            '</div>';
+          if (!open) return head;
+          const fields = g.of === 'hitter' ? HITTER_FIELDS : ARM_FIELDS;
+          const mix =
+            g.of === 'arm'
+              ? `<div class="edmix"><span>arsenal — shares, not percentages</span>` +
+                rows(
+                  ARSENAL_FIELDS,
+                  (who['arsenal'] ?? {}) as Record<string, unknown>,
+                  `data-ed="arsenal" data-group="${g.key}" data-index="${i}"`,
+                ) +
+                '</div>'
+              : '';
+          return `${head}<div class="edform">${rows(fields, who, at)}${mix}</div>`;
+        })
+        .join('');
+      return (
+        `<div class="edgroup" style="grid-column:1/-1">` +
+        `<div class="edhead">${g.label} <i>${people.length}</i>` +
+        `<button class="edtiny" data-ed-go="add" data-group="${g.key}"` +
+        `${people.length >= g.max ? ' disabled' : ''}>+ ADD</button></div>` +
+        body +
+        '</div>'
+      );
+    };
+
+    const notes = leagueSays.length
+      ? `<div class="says" style="grid-column:1/-1">${leagueSays
+          .map((p) => `<div>${escapeText(p)}</div>`)
+          .join('')}</div>`
+      : '';
+
+    grid.innerHTML =
+      notes +
+      `<div class="edgroup" style="grid-column:1/-1"><div class="edhead">THE CLUB</div>` +
+      `<div class="edform">${rows(CLUB_FIELDS, club as unknown as Record<string, unknown>, 'data-ed="club"')}` +
+      rows(
+        IDENTITY_FIELDS,
+        (club.identity ?? {}) as unknown as Record<string, unknown>,
+        'data-ed="identity"',
+      ) +
+      '</div></div>' +
+      GROUPS.map(list).join('') +
+      `<div class="edbar" style="grid-column:1/-1">` +
+      `<button data-ed-go="clubs"><b>ANOTHER CLUB</b><br>your changes are kept</button>` +
+      `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
+      `</button>` +
+      `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
   };
 
   // ⚠️ THE DIFFICULTY SITS ON THE FIRST SCREEN, BEFORE THE MODE, because it is
@@ -4648,7 +4848,10 @@ function pregame(): void {
       return;
     }
     if (mode === 'league') {
-      drawLeague();
+      // The editor is a room off the league screen rather than a mode of its
+      // own: you get to it from there and BACK puts you back on it.
+      if (editing) drawEditor();
+      else drawLeague();
       return;
     }
     // The questions you only get to answer once. See the header.
@@ -4704,6 +4907,69 @@ function pregame(): void {
     settings = { ...settings, level: next.key };
     saveSettings(settings);
     drawLevels();
+  });
+
+  /**
+   * TYPING IN THE EDITOR. Every control on that screen lands here.
+   *
+   * ⚠️ IT DOES NOT REDRAW, and that is the whole reason it is a separate
+   * listener from the click one. Rebuilding the grid on each keystroke replaces
+   * the element being typed into, which drops focus and puts the caret back at
+   * the start — you get one character per click. The working copy is the model
+   * and the DOM is already showing what was typed, so there is nothing to
+   * repaint until something STRUCTURAL happens, and those are all buttons.
+   *
+   * The one visible cost is that a man's name in the list above his form does
+   * not follow along as it is retyped. It catches up the moment anything is
+   * clicked, and chasing it would mean the redraw this exists to avoid.
+   */
+  grid.addEventListener('input', (e) => {
+    const el2 = e.target as HTMLInputElement | HTMLSelectElement;
+    const kind = el2.dataset?.['ed'];
+    if (!kind || editing === null || editClub === null) return;
+    const key = el2.dataset['key'] ?? '';
+    const club = editing[editClub]!;
+
+    if (kind === 'club') {
+      const f = CLUB_FIELDS.find((x) => x.key === key);
+      if (f) editing = replaceClub(editing, editClub, withClubField(club, key, coerce(f, el2.value))) as Team[];
+      return;
+    }
+    if (kind === 'identity') {
+      const f = IDENTITY_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withIdentityField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+      }
+      return;
+    }
+
+    const group = el2.dataset['group'] as Group | undefined;
+    const index = Number(el2.dataset['index']);
+    if (!group || !Number.isInteger(index)) return;
+
+    if (kind === 'arsenal') {
+      editing = replaceClub(
+        editing,
+        editClub,
+        withArsenalShare(club, group, index, key, Number(el2.value) || 0),
+      ) as Team[];
+      return;
+    }
+    if (kind === 'person') {
+      const fields = groupOf(group).of === 'hitter' ? HITTER_FIELDS : ARM_FIELDS;
+      const f = fields.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withPersonField(club, group, index, key, coerce(f, el2.value)),
+        ) as Team[];
+      }
+    }
   });
 
   grid.addEventListener('click', (e) => {
@@ -4763,7 +5029,77 @@ function pregame(): void {
           leagueSays = problems;
           drawn();
         }
+      } else if (lg === 'edit') {
+        editing = workingCopy(LEAGUE_SOURCE);
+        editClub = null;
+        editWho = null;
+        leagueSays = [];
+        drawn();
       }
+      return;
+    }
+
+    // ---- the club editor. Every branch either moves the cursor around the
+    // working copy or ends the same way the paste box does — through
+    // saveCustomLeague(), then a reload. See drawEditor().
+    const ed = btn.dataset['edGo'];
+    if (ed && editing) {
+      const group = btn.dataset['group'] as Group | undefined;
+      const index = Number(btn.dataset['index']);
+      const at = editClub;
+
+      if (ed === 'back') {
+        editing = null;
+        editClub = null;
+        editWho = null;
+      } else if (ed === 'clubs') {
+        editClub = null;
+        editWho = null;
+      } else if (ed === 'club') {
+        editClub = index;
+        editWho = null;
+      } else if (ed === 'who') {
+        // Clicking the man who is already open closes him. A list where the
+        // only way to collapse a form is to open a different one is a list you
+        // cannot see the bottom of.
+        editWho =
+          group && editWho?.group === group && editWho.index === index
+            ? null
+            : group
+              ? { group, index }
+              : null;
+      } else if (at !== null && group) {
+        const club = editing[at]!;
+        if (ed === 'add') {
+          // ⚠️ addPerson TAKES THE WHOLE LEAGUE, unlike its three neighbours. A
+          // new man's id and name have to be free across all thirty clubs —
+          // see takenIn() in editor.ts — so it returns the league, not the club.
+          editing = addPerson(editing, at, group) as Team[];
+          editWho = { group, index: ((club[group] ?? []) as readonly unknown[]).length };
+        } else if (ed === 'del') {
+          editing = replaceClub(editing, at, removePerson(club, group, index)) as Team[];
+          editWho = null;
+        } else if (ed === 'up' || ed === 'down') {
+          const by = ed === 'up' ? -1 : 1;
+          editing = replaceClub(editing, at, movePerson(club, group, index, by)) as Team[];
+          // The cursor follows the man, not the slot — he is what was grabbed.
+          if (editWho?.group === group && editWho.index === index) {
+            editWho = { group, index: index + by };
+          }
+        }
+      }
+
+      if (ed === 'save') {
+        // ⚠️ SERIALISED AND PUT BACK THROUGH THE SAME GATE. Handing the objects
+        // to the engine directly would skip every rule in league.ts, and the
+        // editor is exactly the thing most likely to produce a club that is
+        // nearly legal — nine hitters minus the one you just deleted, an out
+        // pitch you removed from the mix.
+        const problems = saveCustomLeague(serialiseLeague(editing!), LEAGUE_SOURCE);
+        if (problems === null) location.reload();
+        else leagueSays = problems;
+      }
+      drawn();
       return;
     }
     // ---- an arrow on a dial. One handler for all seven, because they differ

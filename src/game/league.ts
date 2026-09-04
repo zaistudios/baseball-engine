@@ -60,20 +60,20 @@ export type LeagueCheck =
 
 // ------------------------------------------------------------ the vocabulary
 
-const BUILDS = ['human', 'augmented', 'machine'] as const;
-const TRAITS = ['grit', 'slugger', 'reader', 'precision', 'showman'] as const;
-const HANDS = ['L', 'R'] as const;
-const SIGNATURES = ['none', 'knuckler', 'fireball', 'painter', 'junk'] as const;
-const TELLS = ['pre_pitch', 'release', 'none'] as const;
+export const BUILDS = ['human', 'augmented', 'machine'] as const;
+export const TRAITS = ['grit', 'slugger', 'reader', 'precision', 'showman'] as const;
+export const HANDS = ['L', 'R'] as const;
+export const SIGNATURES = ['none', 'knuckler', 'fireball', 'painter', 'junk'] as const;
+export const TELLS = ['pre_pitch', 'release', 'none'] as const;
 
 /** Every rating a hitter must carry. Same six as BatterStats, same order. */
-const BAT_RATINGS = ['power', 'contact', 'vision', 'clutch', 'bunt', 'speed'] as const;
+export const BAT_RATINGS = ['power', 'contact', 'vision', 'clutch', 'bunt', 'speed'] as const;
 
 /** An arm's ratings that may be left off. Each defaults to 1.0 at its read site. */
-const ARM_OPTIONAL = ['speedBonus', 'break', 'clutch', 'stamina'] as const;
+export const ARM_OPTIONAL = ['speedBonus', 'break', 'clutch', 'stamina'] as const;
 
 /** The four knobs on an Identity. knob() defaults each to 1, so all are optional. */
-const IDENTITY_KNOBS = ['aggression', 'running', 'hook', 'bunt'] as const;
+export const IDENTITY_KNOBS = ['aggression', 'running', 'hook', 'bunt'] as const;
 
 type Bag = Record<string, unknown>;
 
@@ -223,7 +223,7 @@ function checkIdentity(raw: unknown, where: string, r: Report): void {
  * league-average hands. Ten men means the tenth never takes the field. Neither
  * throws; both are a club playing a different game from the one on the screen.
  */
-const LINEUP_SIZE = 9;
+export const LINEUP_SIZE = 9;
 
 function checkClub(raw: unknown, index: number, r: Report): void {
   const t = bag(raw);
