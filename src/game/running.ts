@@ -202,8 +202,19 @@ export const SEND_THRESHOLD = 0.62;
  * This is the manager deciding not to, for all the reasons a model does not
  * hold: the hitter is dangerous, the runner has a tight hamstring, they ran
  * last inning. Tuned against scripts/field.ts.
+ *
+ * ⚠️ AND THEN IT OVERSHOT THE OTHER WAY. 0.12 was the correction for the 9.2,
+ * and it landed on **0.55 attempts a game** — under a third of the real 1.8.
+ * The league had a running knob, a catcher's arm and a speed stat and almost
+ * never used any of them, because the manager was asking one time in eight.
+ * 0.4 reads 1.74 attempts at 75% success against scripts/field.ts, and costs
+ * nothing on the scoreboard: runs per team held at 4.34 in scripts/balance.ts.
+ *
+ * Measure both scripts when you touch this. A steal is an out as often as it
+ * is a base, so the attempt rate moves the run environment in both directions
+ * at once and neither script sees the whole of it alone.
  */
-export const ATTEMPT_RATE = 0.12;
+export const ATTEMPT_RATE = 0.4;
 
 /**
  * Should the computer send the runner?

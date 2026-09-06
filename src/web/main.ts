@@ -46,6 +46,7 @@ import {
   playerWon,
   moveRunner,
   removeRunner,
+  heldRunners,
   runnerMoves,
   scorersFrom,
   isSacrificeFly,
@@ -264,7 +265,7 @@ if (import.meta.env.DEV) {
     launchAngle = 22,
     direction = -18,
     speed = 1,
-    extra: { doublePlay?: boolean; error?: boolean; moves?: RunnerMove[]; scoredFrom?: number[] } = {},
+    extra: { doublePlay?: boolean; error?: boolean; moves?: RunnerMove[]; held?: number[] } = {},
   ) => {
     replay = {
       startedAt: gameNow(),
@@ -276,7 +277,7 @@ if (import.meta.env.DEV) {
       doublePlay: !!extra.doublePlay,
       error: !!extra.error,
       moves: extra.moves ?? [],
-      scoredFrom: extra.scoredFrom ?? [],
+      held: extra.held ?? [],
       cued: new Set(),
     };
   };
@@ -788,8 +789,13 @@ function finishPitch(pitch: ThrownPitch, text: string): void {
         doublePlay: fielding.doublePlay,
         error: fielding.error,
         // from === -1 is the batter, and he is drawn by the race instead.
-        moves: runnerMoves(basesBefore, match.bases).filter((m) => m.from >= 0),
-        scoredFrom: scorersFrom(basesBefore, match.bases, match.runs - runsBefore),
+        // Scorers ride in the same list — see scorersFrom(), whose `to` of 3
+        // is the plate.
+        moves: [
+          ...runnerMoves(basesBefore, match.bases).filter((m) => m.from >= 0),
+          ...scorersFrom(basesBefore, match.bases, match.runs - runsBefore),
+        ],
+        held: heldRunners(basesBefore, match.bases),
         cued: new Set(),
       };
     }
@@ -1713,7 +1719,9 @@ interface RunnerTween {
   to: number;
   startedAt: number;
 }
+/** Per BAG, not per move — two bases take twice as long as one. */
 const RUNNER_TWEEN_MS = 280;
+const tweenMs = (t: RunnerTween): number => RUNNER_TWEEN_MS * (t.to - t.from);
 let runnerTweens: RunnerTween[] = [];
 let basesSnapshot: Bases = EMPTY_BASES;
 
@@ -1735,7 +1743,7 @@ function syncRunners(now: number): void {
 
 function drawBases(now: number): void {
   syncRunners(now);
-  runnerTweens = runnerTweens.filter((t) => now - t.startedAt < RUNNER_TWEEN_MS);
+  runnerTweens = runnerTweens.filter((t) => now - t.startedAt < tweenMs(t));
 
   const cx = HUD_X + 46;
   const cy = HUD_Y + 56;
@@ -1795,14 +1803,19 @@ function drawBases(now: number): void {
   for (let i = 0; i < 3; i++) bag(i, match.bases[i] !== null && !arriving.has(i));
   bag(-1, false);
 
-  // Runners in transit.
+  // Runners in transit, ALONG THE BASEPATH. A man going first to third is
+  // two legs and a corner; lerping him straight there slid him across the
+  // middle of the diamond, which is the one place a baserunner never is.
   for (const t of runnerTweens) {
-    const k = Math.min(1, (now - t.startedAt) / RUNNER_TWEEN_MS);
-    const a = basePoint(t.from, cx, cy, BASE_R);
-    const b = basePoint(t.to, cx, cy, BASE_R);
+    const k = Math.min(1, (now - t.startedAt) / tweenMs(t));
+    const u = t.from + (t.to - t.from) * k;
+    const leg = Math.floor(u);
+    const a = basePoint(leg, cx, cy, BASE_R);
+    const b = basePoint(leg + 1 > 2 ? -1 : leg + 1, cx, cy, BASE_R);
+    const f = u - leg;
     ctx.fillStyle = '#f2c14e';
     ctx.beginPath();
-    ctx.arc(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 4, 0, Math.PI * 2);
+    ctx.arc(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 4, 0, Math.PI * 2);
     ctx.fill();
   }
 

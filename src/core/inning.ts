@@ -38,6 +38,17 @@ export interface RunnerMove {
   name: string;
   from: number;
   to: number;
+  /**
+   * His legs, carried along so the picture can run him at his own pace.
+   *
+   * ⚠️ WITHOUT THIS EVERY RUNNER MOVED AT THE BATTER'S SPEED, over any
+   * distance, in the same fixed span of time — so a catcher going first to
+   * third arrived with a burner going first to second, and both of them beat
+   * the man who only had ninety feet to cover. Distance and legs are the two
+   * things that decide when a runner gets somewhere, and the replay had
+   * neither.
+   */
+  speed: number;
 }
 
 /**
@@ -65,10 +76,26 @@ export function runnerMoves(prev: Bases, next: Bases): RunnerMove[] {
     const from = prev.findIndex((old, i) => old?.name === runner.name && !taken.has(i));
     if (from === to) return;
     if (from >= 0) taken.add(from);
-    moves.push({ name: runner.name, from: from >= 0 ? from : -1, to });
+    moves.push({ name: runner.name, from: from >= 0 ? from : -1, to, speed: runner.speed });
   });
 
   return moves;
+}
+
+/**
+ * Runners who were on base and are STILL ON THE SAME BAG — the third of the
+ * three things that can happen to a man on base, and the one nothing reported.
+ *
+ * runnerMoves() sees the men who advanced and scorersFrom() sees the men who
+ * came home; the man who held was simply absent from both, so a picture built
+ * from the pair drew him nowhere and the base he was standing on looked empty.
+ */
+export function heldRunners(prev: Bases, next: Bases): number[] {
+  const held: number[] = [];
+  prev.forEach((runner, i) => {
+    if (runner && next[i]?.name === runner.name) held.push(i);
+  });
+  return held;
 }
 
 /**
@@ -87,13 +114,16 @@ export function runnerMoves(prev: Bases, next: Bases): RunnerMove[] {
  * Lives next to runnerMoves for the same reason runnerMoves lives here: it
  * reads base state, and the diff belongs with the state it reads.
  */
-export function scorersFrom(prev: Bases, next: Bases, scored: number): number[] {
+export function scorersFrom(prev: Bases, next: Bases, scored: number): RunnerMove[] {
   if (scored <= 0) return [];
   const stillOn = new Set(next.filter(Boolean).map((r) => r!.name));
-  const gone: number[] = [];
+  const gone: RunnerMove[] = [];
   for (let i = 2; i >= 0; i--) {
     const r = prev[i];
-    if (r && !stillOn.has(r.name)) gone.push(i);
+    // `to: 3` is the plate. One bag past third, so a scorer is an ordinary
+    // RunnerMove and the picture does not need a second kind of runner to
+    // draw a man who happened to go all the way.
+    if (r && !stillOn.has(r.name)) gone.push({ name: r.name, from: i, to: 3, speed: r.speed });
   }
   return gone.slice(0, scored);
 }

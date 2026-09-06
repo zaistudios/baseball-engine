@@ -191,7 +191,7 @@ import {
   type BatLine,
   type StatBook,
 } from './stats.ts';
-import { runnerMoves, scorersFrom } from '../core/inning.ts';
+import { heldRunners, runnerMoves, scorersFrom } from '../core/inning.ts';
 import { travelMs, canCheck, batSpeedLabel, CHECK_PULL_MS } from '../web/swing.ts';
 import {
   makeCam,
@@ -1293,8 +1293,16 @@ function finishAtBat(): void {
             ? { chaserNum: placed.placement.fielderNum }
             : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
-          moves: runnerMoves(log.before, log.after).filter((m) => m.from >= 0),
-          scoredFrom: scorersFrom(log.before, log.after, log.runs),
+          // The scorers go in the same list: a man who came all the way home
+          // is a runner who covered more bags, not a different kind of thing.
+          moves: [
+            ...runnerMoves(log.before, log.after).filter((m) => m.from >= 0),
+            ...scorersFrom(log.before, log.after, log.runs),
+          ],
+          held: heldRunners(log.before, log.after),
+          ...(log.thrownOut
+            ? { thrownOut: { at: log.thrownOut.at, speed: log.thrownOut.runner.speed } }
+            : {}),
         })
       : null;
 

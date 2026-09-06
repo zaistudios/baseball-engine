@@ -6,6 +6,7 @@ import {
   occupied,
   runnerMoves,
   scorersFrom,
+  heldRunners,
   EMPTY_BASES,
   ANON,
   SAC_FLY_MIN_EV,
@@ -296,21 +297,21 @@ describe('runnerMoves — what the base HUD draws', () => {
 
   it('reports a steal of second as first to second', () => {
     expect(runnerMoves(bases('Cap', null, null), bases(null, 'Cap', null))).toEqual([
-      { name: 'Cap', from: 0, to: 1 },
+      { name: 'Cap', from: 0, to: 1, speed: 1 },
     ]);
   });
 
   it('treats a new runner as coming from home', () => {
     expect(runnerMoves(EMPTY_BASES, bases('Rosa', null, null))).toEqual([
-      { name: 'Rosa', from: -1, to: 0 },
+      { name: 'Rosa', from: -1, to: 0, speed: 1 },
     ]);
   });
 
   it('moves everyone a single advanced', () => {
     const moves = runnerMoves(bases('Cap', 'Rosa', null), bases('Dex', 'Cap', 'Rosa'));
-    expect(moves).toContainEqual({ name: 'Cap', from: 0, to: 1 });
-    expect(moves).toContainEqual({ name: 'Rosa', from: 1, to: 2 });
-    expect(moves).toContainEqual({ name: 'Dex', from: -1, to: 0 });
+    expect(moves).toContainEqual({ name: 'Cap', from: 0, to: 1, speed: 1 });
+    expect(moves).toContainEqual({ name: 'Rosa', from: 1, to: 2, speed: 1 });
+    expect(moves).toContainEqual({ name: 'Dex', from: -1, to: 0, speed: 1 });
   });
 
   it('never slides a runner backwards when a short lineup wraps the same name', () => {
@@ -332,13 +333,18 @@ describe('runnerMoves — what the base HUD draws', () => {
     });
 
     it('sends the man on third home on a one-run play', () => {
-      expect(scorersFrom(bases(null, null, 'Rosa'), EMPTY_BASES, 1)).toEqual([2]);
+      // `to: 3` is the plate, so a scorer is an ordinary RunnerMove.
+      expect(scorersFrom(bases(null, null, 'Rosa'), EMPTY_BASES, 1)).toEqual([
+        { name: 'Rosa', from: 2, to: 3, speed: 1 },
+      ]);
     });
 
     it('scores the LEAD runners first when several came home', () => {
       // Third before second before first: a man cannot score past the runner
       // in front of him, so the order is never in question.
-      expect(scorersFrom(bases('Cap', 'Dex', 'Rosa'), EMPTY_BASES, 2)).toEqual([2, 1]);
+      expect(scorersFrom(bases('Cap', 'Dex', 'Rosa'), EMPTY_BASES, 2).map((m) => m.from)).toEqual([
+        2, 1,
+      ]);
     });
 
     it('does not run the man erased on a double play home', () => {
@@ -351,7 +357,9 @@ describe('runnerMoves — what the base HUD draws', () => {
     it('separates a scorer from a man erased in the same play', () => {
       // Man on first forced at second, man on third scores. Both are gone from
       // the diff; only one of them ran home, and the run count is what says so.
-      expect(scorersFrom(bases('Cap', null, 'Rosa'), EMPTY_BASES, 1)).toEqual([2]);
+      expect(scorersFrom(bases('Cap', null, 'Rosa'), EMPTY_BASES, 1).map((m) => m.from)).toEqual([
+        2,
+      ]);
     });
 
     it('never reports more scorers than runs', () => {
@@ -360,7 +368,26 @@ describe('runnerMoves — what the base HUD draws', () => {
 
     it('ignores runners who are still standing on a bag', () => {
       // Rosa scored from third; Cap only moved up and must not be counted.
-      expect(scorersFrom(bases('Cap', null, 'Rosa'), bases(null, 'Cap', null), 1)).toEqual([2]);
+      expect(
+        scorersFrom(bases('Cap', null, 'Rosa'), bases(null, 'Cap', null), 1).map((m) => m.from),
+      ).toEqual([2]);
+    });
+  });
+  describe('heldRunners — the third thing that can happen to a man on base', () => {
+    it('reports the man who did not move', () => {
+      expect(heldRunners(bases(null, 'Cap', null), bases('Dex', 'Cap', null))).toEqual([1]);
+    });
+
+    it('does not report a man who advanced', () => {
+      expect(heldRunners(bases('Cap', null, null), bases(null, 'Cap', null))).toEqual([]);
+    });
+
+    it('does not report a man who scored or was erased', () => {
+      expect(heldRunners(bases('Cap', null, 'Rosa'), EMPTY_BASES)).toEqual([]);
+    });
+
+    it('reports both when the bases stood still', () => {
+      expect(heldRunners(bases('Cap', 'Rosa', null), bases('Cap', 'Rosa', null))).toEqual([0, 1]);
     });
   });
 });

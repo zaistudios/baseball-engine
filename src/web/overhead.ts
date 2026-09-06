@@ -25,6 +25,7 @@ import {
   chaseReach,
   hasPlayAtFirst,
   raceTiming,
+  runToFirstMs,
   playCues,
   roleFor,
   FIELDERS,
@@ -82,12 +83,29 @@ export interface Replay {
   /** Booted: the chaser gets there and it gets past him anyway. */
   error: boolean;
   /**
-   * Everyone already on base who ended up somewhere else, from
-   * `runnerMoves()`. The batter's own move is excluded — he has the race.
+   * Everyone already on base who ended up somewhere else — `runnerMoves()`
+   * plus `scorersFrom()`, whose `to` of 3 is the plate. The batter's own move
+   * is excluded, because he has the race.
    */
   moves: RunnerMove[];
-  /** Runners who came all the way home, by the base they started on. */
-  scoredFrom: number[];
+  /**
+   * Bags whose runner DID NOT MOVE, and is therefore in neither list above.
+   *
+   * ⚠️ HE USED TO BE INVISIBLE. A fly ball with a man on second drew nine
+   * fielders, a ball, a batter — and an empty second base, because the only
+   * runners the replay knew about were the ones who changed bags. The man
+   * standing on the bag is a baserunner too; he takes his lead and gets back.
+   */
+  held: number[];
+  /**
+   * The bag a runner was GUNNED DOWN at going for one too many, 2/3/4 for
+   * second, third and home — inning.ts's numbering, which is also the bag
+   * count from home that runnerPoint() takes.
+   *
+   * The play-by-play has printed this line since the arm existed and the field
+   * never showed it: the throw beat a man nobody could see running.
+   */
+  thrownOut?: { at: number; speed: number };
   /**
    * Who goes after it, when the geometry cannot say. Only fouls set this —
    * see raceFor(). Undefined means "ask nearestFielder", which is right for
@@ -116,7 +134,8 @@ export function newReplay(o: {
   doublePlay?: boolean;
   error?: boolean;
   moves?: RunnerMove[];
-  scoredFrom?: number[];
+  held?: number[];
+  thrownOut?: { at: number; speed: number };
   chaserNum?: number;
 }): Replay {
   return {
@@ -132,7 +151,8 @@ export function newReplay(o: {
     doublePlay: !!o.doublePlay,
     error: !!o.error,
     moves: o.moves ?? [],
-    scoredFrom: o.scoredFrom ?? [],
+    held: o.held ?? [],
+    ...(o.thrownOut === undefined ? {} : { thrownOut: o.thrownOut }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     cued: new Set(),
   };
@@ -347,6 +367,62 @@ export function pathPoint(cam: Cam, bases: number): { x: number; y: number } {
   const a = bagAt(cam, leg - 1);
   const b = bagAt(cam, leg);
   return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+}
+
+/**
+ * How far outside the basepath a runner swings to round a bag, as a fraction
+ * of the diamond's own radius. Small on purpose — a runner rounds second, he
+ * does not run a lap of the mound.
+ */
+const ROUND_OUT = 0.13;
+/** How much of a leg either side of the bag the arc occupies. */
+const ROUND_SPAN = 0.62;
+
+/** Smooth at both ends, so the arc has no kink where it meets the straight. */
+const smooth = (k: number): number => k * k * (3 - 2 * k);
+
+/**
+ * WHERE A RUNNER ACTUALLY IS, `k` of the way from one bag to another.
+ *
+ * ⚠️ THIS IS THE FUNCTION THAT WAS MISSING, and its absence is what made the
+ * replay read as a diagram rather than a baseball play. Every runner used to
+ * be lerped STRAIGHT from the bag he left to the bag he reached — so a man
+ * scoring from first ran a diagonal across the infield, through the mound and
+ * over the pitcher, arriving at the plate having never touched second or
+ * third. Two dots crossing the diamond in an X is not baserunning.
+ *
+ * `from` and `to` are bags COUNTED FROM HOME, the same numbering pathPoint()
+ * takes: 0 is the box, 1/2/3 are the bags, 4 is back across the plate. So a
+ * man on first who scores is `from: 1, to: 4` and runs three legs.
+ *
+ * The bulge is the other half. A runner who is CONTINUING past a bag swings
+ * wide of it and cuts back — he cannot take a ninety-degree corner at speed —
+ * and the bag he finishes on gets no arc at all, because he stops there. One
+ * outward push per bag being rounded, biggest at the bag itself, gone by the
+ * middle of the legs either side.
+ */
+export function runnerPoint(
+  cam: Cam,
+  from: number,
+  to: number,
+  k: number,
+): { x: number; y: number } {
+  const u = from + (to - from) * Math.max(0, Math.min(1, k));
+  const p = pathPoint(cam, u);
+
+  let bulge = 0;
+  for (let bag = Math.floor(from) + 1; bag < to; bag++) {
+    bulge = Math.max(bulge, 1 - Math.abs(u - bag) / ROUND_SPAN);
+  }
+  if (bulge <= 0) return p;
+
+  // Outward is away from the middle of the diamond, which at a bag is exactly
+  // the corner's bisector and mid-leg is exactly perpendicular to the path.
+  const dx = p.x - cam.centre.x;
+  const dy = p.y - cam.centre.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const out = smooth(bulge) * cam.baseR * ROUND_OUT;
+  return { x: p.x + (dx / d) * out, y: p.y + (dy / d) * out };
 }
 
 export function drawOverhead(
@@ -639,6 +715,22 @@ function drawRunnerDot(
 }
 
 /**
+ * A man on base is already moving when the ball is hit, so a bag costs him
+ * less than the ninety feet out of the box costs the hitter.
+ */
+const RUNNING_START = 0.86;
+
+/**
+ * The lead: off the bag and back on it, for a runner who is going nowhere.
+ *
+ * Twelve feet of ninety, out and back over the first second — a real primary
+ * lead, and no more. The point is that he is a person rather than a lit lamp,
+ * not that he is about to steal.
+ */
+const LEAD_LEG = 0.13;
+const leadOff = (t: number): number => Math.sin(Math.min(1, t / 900) * Math.PI) * LEAD_LEG;
+
+/**
  * The race to first, the relay on a double play, and everyone else moving up.
  *
  * All clocks are measured from CONTACT, not from the cut, because that is when
@@ -656,33 +748,74 @@ function drawRace(
   const t = now - r.startedAt;
   const first = bagAt(cam, 0);
   const second = bagAt(cam, 1);
-  const home = bagAt(cam, -1);
   const race = raceFor(r);
   const { fieldedAt, runMs, throwMs, relayMs } = race;
   if (opts.sfx) cuePlaySounds(r, t, race, opts.sfx);
+
+  /**
+   * How long a man already on base takes to cover `legs` bags.
+   *
+   * A RUNNING START IS THE DIFFERENCE. He broke with the pitch, so ninety feet
+   * costs him less than it costs the batter standing still in the box — and
+   * two bags cost him about twice one, which is the part that used to be
+   * missing entirely.
+   *
+   * Capped the same way the batter's trip is, and for the same reason: a man
+   * scoring from first covers three bags, and three bags at an honest pace
+   * outlasts a replay that is over in under four seconds. See the note on the
+   * batter below.
+   */
+  // Named, not `window`: this file runs in a browser and that name is taken.
+  const onScreen = replayLength(r) - REPLAY_FADE_MS;
+  const trip = (speed: number, legs: number): number =>
+    Math.min(runToFirstMs(speed) * RUNNING_START * legs, Math.max(onScreen, runMs));
+
+  /**
+   * The man gunned down going for one too many, and where he set off from.
+   *
+   * ⚠️ THE BAG HE LEFT IS NOT STORED ANYWHERE, and it does not need to be.
+   * advance() only ever lets a runner stretch for ONE bag past what the hit
+   * was worth, so the bag he was cut down at minus the hit minus that one
+   * extra IS the bag he was standing on. See the extra-base clause in
+   * core/inning.ts, which is the only thing that can produce this.
+   */
+  const gunned =
+    r.thrownOut === undefined
+      ? null
+      : {
+          at: r.thrownOut.at,
+          from: r.thrownOut.at - 1 - basesFor(r.outcome),
+          ms: trip(r.thrownOut.speed, 1 + basesFor(r.outcome)),
+        };
 
   // A caught fly is out on the catch. He pulls up rather than running it out,
   // which is both what happens and what stops a pointless dot finishing a race
   // that was decided in the air.
   const caught = !r.plot.ground && !r.safe;
 
-  // Everyone who was already on. They break with the pitch and take the whole
-  // race to get where inning.ts has already put them.
-  //
-  // ponytail: one leg each, straight from the bag they left to the bag they
-  // reached, at the same pace regardless of who they are. A man going first to
-  // third is doing two legs at real speed and this draws it as one — which at
-  // this scale is a dot travelling a corner, and reads correctly.
-  for (const m of r.moves) {
-    const k = Math.min(1, t / runMs);
-    const a = bagAt(cam, m.from);
-    const b = bagAt(cam, m.to);
-    drawRunnerDot(ctx, { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
+  // The men standing on a bag, doing what a man on a bag does: edging off it
+  // and getting back. They are not going anywhere on this play and they are
+  // still baserunners — an occupied base with nobody drawn on it is the thing
+  // that made the field look like a diagram.
+  for (const bag of r.held) {
+    drawRunnerDot(ctx, runnerPoint(cam, bag + 1, bag + 2, leadOff(t)));
   }
-  for (const from of r.scoredFrom) {
-    const k = Math.min(1, t / runMs);
-    const a = bagAt(cam, from);
-    drawRunnerDot(ctx, { x: a.x + (home.x - a.x) * k, y: a.y + (home.y - a.y) * k });
+
+  // Everyone who was already on and went somewhere, ALONG THE BASEPATH and at
+  // his own pace. Both halves of that sentence used to be false: they cut
+  // straight across the diamond, and they all took exactly as long as the
+  // batter's race to first however far they were going.
+  for (const m of r.moves) {
+    const from = m.from + 1;
+    const to = m.to + 1;
+    drawRunnerDot(ctx, runnerPoint(cam, from, to, t / trip(m.speed, to - from)));
+  }
+
+  // The man gunned down going for one too many. He runs it exactly like the
+  // rest and then stops, dim, at the bag he did not get — until now the only
+  // trace of that on screen was a line of text.
+  if (gunned) {
+    drawRunnerDot(ctx, runnerPoint(cam, gunned.from, gunned.at, t / gunned.ms), t > gunned.ms);
   }
 
   // The forced man on a double play. He is erased from the base state, so he is
@@ -740,10 +873,9 @@ function drawRace(
   // capped to land him on the bag just before the camera cuts back, which on a
   // long ball reads as the trot it should be.
   const bases = basesFor(r.outcome);
-  const tripMs =
-    bases === 1 ? runMs : Math.min(runMs * bases, replayLength(r) - REPLAY_FADE_MS);
+  const tripMs = bases === 1 ? runMs : Math.min(runMs * bases, onScreen);
   const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
-  drawRunnerDot(ctx, pathPoint(cam, tripK * bases));
+  drawRunnerDot(ctx, runnerPoint(cam, 0, bases, tripK));
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.
@@ -754,6 +886,13 @@ function drawRace(
     ctx.fillStyle = safe ? '#6fbf73' : '#ff8c66';
     ctx.fillText(text, at.x + dx, at.y - 16);
   };
+
+  // The man cut down going for the extra base gets his own call, at his own
+  // bag. It is a second out on a play the batter was safe on, which is exactly
+  // why it needs saying somewhere other than the play-by-play.
+  if (gunned && t > gunned.ms) {
+    call('OUT', bagAt(cam, gunned.at - 1), false, gunned.at === 3 ? -24 : 22);
+  }
 
   if (caught) {
     // Out in the air, so it is called where the catch happened.

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint } from '../overhead.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint } from '../overhead.ts';
 import { overheadPoint, WALL_FT } from '../plot.ts';
 
 /** Both screens, plus a deliberately awkward one. */
@@ -105,5 +105,67 @@ describe('the batter runs as far as the scoreboard says', () => {
       });
       expect(onPath, `bases=${b}`).toBe(true);
     }
+  });
+});
+
+/**
+ * THE BUG THIS ANSWERS: a man scoring from first was lerped straight to the
+ * plate, so he ran a diagonal through the mound and touched neither second nor
+ * third. Everything here is a statement about the SHAPE of a trip — never
+ * about who was safe, which is the scoreboard's business and not this file's.
+ */
+describe('a runner runs the bases', () => {
+  const cam = makeCam(420, 340);
+  const bag = (i: number) => basePoint(i, cam.centre.x, cam.centre.y, cam.baseR);
+  const fromCentre = (p: { x: number; y: number }) =>
+    Math.hypot(p.x - cam.centre.x, p.y - cam.centre.y);
+
+  it('starts on the bag he left and ends on the bag he reached', () => {
+    for (const [from, to] of [
+      [1, 2],
+      [1, 4],
+      [0, 2],
+      [3, 4],
+    ] as const) {
+      const start = runnerPoint(cam, from, to, 0);
+      const end = runnerPoint(cam, from, to, 1);
+      expect(Math.hypot(start.x - bag(from - 1).x, start.y - bag(from - 1).y)).toBeLessThan(0.001);
+      const last = to > 2 ? -1 : to - 1;
+      expect(Math.hypot(end.x - bag(last).x, end.y - bag(last).y)).toBeLessThan(0.001);
+    }
+  });
+
+  it('never crosses the middle of the diamond, however far he is going', () => {
+    // A man scoring from first covers three bags. Every sample of that trip
+    // has to stay out by the basepath — the mound is the thing he must not
+    // run over, and the old straight lerp ran him right across it.
+    for (let k = 0; k <= 1.0001; k += 0.02) {
+      expect(fromCentre(runnerPoint(cam, 1, 4, k)), `k=${k}`).toBeGreaterThan(cam.baseR * 0.6);
+    }
+  });
+
+  it('rounds a bag he is passing and squares up on the one he stops at', () => {
+    // Outside the corner at second on his way to third...
+    const rounding = runnerPoint(cam, 1, 3, 0.5);
+    expect(fromCentre(rounding)).toBeGreaterThan(cam.baseR + 1);
+    // ...and dead on it when second is where the trip ends.
+    const arriving = runnerPoint(cam, 1, 2, 1);
+    expect(fromCentre(arriving)).toBeCloseTo(cam.baseR, 5);
+  });
+
+  it('keeps the arc small enough to still read as the basepath', () => {
+    let widest = 0;
+    for (let k = 0; k <= 1.0001; k += 0.01) {
+      widest = Math.max(widest, fromCentre(runnerPoint(cam, 0, 4, k)) - cam.baseR);
+    }
+    expect(widest).toBeGreaterThan(cam.baseR * 0.05);
+    expect(widest).toBeLessThan(cam.baseR * 0.2);
+  });
+
+  it('is a single straight leg when there is no bag to round', () => {
+    const mid = runnerPoint(cam, 0, 1, 0.5);
+    const a = bag(-1);
+    const b = bag(0);
+    expect(Math.hypot(mid.x - (a.x + b.x) / 2, mid.y - (a.y + b.y) / 2)).toBeLessThan(0.001);
   });
 });
