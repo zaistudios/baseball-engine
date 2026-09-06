@@ -20,6 +20,7 @@
  * a unit test buys a flaky suite and nothing else.
  */
 import { describe, it, expect } from 'vitest';
+import { ROTATION_SIZE } from '../depth.ts';
 import { LEAGUE, LEAGUE_AS_WRITTEN, HOME, AWAY, starterOf } from '../teams.ts';
 import { checkLeague } from '../league.ts';
 
@@ -57,12 +58,13 @@ describe('the league', () => {
     }
   });
 
-  it('gives every club a rotation of exactly three', () => {
+  it('gives every club a rotation of exactly five', () => {
     // checkLeague only asks for one, because an imported club may carry any
-    // number and rotation.ts indexes modulo the array. Three is what the
-    // shipped clubs are balanced around — see the arms section in teams.ts.
+    // number and rotation.ts indexes modulo the array. Five is what the
+    // shipped clubs dress — three written by hand in teams.ts and two more
+    // filled in by depth.ts, which is also what LEAGUE_AS_WRITTEN now means.
     for (const t of LEAGUE_AS_WRITTEN) {
-      expect(t.rotation, t.abbr).toHaveLength(3);
+      expect(t.rotation, t.abbr).toHaveLength(ROTATION_SIZE);
       expect(starterOf(t)).toBe(t.rotation[0]);
     }
   });

@@ -158,8 +158,13 @@ export const GROUPS: readonly {
 }[] = [
   { key: 'lineup', label: 'LINEUP', of: 'hitter', min: LINEUP_SIZE, max: LINEUP_SIZE },
   { key: 'bench', label: 'BENCH', of: 'hitter', min: 0, max: 8 },
-  { key: 'rotation', label: 'ROTATION', of: 'arm', min: 1, max: 6 },
-  { key: 'bullpen', label: 'BULLPEN', of: 'arm', min: 1, max: 8 },
+  // ⚠️ THE CAPS ARE ABOVE WHAT A CLUB SHIPS WITH, AND THEY HAVE TO BE. The
+  // shipped bullpen used to be three against a cap of eight; it is eight now
+  // (see depth.ts), and a cap equal to the default is an ADD button that is
+  // greyed out the first time anybody opens the panel. Room for a sixth
+  // starter and four more arms is room to actually build something.
+  { key: 'rotation', label: 'ROTATION', of: 'arm', min: 1, max: 8 },
+  { key: 'bullpen', label: 'BULLPEN', of: 'arm', min: 1, max: 12 },
 ];
 
 export const groupOf = (key: Group) => GROUPS.find((g) => g.key === key)!;

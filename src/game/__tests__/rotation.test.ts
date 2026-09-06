@@ -1,5 +1,10 @@
 /**
- * The rotation: three starters, a rest rule, and a pen you pick from.
+ * The rotation: five starters, a rest rule, and an eight-man pen you pick from.
+ *
+ * ⚠️ THE COUNTS ARE READ OFF depth.ts AND NOT WRITTEN OUT. This file said THREE
+ * in nine separate places, and every one of them had to be found by hand when
+ * the league went to twenty-six men. The staff sizes are one fact and they now
+ * live in one place.
  *
  * ⚠️ THE TEST THAT MATTERS MOST IS 'a season turns its rotation over'. Every
  * other assertion here can pass while the feature is dead — the old bug was
@@ -27,26 +32,31 @@ import {
   type RestLog,
 } from '../rotation.ts';
 import { LEAGUE, club } from '../teams.ts';
+import { ROTATION_SIZE, BULLPEN_SIZE, ROSTER_SIZE, rosterSize } from '../depth.ts';
 import { newStaff, bringInRelief, fatigue, shouldRelieve, recordPitch, openedBy, GASSED_AT } from '../bullpen.ts';
 import { newGame, goToBullpen, fieldingStaff } from '../game.ts';
 import { simulateGame } from '../sim.ts';
 import { newSeason, playDay, seasonOver, starterFor, armFor, restOf, penRestOf, yourGame, teamOf } from '../franchise.ts';
-import { armValue } from '../value.ts';
+import { armValue, stuffValue } from '../value.ts';
 
 const ALB = club('ALB');
 
-describe('every club is three and three', () => {
-  it('carries exactly three starters and three relievers', () => {
+describe('every club dresses twenty-six', () => {
+  it('carries a five-man rotation and an eight-man pen', () => {
     for (const t of LEAGUE) {
-      expect(t.rotation, `${t.abbr} rotation`).toHaveLength(3);
-      expect(t.bullpen, `${t.abbr} bullpen`).toHaveLength(3);
+      expect(t.rotation, `${t.abbr} rotation`).toHaveLength(ROTATION_SIZE);
+      expect(t.bullpen, `${t.abbr} bullpen`).toHaveLength(BULLPEN_SIZE);
     }
+  });
+
+  it('adds up to a full roster, club by club', () => {
+    for (const t of LEAGUE) expect(rosterSize(t), t.abbr).toBe(ROSTER_SIZE);
   });
 
   it('never names the same arm twice, anywhere in the league', () => {
     const names = LEAGUE.flatMap((t) => [...t.rotation, ...t.bullpen]).map((a) => a.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(LEAGUE.length * 6);
+    expect(names).toHaveLength(LEAGUE.length * (ROTATION_SIZE + BULLPEN_SIZE));
   });
 
   it('gives every arm a putaway it actually throws', () => {
@@ -134,17 +144,18 @@ describe('the computer picks a starter', () => {
     expect(pickStarter(ALB, log, 5)).not.toBe(0);
   });
 
-  it('comes back to him once the other two have had their turn', () => {
+  it('comes back to him once everybody else has had a turn', () => {
     // Not "once he is whole" — that was the greedy rule, and it never got to
     // the third starter. The rotation is an order: he is up again when he is
     // the man who has waited longest.
-    let log = recordStart({}, 'ALB', ALB.rotation[0]!.name, 5);
-    log = recordStart(log, 'ALB', ALB.rotation[1]!.name, 6);
-    log = recordStart(log, 'ALB', ALB.rotation[2]!.name, 7);
-    expect(pickStarter(ALB, log, 8)).toBe(0);
+    let log: RestLog = {};
+    ALB.rotation.forEach((arm, i) => {
+      log = recordStart(log, 'ALB', arm.name, 5 + i);
+    });
+    expect(pickStarter(ALB, log, 5 + ALB.rotation.length)).toBe(0);
   });
 
-  it('settles into a three-man cycle and repeats it', () => {
+  it('settles into a five-man cycle and repeats it', () => {
     // ⚠️ NOT asserted as literally [0,1,2,...]. Opening day is a tie broken on
     // armValue, and rotation[0] is not guaranteed to be the best arm on every
     // staff — a club can carry its best value in the second slot. What has to
@@ -152,13 +163,13 @@ describe('the computer picks a starter', () => {
     // a rotation IS.
     let log: RestLog = {};
     const order: number[] = [];
-    for (let day = 0; day < 9; day++) {
+    for (let day = 0; day < ROTATION_SIZE * 3; day++) {
       const at = pickStarter(ALB, log, day);
       order.push(at);
       log = recordStart(log, 'ALB', ALB.rotation[at]!.name, day);
     }
-    const cycle = order.slice(0, 3);
-    expect(new Set(cycle).size).toBe(3);
+    const cycle = order.slice(0, ROTATION_SIZE);
+    expect(new Set(cycle).size).toBe(ROTATION_SIZE);
     expect(order).toEqual([...cycle, ...cycle, ...cycle]);
     // ...and the first man out is the best arm on the staff.
     const best = ALB.rotation.reduce((a, b) => (armValue(b) > armValue(a) ? b : a));
@@ -176,7 +187,7 @@ describe('the computer picks a starter', () => {
       used.add(arm.name);
       log = recordStart(log, 'ALB', arm.name, day);
     }
-    expect(used.size).toBe(3);
+    expect(used.size).toBe(ROTATION_SIZE);
   });
 
   it('never starts a man on zero rest while somebody else is available', () => {
@@ -193,10 +204,22 @@ describe('the computer picks a starter', () => {
 describe('the computer picks a reliever', () => {
   const pen = ALB.bullpen;
 
-  it('sends its best arm late in a close game', () => {
-    const best = pen.reduce((a, b, i) => (armValue(b) > armValue(pen[a]!) ? i : a), 0);
+  it('sends its best STUFF late in a close game, not its longest arm', () => {
+    // ⚠️ stuffValue, NOT armValue, AND THE DIFFERENCE IS THE SAVE. armValue
+    // prices stamina at 0.43 because a man who gives you six innings is worth
+    // more over a season — but a closer is short on purpose, and scoring the
+    // ninth inning with a length term ranks him under a sixth-inning man with
+    // worse stuff and longer legs. With three in a pen that never bit; with
+    // eight it sent the wrong arm out on ten of the thirty clubs.
+    const best = pen.reduce((a, b, i) => (stuffValue(b) > stuffValue(pen[a]!) ? i : a), 0);
     expect(pickReliever(pen, { inning: 8, deficit: 1 })).toBe(best);
     expect(pickReliever(pen, { inning: 9, deficit: -2 })).toBe(best);
+    // ...and he is one of the three teams.ts wrote, on every club in the
+    // league. A generated middle man must never take the closer's inning.
+    for (const t of LEAGUE) {
+      const at = pickReliever(t.bullpen, { inning: 9, deficit: 1 });
+      expect(at, `${t.abbr} sends ${t.bullpen[at]!.name}`).toBeLessThan(BULLPEN_SIZE - 5);
+    }
   });
 
   it('sends the longest arm early, or in a blowout', () => {
@@ -215,7 +238,9 @@ describe('the pen is a list you pick from, not a queue', () => {
     const s = newStaff(ALB.rotation[0]!, ALB.bullpen);
     const picked = bringInRelief(s, 2);
     expect(picked.current.pitcher.name).toBe(ALB.bullpen[2]!.name);
-    expect(picked.bullpen.map((a) => a.name)).toEqual([ALB.bullpen[0]!.name, ALB.bullpen[1]!.name]);
+    expect(picked.bullpen.map((a) => a.name)).toEqual(
+      ALB.bullpen.filter((_, i) => i !== 2).map((a) => a.name),
+    );
     expect(picked.used).toHaveLength(1);
   });
 
@@ -228,11 +253,11 @@ describe('the pen is a list you pick from, not a queue', () => {
   it('can empty the whole pen without anyone coming back', () => {
     let s = newStaff(ALB.rotation[0]!, ALB.bullpen);
     const seen = new Set<string>();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < BULLPEN_SIZE; i++) {
       s = bringInRelief(s, 0);
       seen.add(s.current.pitcher.name);
     }
-    expect(seen.size).toBe(3);
+    expect(seen.size).toBe(BULLPEN_SIZE);
     expect(s.bullpen).toHaveLength(0);
     // One more is a no-op, not a crash — a manager out of arms leaves him in.
     const stuck = bringInRelief(s, 0);
@@ -347,7 +372,7 @@ describe('a season turns its rotation over', () => {
     return s;
   };
 
-  it('uses all three starters, for every club in the league', () => {
+  it('uses every starter, for every club in the league', () => {
     const s = playAll('---', 4242);
     const byClub: Record<string, Set<string>> = {};
     for (const r of s.results) {
@@ -355,7 +380,7 @@ describe('a season turns its rotation over', () => {
       if (r.as) (byClub[r.away] ??= new Set()).add(r.as);
     }
     for (const t of LEAGUE) {
-      expect(byClub[t.abbr]?.size, `${t.abbr} distinct starters`).toBe(3);
+      expect(byClub[t.abbr]?.size, `${t.abbr} distinct starters`).toBe(ROTATION_SIZE);
     }
   });
 
@@ -364,9 +389,14 @@ describe('a season turns its rotation over', () => {
     for (const t of LEAGUE) {
       const logged = Object.keys(s.rest?.[t.abbr] ?? {});
       const staff = [...t.rotation, ...t.bullpen].map((a) => a.name);
-      // All three starters throw over fourteen games, and the pen is worked.
-      expect(logged.length, t.abbr).toBeGreaterThanOrEqual(3);
-      expect(logged.length, t.abbr).toBeLessThanOrEqual(6);
+      // ⚠️ A FOURTEEN-GAME SEASON CANNOT REACH THE BOTTOM OF A THIRTEEN-MAN
+      // STAFF, and that is the correct answer rather than a gap. Every
+      // STARTER takes the ball — the assertion above holds that — and the pen
+      // is worked from the top down, so the mop-up man on a club that never
+      // gets blown out genuinely does not pitch. What must never happen is an
+      // arm in the ledger who is not on the staff.
+      expect(logged.length, t.abbr).toBeGreaterThanOrEqual(ROTATION_SIZE);
+      expect(logged.length, t.abbr).toBeLessThanOrEqual(ROTATION_SIZE + BULLPEN_SIZE);
       for (const n of t.rotation.map((a) => a.name)) expect(logged, t.abbr).toContain(n);
       // Nothing in the ledger is a man who is not on the staff.
       for (const n of logged) expect(staff, t.abbr).toContain(n);

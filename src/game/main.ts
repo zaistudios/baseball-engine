@@ -2480,7 +2480,16 @@ function benchPanel(): string {
       : `PINCH HIT <kbd>H</kbd>`) +
     `</button>` +
     `<div class="dim" style="font-size:10px;margin-top:4px">` +
-    `${due.name} is out of the game. Pick the man — click, or <kbd>,</kbd> <kbd>.</kbd></div>` +
+    // ⚠️ FUTURE TENSE, AND IT WAS NOT. This line read "<due> is out of the
+    // game" — about the man the row directly above it labels AT THE PLATE. It
+    // was describing what a pinch hit WOULD cost and stating it as something
+    // that had already happened, so the panel contradicted itself: the hitter
+    // standing in the box was announced as gone every time you looked at the
+    // bench, whether or not you ever pressed the button.
+    (benchArmed
+      ? `${due.name} is done for the night if you press it.`
+      : `A pinch hitter costs you ${due.name} for the night.`) +
+    ` Pick the man — click, or <kbd>,</kbd> <kbd>.</kbd></div>` +
     `</div>`
   );
 }
@@ -3286,7 +3295,7 @@ function lineupPanel(s: Season): string {
  * ⚠️ THIS PANEL IS THE FEATURE. Before it there was no choice to make: every
  * club started rotation[0] in every game it ever played, so a fourteen-game
  * season was one starter fourteen times and you met exactly seven opposing
- * arms all year. Three starters and a rest rule are only a rotation if
+ * arms all year. Five starters and a rest rule are only a rotation if
  * somebody picks, and this is where you pick.
  *
  * ⚠️ REST IS SHOWN AS STA, THE SAME NUMBER THE PEN PANEL SHOWS IN-GAME. Not a
@@ -3340,7 +3349,8 @@ function rotationPanel(s: Season): string {
     '<div class="panel rotation"><div class="dim penhead">YOUR ROTATION &mdash; PICK A STARTER</div>' +
     rows +
     '<div class="dim" style="font-size:10px;margin-top:6px">' +
-    'A start costs him a game and a half. Turn the three over and everybody is always whole.</div>' +
+    'A start costs him a game and a half. Turn the five over and everybody is always whole; ' +
+    'reach for a man early and he is short the next time you need him.</div>' +
     '<div class="dim penhead" style="margin-top:12px">YOUR PEN &mdash; WHO IS AVAILABLE</div>' +
     pen +
     '<div class="dim" style="font-size:10px;margin-top:6px">' +

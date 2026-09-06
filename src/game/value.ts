@@ -154,6 +154,31 @@ export const armValue = (a: Pitcher): number =>
   (a.zoneRate / 0.55) * 0.07;
 
 /**
+ * THE SAME ARM WITH HOW LONG HE GOES TAKEN OUT — armValue() minus its stamina
+ * term, and nothing else different.
+ *
+ * ⚠️ THERE IS A QUESTION armValue CANNOT ANSWER, and an eight-man bullpen is
+ * what exposed it. "Who is the best arm on this staff" is a question about a
+ * SEASON, and a man who gives you six innings is worth more over one than a
+ * man who gives you one — which is why stamina is in there at 0.43, and it is
+ * measured and correct.
+ *
+ * "Who do I want facing this hitter in the ninth" is a different question with
+ * the innings taken out of it. A closer is short ON PURPOSE. Scoring him with
+ * a term that rewards length ranks him below a middle reliever with worse
+ * stuff and longer legs — which is exactly what started happening when clubs
+ * went from three relievers to eight: pickReliever() was sending the sixth-
+ * inning man out for the save, on ten of the thirty clubs, and the arm the
+ * club is NAMED for sat in the pen.
+ *
+ * Used by rotation.ts for the late-and-close call, and by depth.ts to keep a
+ * generated arm from out-pitching a man teams.ts wrote. Both want the same
+ * thing: how good is he, ignoring how long he lasts.
+ */
+export const stuffValue = (a: Pitcher): number =>
+  (a.clutch ?? 1) * 0.61 + (a.break ?? 1) * 0.68 + (a.zoneRate / 0.55) * 0.07;
+
+/**
  * The bats and the arms, added.
  *
  * ⚠️ THERE IS NO LONGER A HITTING SHARE, and deleting it was a correction, not

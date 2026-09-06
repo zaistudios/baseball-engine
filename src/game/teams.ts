@@ -51,6 +51,7 @@ import type { BatterStats } from '../core/hit.ts';
 import { IDENTITIES, type Identity } from './identity.ts';
 import { loadCustomLeague } from './league.ts';
 import { TALENT_SPREAD } from './tuning.ts';
+import { fillRoster } from './depth.ts';
 
 // ------------------------------------------------------------- the hitters
 
@@ -2738,7 +2739,7 @@ export function leagueUnder(parity: number, offence: number): readonly Team[] {
  * and nothing to catch a throw — so loadCustomLeague() hands back null for
  * anything it cannot vouch for and the league screen explains it later.
  */
-const SOURCE: readonly Team[] = loadCustomLeague() ?? WRITTEN;
+const SOURCE: readonly Team[] = (loadCustomLeague() ?? WRITTEN).map(fillRoster);
 
 /**
  * The clubs at the shipped defaults — what an EXHIBITION plays and what every
@@ -2764,7 +2765,7 @@ export const LEAGUE_SOURCE: readonly Team[] = SOURCE;
  * them. The way back to the shipped league, and the fixed point the tests that
  * check tempering did what it says are measured against.
  */
-export const LEAGUE_AS_WRITTEN = WRITTEN;
+export const LEAGUE_AS_WRITTEN = WRITTEN.map(fillRoster);
 
 /** A club by its three letters. */
 export const club = (abbr: string): Team => LEAGUE.find((t) => t.abbr === abbr)!;

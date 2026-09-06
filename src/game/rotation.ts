@@ -56,7 +56,7 @@
 
 import type { Pitcher } from '../core/pitcher.ts';
 import type { Team } from './teams.ts';
-import { armValue } from './value.ts';
+import { armValue, stuffValue } from './value.ts';
 import { GASSED_AT } from './bullpen.ts';
 
 /**
@@ -327,6 +327,14 @@ export interface ReliefSituation {
  * ANY OTHER TIME, send the longest arm, because the innings still have to come
  * from somewhere and burning your best man in a blowout leaves you nothing.
  *
+ * ⚠️ "BEST" IS stuffValue AND IT USED TO BE armValue, WHICH PRICES STAMINA.
+ * With three men in a pen that never mattered. With eight it broke the save:
+ * a closer is short ON PURPOSE, so a term rewarding length ranked him under a
+ * sixth-inning man with worse stuff and longer legs, and on ten of the thirty
+ * clubs the ninth inning went to the wrong arm — including Chicago, whose
+ * whole identity is the man who comes in to put the rally out. The other
+ * branch still reads stamina, because that branch IS the innings question.
+ *
  * ⚠️ AND BOTH ARE NOW SCALED BY HOW MUCH OF HIM IS LEFT. A closer on his fourth
  * straight day is not the best arm you have, whatever the card says — sending
  * him because of the rating on the card is the pen's version of starting a
@@ -351,7 +359,7 @@ export function pickReliever(
     const rated = arm.stamina ?? 1;
     // How much of him is here tonight, 0..1 against his own rating.
     const share = Math.min(1, (legs[arm.name] ?? rated) / Math.max(0.01, rated));
-    const s = (lateAndClose ? armValue(arm) : rated) * share;
+    const s = (lateAndClose ? stuffValue(arm) : rated) * share;
     if (s > score) {
       score = s;
       best = i;

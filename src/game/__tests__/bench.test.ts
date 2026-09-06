@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { BENCH_SIZE } from '../depth.ts';
 import { LEAGUE, club, statsOf } from '../teams.ts';
 import {
   benchOf,
@@ -28,9 +29,9 @@ const HOME = club('ALB');
 const AWAY = club('DET');
 
 describe('every club has one', () => {
-  it('carries three men, and they are nobody who is already starting', () => {
+  it('carries four men, and they are nobody who is already starting', () => {
     for (const t of LEAGUE) {
-      expect(t.bench).toHaveLength(3);
+      expect(t.bench).toHaveLength(BENCH_SIZE);
       for (const p of t.bench!) {
         expect(t.lineup).not.toContain(p);
       }
@@ -103,7 +104,7 @@ describe('sending one up', () => {
     const sub = benchOf(g, 'away')[1]!;
     const after = pinchHit(g, 'away', sub);
     expect(after.away.bench).toBe(g.away.bench);
-    expect(benchOf(after, 'away')).toHaveLength(2);
+    expect(benchOf(after, 'away')).toHaveLength(BENCH_SIZE - 1);
     expect(benchOf(after, 'away')).not.toContain(sub);
   });
 
