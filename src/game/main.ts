@@ -73,6 +73,10 @@ import {
   countPitch,
   goToBullpen,
   benchOf,
+  // ⚠️ ALIASED. `teamOf` in this file is franchise.ts's (a Season and an
+  // abbreviation); this one takes a GameState and a Side, and importing both
+  // under one name is a type error waiting to read as a logic bug.
+  teamOf as clubInGame,
   pinchHit,
   fieldingStaff,
   fieldingAlignment,
@@ -2432,6 +2436,37 @@ function renderSituation(): void {
  * is the same gate the bunt and the steal use — a substitution mid-flight would
  * change who is swinging at a ball already in the air.
  */
+/**
+ * WHAT A BENCH MAN IS FOR, in one word, read off his card and his club's.
+ *
+ * ⚠️ THE FOURTH MAN BROKE THIS AND THE BENCH SECTION IN teams.ts PREDICTED IT.
+ * It says a bench is a MENU, and that if a club's men ever stop being one of
+ * each "two rows of that panel say the same word and the choice stops
+ * reading". Three archetypes and three men held that. A fourth man — average
+ * everything, which is what a twenty-sixth man IS — fell into the same
+ * catch-all as the platoon bat, and Chicago's panel listed PLATOON twice.
+ *
+ * ⚠️ THE PLATOON MAN IS DECIDED BY HIS HAND, NOT BY WHAT HE IS NOT. That is
+ * what the archetype was always about — see the bench section: "on most clubs
+ * he hits the other way round from the men around him", because
+ * platoonContact() in hit.ts is worth about eight points against a breaking
+ * ball. So ask the question directly: does he bat the other way from the nine
+ * he would come in for? Everybody else left over is the utility man, which is
+ * an honest name for a man who is on the roster because somebody has to be.
+ *
+ * It relabels exactly one written man in the league, and for a true reason:
+ * Chicago is the only lefty-majority lineup in it, so their left-handed bench
+ * bat has no platoon edge to sell and never did.
+ */
+export function benchRole(p: Player, lineup: readonly Player[]): string {
+  const s = statsOf(p);
+  if (s.power >= 1.3) return 'bat';
+  if (s.speed >= 1.25) return 'legs';
+  const lefties = lineup.filter((x) => x.bats === 'L').length;
+  const majority = lefties * 2 > lineup.length ? 'L' : 'R';
+  return p.bats === majority ? 'utility' : 'platoon';
+}
+
 function benchPanel(): string {
   const bench = benchOf(game, YOU);
   if (bench.length === 0) return '';
@@ -2463,7 +2498,7 @@ function benchPanel(): string {
       // this is the glance — see the bench section there.
       man(
         p,
-        statsOf(p).power >= 1.3 ? 'bat' : statsOf(p).speed >= 1.25 ? 'legs' : 'platoon',
+        benchRole(p, clubInGame(game, YOU).lineup),
         i === benchPick,
         ` data-bench="${i}" style="cursor:pointer"`,
       ),
@@ -3264,7 +3299,7 @@ function lineupPanel(s: Season): string {
         : '';
       return (
         '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" tabindex="0" style="cursor:pointer">' +
-        '<span class="dim">' + (on ? '&#9656; moving' : bat.power >= 1.3 ? 'bat' : bat.speed >= 1.25 ? 'legs' : 'platoon') + '</span>' +
+        '<span class="dim">' + (on ? '&#9656; moving' : benchRole(p, you.lineup)) + '</span>' +
         '<b>' + p.name + formTag(s, p.name) + '</b>' +
         '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(bat.power) +
         ' &middot; CON ' + showScale(bat.contact) + ' &middot; VIS ' + showScale(bat.vision) +
@@ -3349,7 +3384,15 @@ function rotationPanel(s: Season): string {
     '<div class="panel rotation"><div class="dim penhead">YOUR ROTATION &mdash; PICK A STARTER</div>' +
     rows +
     '<div class="dim" style="font-size:10px;margin-top:6px">' +
-    'A start costs him a game and a half. Turn the five over and everybody is always whole; ' +
+    // ⚠️ THE COUNT IS READ OFF THE CLUB, NOT WRITTEN OUT. This said "the
+    // three" and then "the five", and both were wrong somewhere: a SEASON
+    // STORES ITS ROSTERS WHOLE, so a franchise begun before the staff went to
+    // twenty-six men is still playing three starters and three relievers and
+    // will be until it ends. It loads and plays correctly — that is the point
+    // of storing them whole — and the line under the panel was the one thing
+    // on the screen telling it that it had five.
+    'A start costs him a game and a half. Turn the ' + you.rotation.length +
+    ' over and everybody is always whole; ' +
     'reach for a man early and he is short the next time you need him.</div>' +
     '<div class="dim penhead" style="margin-top:12px">YOUR PEN &mdash; WHO IS AVAILABLE</div>' +
     pen +

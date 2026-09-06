@@ -52,21 +52,21 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   // Los Angeles Aqueducts — the water still runs and the money stopped.
   LAA: [
     'Penstock Amaya', 'Silt Trap Oyelaran',
-    'Aqueduct Mile Duffy', 'Standpipe Corliss', 'Weir Gate Castellanos',
+    'Aqueduct Mile Duffy', 'Tailrace Corliss', 'Weir Gate Castellanos',
     'Sluice Box Aguirre', 'Dry Wash Prendergast',
     'Water Table Osborne',
   ],
   // Chicago Firemen — the deepest pen in the league, and now it is deeper.
   CHF: [
-    'Third Alarm Pilsudski', 'Wet Line Bartosz',
-    'Backdraft Marchewka', 'Halligan Bar Sobieski', 'Turnout Gear Lisowski',
-    'Standpipe Rzepka', 'Overhaul Kaczmarek',
+    'Fourth Alarm Pilsudski', 'Wet Line Bartosz',
+    'Flashover Marchewka', 'Halligan Bar Sobieski', 'Turnout Gear Lisowski',
+    'Wye Gate Rzepka', 'Overhaul Kaczmarek',
     'Firehouse Cot Wachowski',
   ],
   // Chicago Ivy — day baseball, a living wall and no titles.
   CHI: [
     'Waveland Doheny', 'Rooftop Seat Mazurek',
-    'Afternoon Game Trilling', 'Marquee Board Sostak', 'Brick Wall Lindqvist',
+    'Afternoon Game Trilling', 'Marquee Board Sostak', 'Batters Eye Lindqvist',
     'Ballhawk Renfroe', 'Bleacher Bum Salgado',
     'Warning Track Vlach',
   ],
@@ -79,37 +79,37 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   ],
   // Baltimore Crabbers — the bay, the mallet and nine fouled-off pitches.
   BAL: [
-    'Soft Shell Danowski', 'Trotline Bercik',
+    'Number One Danowski', 'Chicken Neck Bercik',
     'Marsh Grass Adeyemo', 'Peeler Run Kucharski', 'Shell Pile Fenwick',
-    'Old Bay Zawistowski', 'Low Tide Vandiver',
+    'Steam Pot Zawistowski', 'Low Tide Vandiver',
     'Dock Scale Hoyle',
   ],
   // Buffalo Snowplows — six feet of it, twice a winter.
   BUF: [
-    'Drift Line Wilczynski', 'Snow Fence Pietrzak',
+    'Drift Line Wilczynski', 'Berm Line Pietrzak',
     'Second Shovel Krupinski', 'Roof Rake Grabowski', 'Thaw Week Slusarczyk',
     'Black Ice Nowakowski', 'Cold Snap Wojtowicz',
     'Chain Up Sikorski',
   ],
   // Cincinnati Pigs — they were first, and the pork capital before that.
   CIN: [
-    'Over The Rhine Duerr', 'Packing House Schnell',
-    'Canal Basin Wurtz', 'Hog Drover Ecklein', 'Findlay Market Rausch',
-    'Smokehouse Leinweber', 'Lard Rendering Bosse',
+    'Vine Street Duerr', 'Packing House Schnell',
+    'Canal Basin Wurtz', 'Stockyard Ecklein', 'Market Stall Rausch',
+    'Curing Room Leinweber', 'Lard Rendering Bosse',
     'Opening Day Gruber',
   ],
   // Cleveland Rivets — nine machines off the same line, and the men who ran it.
   CLE: [
     'Flux Line Havlicek', 'Bar Mill Rusnak',
-    'Slag Heap Prokop', 'Ingot Mold Stefanik', 'Skip Hoist Dudek',
+    'Cinder Path Prokop', 'Ingot Mold Stefanik', 'Skip Hoist Dudek',
     'Cold Roll Machacek', 'Scale Pit Novosad',
     'Second Trick Vlasak',
   ],
   // Denver Void — a mile up, where nobody has learned to pitch.
   DEN: [
-    'Mile High Sedlacek', 'No Break Vandegrift',
+    'Fifty Two Eighty Sedlacek', 'No Break Vandegrift',
     'Tree Line Bohannon', 'Oxygen Debt Reasoner', 'Snowmelt Chacon',
-    'Front Range Ybarra', 'Nine Eight Loveless',
+    'Rain Shadow Ybarra', 'Nine Eight Loveless',
     'Long Haul Pittman',
   ],
   // Detroit Foundry — machines, in capitals, off the same line.
@@ -121,7 +121,7 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   ],
   // Florida Stingrays — spliced, storm-season, up for anything.
   FLA: [
-    'Sawgrass Betancourt', 'Turnpike Mile Arocha',
+    'Cypress Head Betancourt', 'Turnpike Mile Arocha',
     'Panhandle Duguay', 'Brackish Nadeau', 'Hurricane Party Lykins',
     'Mosquito Coast Villalobos', 'Tarpon Run Escalante',
     'Snowbird Season Kettering',
@@ -129,7 +129,7 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   // Kansas City Freight — a yard, a schedule and nobody who was drafted.
   KCF: [
     'Switch List Bogard', 'Interchange Culwell',
-    'Air Brake Culpepper', 'Flat Car Renshaw', 'Waybill Stipe',
+    'Knuckle Coupler Culpepper', 'Flat Car Renshaw', 'Manifest Stipe',
     'Siding Track Amador', 'Caboose Light Odell',
     'Rip Track Meeks',
   ],
@@ -142,14 +142,14 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   ],
   // Milwaukee Coopers — barrel makers, built like one.
   MIL: [
-    'Barrel Head Schierl', 'Croze Cut Bublitz',
+    'Cooper Shop Schierl', 'Croze Cut Bublitz',
     'Chime Hoop Vandehey', 'Mash Tun Roggenbuck', 'Cask Line Steinmetz',
     'Wort Chill Kupfer', 'Draft Horse Weninger',
     'Taproom Bench Zuehlke',
   ],
   // Minneapolis Millers — flour, ice and patience.
   MIN: [
-    'Grain Elevator Sjoberg', 'Bran Line Aakre',
+    'Head House Sjoberg', 'Bran Line Aakre',
     'Roller Mill Hovda', 'Sifter Deck Ellingson', 'Thirty Below Kvamme',
     'Mill Race Nyberg', 'Chaff Pile Torkelson',
     'Long Winter Sandvik',
@@ -170,15 +170,15 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   ],
   // New Orleans Spirit — a funeral that decided to be a party.
   NOL: [
-    'Sousaphone Broussard', 'Levee Board Prejean',
+    'Bass Drum Broussard', 'Levee Board Prejean',
     'Above Ground Boudreaux', 'Snare Drum Comeaux', 'Streetcar Line Naquin',
     'Jazz Funeral Melancon', 'Krewe Float Hebert',
     'Second Set Arceneaux',
   ],
   // Oklahoma City Dustbowl — no money, no staff, and the whole town turns out.
   OKC: [
-    'Black Sunday Wofford', 'Section Line Tullos',
-    'Red Dirt Hollaway', 'Fence Row Pankey', 'Hardpan Yeargin',
+    'Duster Wofford', 'Quarter Section Tullos',
+    'Caliche Hollaway', 'Fence Row Pankey', 'Hardpan Yeargin',
     'Tumbleweed Skaggs', 'Cattle Guard Prine',
     'Bus Fare Renfro',
   ],
@@ -187,12 +187,12 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
     'Dry Dock Feeney', 'Yard Whistle Trombetta',
     'Shipfitter Devaney', 'Armor Belt Kachmar', 'Gun Deck Mangano',
     'Ram Bow Scalise', 'Turret Ring Hanrahan',
-    'Powder Room Cerrone',
+    'Magazine Deck Cerrone',
   ],
   // Phoenix Flames — the fastest staff in the league, at a hundred and ten.
   PHX: [
-    'Hundred And Five Nez', 'Dry Heat Benally',
-    'Saguaro Shade Manuelito', 'Haboob Tsosie', 'Swamp Cooler Etsitty',
+    'Hundred And Five Nez', 'Shade Temp Benally',
+    'Saguaro Shade Manuelito', 'Dust Wall Tsosie', 'Evap Line Etsitty',
     'Century Mark Largo', 'Sun Shade Bitsui',
     'Water Break Descheny',
   ],
@@ -233,7 +233,7 @@ export const DEPTH_NAMES: Readonly<Record<string, readonly string[]>> = {
   ],
   // Toronto Travelers — nine men from nine places, playing a road season.
   TOR: [
-    'Layover Krishnan', 'Departures Board Vukovic',
+    'Missed Connection Krishnan', 'Departures Board Vukovic',
     'Baggage Claim Nkemelu', 'Standby Seat Haraldsson', 'Gate Change Villanueva',
     'Duty Free Sandhu', 'Overnight Bag Kirilenko',
     'Aisle Seat Persaud',
