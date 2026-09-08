@@ -2513,11 +2513,13 @@ function drawDelivery(now: number): void {
     ctx.fillText(RELEASE_LABEL[releaseGrade], BAR.x, BAR.y + BAR.h + 15);
   } else {
     ctx.fillStyle = '#7a8a6a';
-    ctx.fillText(
-      `SPACE starts the arm — SPACE again to let go · ${callType} is ${tempoWord(callType)}`,
-      BAR.x,
-      BAR.y + BAR.h + 15,
-    );
+    // ⚠️ TWO SHORT LINES, NOT ONE LONG ONE. drawBases() puts the diamond at
+    // canvas x 328-372 on this same row, and appending the tempo to the hint
+    // ran the sentence straight through it — 43 characters cleared the bags,
+    // 62 did not. Playtested; it is in every screenshot of the mound.
+    ctx.fillText('SPACE starts the arm — SPACE again to let go', BAR.x, BAR.y + BAR.h + 15);
+    ctx.fillStyle = '#5f6d54';
+    ctx.fillText(`${callType} · ${tempoWord(callType)}`, BAR.x, BAR.y + BAR.h + 27);
   }
 }
 

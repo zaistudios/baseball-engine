@@ -1199,14 +1199,14 @@ the line is. That is what made it repetitive, and it was not a feedback problem.
 
 A pitch is an arm action now, and arm actions differ:
 
-| pitch | sweep | release | window | on screen |
-|---|---|---|---|---|
-| fastball | 880ms | 560ms | ×1.10 | quick |
-| sinker | 900 | 600 | ×1.05 | quick |
-| slider | 950 | 650 | ×0.95 | even |
-| knuckleball | 1000 | 700 | ×0.80 | even |
-| changeup | 1150 | 830 | ×0.92 | slow |
-| curveball | 1250 | 920 | ×0.90 | long |
+| pitch | sweep | release | line sits at | window | on screen |
+|---|---|---|---|---|---|
+| fastball | 960ms | 500ms | 52% | ×1.10 | quick |
+| sinker | 980 | 560 | 57% | ×1.05 | quick |
+| slider | 1000 | 640 | 64% | ×0.95 | even |
+| knuckleball | 1000 | 700 | 70% | ×0.80 | even |
+| changeup | 1110 | 830 | 75% | ×0.92 | slow |
+| curveball | 1180 | 920 | 78% | ×0.90 | long |
 
 **Mixing pitches costs you your rhythm, and that is the point.** Coming to the
 changeup straight off a fastball is a 270ms difference in when to let go — the
@@ -1220,6 +1220,17 @@ marker crawls on a curveball and snaps on a fastball. Scaling the bar to the
 sweep would have made all six look identical again. The tempo is written on the
 pitch button (`1 · quick`) so you can see which is which *before* you call one —
 otherwise it is just the bar behaving oddly.
+
+⚠️ **The release/sweep RATIO is a design number, and the first table got it
+wrong by never considering it.** The line is drawn at `release/sweep` across a
+fixed-width bar; v1's sweeps and releases scaled together, so every ratio landed
+between 63.6% and 73.6% — **25px of travel on a 252px bar.** Playtested on the
+real screen, the line looked like it sat in the same place on all six and the
+only cue left was marker speed. The spread is now **52%→78%, 65px**, so the
+target visibly walks right as the pitches slow down and the marker speed still
+varies underneath it. Two cues, not one. `delivery.test.ts` asserts the spread
+and the ordering — the two bounds tests never caught this, because neither is
+about where the line is *drawn*.
 
 ⚠️ Still one press. `delivery.ts` rules out wind-up stages, arm slots and double
 meters and none of them are here — the same single graded press against

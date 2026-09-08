@@ -84,11 +84,20 @@ export const SHIFT_WORDS: Record<Shift, string> = {
   in: 'INFIELD IN',
 };
 
-/** The one-line explanation under the menu, so a shift is never a mystery. */
+/**
+ * The one-line explanation under the menu, so a shift is never a mystery.
+ *
+ * ⚠️ IT SAYS "LEANED" BECAUSE THE TABLES ARE A LEAN. These two lines said
+ * "stacked" — written against the four-men-on-one-side design, before the
+ * balance runs measured that version as a gift to the hitter and forced it down
+ * to a lean of at most ~15° a man. The word survived the retune and the panel
+ * spent a whole playtest describing a defence the game does not field. If MOVES
+ * ever goes back to a stack, this goes back to 'stacked'.
+ */
 export const SHIFT_BLURB: Record<Shift, string> = {
   straight: 'nobody moves',
-  left: 'stacked against a right-handed pull hitter',
-  right: 'stacked against a left-handed pull hitter',
+  left: 'leaned against a right-handed pull hitter',
+  right: 'leaned against a left-handed pull hitter',
   in: 'cuts the run at third — and opens the holes',
 };
 
@@ -104,16 +113,21 @@ export const SHIFT_BLURB: Record<Shift, string> = {
  */
 const MOVES: Record<Exclude<Shift, 'straight'>, Record<number, Partial<Omit<Fielder, 'num'>>>> = {
   // Against a LEFTY, who pulls to right (positive degrees). First base holds
-  // the bag; second goes deep toward the line, short crosses the bag, and
-  // third comes all the way over to where short usually plays.
+  // the bag. Second cheats 8° toward the line, short slides across to just left
+  // of the bag, and third comes over and in — 12° and 18 feet, which is a step
+  // toward short's ground rather than a move into it.
   right: {
     4: { dirDeg: 27 },
     6: { dirDeg: -4 },
     5: { distFt: 122, dirDeg: -26 },
   },
-  // Against a RIGHTY, who pulls to left (negative degrees). Third is the man
-  // on the line, short plays deep in the hole, second slides across the bag —
-  // and first only cheats over, because he still has to cover.
+  // Against a RIGHTY, who pulls to left (negative degrees). Third steps 4°
+  // toward the line, short 7° into the hole, second 15° across toward the bag,
+  // and first cheats 6° over and 8 feet back — he still has to cover.
+  //
+  // ⚠️ THESE ARE SMALL NUMBERS ON PURPOSE. See the balance note at the top:
+  // the version that moved men the distance the word "shift" implies measured
+  // as a gift to the hitter.
   left: {
     5: { dirDeg: -34 },
     6: { dirDeg: -26 },

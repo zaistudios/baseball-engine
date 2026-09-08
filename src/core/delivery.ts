@@ -132,20 +132,35 @@ export interface Delivery {
   scale: number;
 }
 
+/**
+ * ⚠️ THE RATIO release/sweep IS A DESIGN NUMBER, NOT A CONSEQUENCE — and the
+ * first version of this table got it wrong by not thinking about it at all.
+ *
+ * The bar is one fixed width, so the release LINE is drawn at release/sweep
+ * across it. v1 picked a sweep and a release per pitch that happened to scale
+ * together, which put every ratio between 63.6% and 73.6%: playtested on the
+ * real screen, that is 25px of travel on a 252px bar, and the line looked like
+ * it was in the same place on all six. The only cue left was marker SPEED, so
+ * the variety was there to feel and not to see.
+ *
+ * The spread is now 52.1% to 78.0% — 65px — so the target visibly walks right
+ * as the pitches get slower, and the marker speed still varies underneath it.
+ * Two cues, not one. Keep the spread when retuning: delivery.test.ts asserts it.
+ */
 export const DELIVERIES: Record<PitchType, Delivery> = {
   // Quick, early, and the most forgiving of the six. It is the pitch you go
   // back to when the rhythm is gone, which is what a fastball is for.
-  fastball: { sweepMs: 880, releaseAtMs: 560, scale: 1.1 },
+  fastball: { sweepMs: 960, releaseAtMs: 500, scale: 1.1 },
   // The fastball's cousin, a touch longer through the bottom.
-  sinker: { sweepMs: 900, releaseAtMs: 600, scale: 1.05 },
+  sinker: { sweepMs: 980, releaseAtMs: 560, scale: 1.05 },
   // Middle tempo, and the first one that asks for something.
-  slider: { sweepMs: 950, releaseAtMs: 650, scale: 0.95 },
+  slider: { sweepMs: 1000, releaseAtMs: 640, scale: 0.95 },
   // ⚠️ HELD PAST WHERE THE FASTBALL WENT, which is the whole pitch. Coming to
   // it straight off a fastball is a 270ms difference in when to let go, and
   // that mis-press is the changeup's own deception turned on the man throwing it.
-  changeup: { sweepMs: 1150, releaseAtMs: 830, scale: 0.92 },
+  changeup: { sweepMs: 1110, releaseAtMs: 830, scale: 0.92 },
   // The long slow wind. Latest release in the game and you have to wait it out.
-  curveball: { sweepMs: 1250, releaseAtMs: 920, scale: 0.9 },
+  curveball: { sweepMs: 1180, releaseAtMs: 920, scale: 0.9 },
   // Nobody repeats a knuckleball, including you. Ordinary tempo, narrowest
   // window — this is the per-PITCH half of what COMMAND.knuckler already says
   // about the per-ARM half.

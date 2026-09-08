@@ -191,3 +191,32 @@ describe('the invariants the design rests on', () => {
     }
   });
 });
+
+describe('the release line has to visibly move between pitches', () => {
+  /**
+   * ⚠️ THE REGRESSION THIS EXISTS TO CATCH, and it shipped once already.
+   *
+   * The bar is one fixed width, so the release line is drawn at
+   * release/sweep across it. The first table picked sweeps and releases that
+   * scaled together — every ratio landed between 63.6% and 73.6%, which on a
+   * 252px bar is 25px, and on the real screen the line looked like it was in
+   * the same place on all six pitches. The tempo was felt and not seen.
+   *
+   * Both bounds tests above still passed with that table, because neither of
+   * them is about where the line is DRAWN. This one is.
+   */
+  it('spreads the release ratios across a quarter of the bar', () => {
+    const ratios = Object.values(DELIVERIES).map((d) => d.releaseAtMs / d.sweepMs);
+    expect(Math.max(...ratios) - Math.min(...ratios)).toBeGreaterThan(0.2);
+  });
+
+  it('walks the line rightward as the pitch gets slower', () => {
+    // The ordering is the mechanic: a slower pitch is held longer AND its line
+    // sits further right, so the two cues agree instead of fighting.
+    const byRelease = Object.values(DELIVERIES).sort((a, b) => a.releaseAtMs - b.releaseAtMs);
+    const ratios = byRelease.map((d) => d.releaseAtMs / d.sweepMs);
+    for (let i = 1; i < ratios.length; i++) {
+      expect(ratios[i]!).toBeGreaterThan(ratios[i - 1]!);
+    }
+  });
+});
