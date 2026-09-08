@@ -2449,10 +2449,414 @@ export interface Team {
    * see pinchHit() in game.ts.
    */
   bench?: readonly Player[];
+  /**
+   * THE BUILDING THIS CLUB PLAYS IN — see Park below and atPark().
+   *
+   * ⚠️ OPTIONAL, AND IT HAS TO STAY OPTIONAL, for the same reason `identity`
+   * and `bench` are: a Season stores its rosters WHOLE, so a franchise saved
+   * before parks existed holds clubs with no park on them and has to keep
+   * loading. A club with no park plays in a neutral one.
+   *
+   * ⚠️ IT IS NOT PART OF WHAT A CLUB IS WORTH. value.ts does not read it and
+   * must not start — the rank on the pre-game card is what a club's PLAYERS
+   * are worth, and a park is a building both clubs hit in. Folding it in would
+   * rank a club by the fences it happens to own.
+   */
+  park?: Park;
+}
+
+/**
+ * A BALLPARK, as two multipliers and a name.
+ *
+ * ⚠️ THIS IS THE OTHER HALF OF identity.ts, AND THE HALF THAT WAS MISSING. An
+ * identity changes what the MANAGER does with the ratings a club has — swing
+ * more, run more, a shorter leash. Nothing in the engine changed what the
+ * ratings are WORTH, so every club played in the same building and the same
+ * 1.8-power hitter was the same hitter everywhere in the league. A park is
+ * that missing knob: the world's opinion of what it rewards, rather than the
+ * bench's opinion of what to try.
+ *
+ * ⚠️ IT DOES NOT LIVE IN plot.ts, AND WALL_FT IS THE TRAP. `WALL_FT = 400`
+ * looks like where a park belongs and is exactly the wrong place: plotBatted()
+ * is a PICTURE RECONCILED TO A VERDICT ALREADY IN THE BOOK — the outcome table
+ * calls `home_run` first and justOut() then shoves the flight over whatever
+ * fence is there. A per-park wall would change the replay and not one result.
+ * A park has to move the bats, the way `offence` does, or it is scenery.
+ *
+ * ⚠️ AND GEOMETRY CANNOT BE ALLOWED TO DECIDE A HOME RUN, WHICH WAS MEASURED
+ * RATHER THAN ASSUMED. placement.ts lets geometry vote on HIT OR OUT, and the
+ * obvious next step is to let it vote on home runs the same way: demote a
+ * table-homer whose flight never reached the fence, promote a double that
+ * cleared it, matched so the rate holds. Counted over 52,417 balls in play
+ * against the neutral 400-foot bowl:
+ *
+ *     table home runs            11,316
+ *     flight never reached 400    6,683   (59% of them)
+ *     doubles that cleared 400       154
+ *
+ * The flight model and the outcome table are not on the same scale for home
+ * runs and never were — plot.ts's own note on justOut() says so ("a 105mph ball
+ * at the flat end of the launch band computes 377 feet"), and 59% is what
+ * "sometimes" turns out to mean. A matched swap would delete three fifths of
+ * the home runs in the game and hand back two hundred. So the fence decides
+ * where a home run is DRAWN and the park decides how OFTEN one is hit, and
+ * those are two different mechanisms on purpose. scripts/hrswap.ts is the probe;
+ * re-run it before anybody tries this again.
+ */
+/**
+ * A BALLPARK, AS A LAYOUT — three fences and how much room there is in foul
+ * ground. Everything the engine does with a park is DERIVED from these four
+ * numbers; there is no second set of knobs to disagree with them.
+ *
+ * ⚠️ THE DIMENSIONS ARE THE TRUTH AND THE FACTORS ARE DERIVED, which is the
+ * whole reason this is a layout rather than a pair of multipliers. The first
+ * cut of this feature was `power` and `contact` written by hand, and it had the
+ * failure this file already warns about in another voice — see the note on
+ * zoneRate in pitcher.ts, "a separate control multiplier on top would be two
+ * knobs turning one thing". A 310-foot fence and a 0.95 power factor on the
+ * same club is a park that says two different things about itself. Move a
+ * fence and the factor follows; that is the contract.
+ *
+ * ⚠️ WHAT EACH NUMBER ACTUALLY REACHES:
+ *
+ *   left / center / right  →  parkPower(), the multiplier on every hitter's
+ *                             power in this building. See atPark().
+ *                         →  wallAt(), the fence the replay draws and the
+ *                             distance a home run is reported at.
+ *   foul                   →  parkFoulAngle(), how much of the foul population
+ *                             somebody can get under. See caughtFoul() in hit.ts.
+ *
+ * ⚠️ THERE IS NO WALL HEIGHT AND NO ALTITUDE. A thirty-seven-foot wall in left
+ * is expressed as the distance that makes it play the way it plays, which is
+ * what NEM's 310 is doing; a mile of thin air is expressed as fences. Both
+ * would be a second knob turning the same thing, and neither has a read site
+ * the engine could give it that these four do not already cover.
+ */
+export interface Park {
+  /** What it is called. Shown on the pre-game card; the engine never reads it. */
+  name: string;
+  /** Feet down the left-field line. */
+  left: number;
+  /** Feet to straightaway centre — the deepest point, and the gaps with it. */
+  center: number;
+  /** Feet down the right-field line. */
+  right: number;
+  /**
+   * HOW MUCH ROOM THERE IS IN FOUL GROUND, as a multiplier. 1 is ordinary,
+   * above 1 is acreage a catcher can run in, below 1 is the seats right on top
+   * of the line. It moves foul POPS somebody catches and nothing else — see
+   * parkFoulAngle().
+   */
+  foul: number;
+}
+
+/**
+ * ONE NUMBER FOR HOW BIG A PARK IS, in feet.
+ *
+ * ⚠️ CENTRE CARRIES THE MOST WEIGHT AND IT IS NOT BECAUSE OF CENTRE FIELD. The
+ * engine has three fences and a real park has a whole arc; the deepest point
+ * stands in for the two GAPS either side of it, which is where the ball that
+ * would have been a home run somewhere else actually dies. The lines take the
+ * rest between them because that is where pull power goes.
+ *
+ * ponytail: a weighted mean of the three numbers there are. Not an integral
+ * around an interpolated fence, not an area. Those would be arithmetic with a
+ * decimal point of extra precision on top of three hand-written numbers.
+ */
+export const parkSize = (p: Park): number => 0.3 * p.left + 0.4 * p.center + 0.3 * p.right;
+
+/**
+ * THE SIZE THAT PLAYS NEUTRAL, and it is the thirty's own mean rather than a
+ * round number somebody liked.
+ *
+ * ⚠️ IT IS WHAT KEEPS THE LEAGUE'S SCORING WHERE IT WAS. Every park below is
+ * measured against this, so the thirty average to a multiplier of 1 and the
+ * run environment the whole engine was tuned around does not move when parks
+ * are switched on. Add a club or re-cut a fence and this is the number to
+ * re-derive — `node scripts/parks.ts` prints it.
+ *
+ * ⚠️ AND IT IS NOT 400, WHICH IS WHAT plot.ts's WALL_FT STILL IS. That constant
+ * is the fallback fence for anything with no park — the roguelike, an
+ * exhibition between two clubs nobody gave a building to, every test written
+ * before this existed. A park-less game is played in a 400-foot bowl, exactly
+ * as it always was.
+ */
+export const NEUTRAL_SIZE = 362;
+
+/**
+ * HOW MUCH A FOOT OF FENCE IS WORTH, and it was measured rather than chosen.
+ *
+ * A factor multiplies NINE hitters at once on BOTH clubs, so it compounds where
+ * one man's rating does not. Measured over 500 games of ALB at DET, runs per
+ * club per game against the multiplier:
+ *
+ *     0.92 → 4.00      1.00 → 5.30      1.05 → 5.76
+ *     0.95 → 4.49      1.03 → 5.49      1.08 → 6.18
+ *
+ * ⚠️ THE CURVE IS NOT SYMMETRIC — half a run gained at 1.05 against four fifths
+ * of a run lost at 0.95 — so a symmetric spread of park SIZES does not produce
+ * a symmetric spread of runs, and the league would quietly lose offence if
+ * NEUTRAL_SIZE were set to the bare arithmetic mean of the fences. It is set to
+ * where the RUNS come out level, which is a slightly smaller park than the
+ * average one. scripts/parks.ts is what says where that is.
+ *
+ * At this slope the league's smallest park (NEM, 340ft) plays at 1.064 and its
+ * largest (DEN, 379ft) at 0.950 — about a run and a half a game between the two
+ * extremes, which is roughly the spread real park factors have.
+ */
+export const PARK_SLOPE = 0.0029;
+
+/** The multiplier a park puts on every hitter in it. 1 for a club with none. */
+export const parkPower = (p: Park | undefined): number =>
+  p === undefined ? 1 : 1 + (NEUTRAL_SIZE - parkSize(p)) * PARK_SLOPE;
+
+/**
+ * THE FENCE IN A GIVEN DIRECTION, in feet — the layout as the replay sees it.
+ *
+ * `dirDeg` is the engine's batted-ball direction: -45 is the left-field line,
+ * 0 is straightaway centre, +45 is the right-field line. The fence is
+ * interpolated between the three numbers a park carries.
+ *
+ * ⚠️ THE CURVE IS QUADRATIC, NOT LINEAR, AND A STRAIGHT LINE LOOKED WRONG. A
+ * real outfield wall bulges out toward the GAPS and then falls away hard into
+ * the corner. Interpolating straight from the line to centre instead drains
+ * the alley — the part of the park that decides more balls than any other —
+ * down to the average of the two things either side of it. Squaring keeps the
+ * gap out near centre's depth and spends the whole difference in the last
+ * fifteen degrees, which is what a ballpark looks like from above.
+ *
+ * The Common (310/390/302) across left field, to see the shape:
+ *
+ *     0°  390    -11°  385    -22°  371    -34°  344    -45°  310
+ *
+ * ⚠️ IT IS CLAMPED TO THE LINES. A foul ball's direction runs past ±45 all the
+ * way to ±128 (see FOUL_MAX_DEG in hit.ts) and there is no outfield fence out
+ * there at all. Nothing asks this about a foul — plotBatted() takes the foul
+ * branch first — but a caller that did would otherwise get an extrapolated
+ * fence behind home plate.
+ */
+export function wallAt(dirDeg: number, park: Park | undefined): number {
+  if (park === undefined) return NEUTRAL_WALL_FT;
+  const d = Math.max(-45, Math.min(45, dirDeg));
+  const line = d < 0 ? park.left : park.right;
+  // 0 at centre, 1 at the line, squared so the gaps stay deep.
+  const t = (Math.abs(d) / 45) ** 2;
+  return park.center + (line - park.center) * t;
+}
+
+/**
+ * The fence a game with no park is played in front of.
+ *
+ * ⚠️ IT MUST STAY EQUAL TO WALL_FT IN plot.ts, and it is written here rather
+ * than imported to keep game code out of the web layer's import graph — the
+ * roguelike's plot.ts is a leaf and teams.ts is not. park.test.ts asserts the
+ * two agree, which is the cheap half of the alternative.
+ */
+export const NEUTRAL_WALL_FT = 400;
+
+/**
+ * HOW HIGH A FOUL HAS TO BE HIT FOR SOMEBODY TO GET UNDER IT, in this park.
+ *
+ * ⚠️ THE BAND IS TINY AND THE NOTE ON FOUL_POP_ANGLE IN hit.ts SAYS WHY. The
+ * bar cuts the top of a foul population that runs to 78°, so at the shipped 75
+ * it takes the top three degrees. One degree either way is a third of the
+ * effect, and hit.ts measured that past about 4% of plate appearances a foul
+ * out starts eating strikeouts that should have happened, and a tenth of a run
+ * a side with them. So the whole league lives inside 73.5° and 76.5° — a foul
+ * multiplier of 1.5 is Oakland's acreage and 0.7 is the seats on the line, and
+ * neither leaves that window.
+ */
+export const parkFoulAngle = (park: Park | undefined): number =>
+  park === undefined ? BASE_FOUL_POP_ANGLE : BASE_FOUL_POP_ANGLE - (park.foul - 1) * 3;
+
+/** Kept in step with FOUL_POP_ANGLE in hit.ts — park.test.ts asserts it. */
+const BASE_FOUL_POP_ANGLE = 75;
+
+
+/**
+ * The two clubs as they hit in one building.
+ *
+ * ⚠️ IT APPLIES TO BOTH CLUBS, AND THAT IS THE HONEST MODEL. A hitter's park
+ * does not follow him on the road and the home club does not get an edge out
+ * of its own fences — both lineups hit in the same place on the same night.
+ * Applying it to the home club only would be a home-field advantage wearing a
+ * park's name, and it would re-rank all thirty clubs on a ladder value.ts
+ * computes without ever reading this field.
+ *
+ * ⚠️ IT MOVES THE BATS, NOT THE ARMS, which is leagueUnder()'s rule above and
+ * is right here for the same reason: weakening a staff to raise scoring in a
+ * bandbox would make every ERA in the record book a lie about the pitchers.
+ * A lively park says the HITTERS did more, which is what actually happened.
+ *
+ * ⚠️ AND IT IS APPLIED PER GAME, NOT STORED. newGame() calls this on its way
+ * in and the result lives only in that GameState — nothing writes a parked
+ * roster back to Season.rosters, so a long season cannot compound the same
+ * park thirty times into a club that hits like a machine shop.
+ */
+export function atPark(club: Team, park: Park | undefined): Team {
+  const power = parkPower(park);
+  if (power === 1) return club;
+  /**
+   * ⚠️ POWER ONLY, AND CONTACT WAS DELIBERATELY LEFT ALONE. A fence changes
+   * what a fly ball is WORTH; it does not change whether a hitter squares one
+   * up. Scaling contact as well would be the park reaching into the part of an
+   * at-bat it has no business in — and it would double-count, because a
+   * shorter fence already turns fly balls into home runs through the power
+   * curve. The room a big outfield gives a single to drop in is real and is
+   * the one thing this model does not have; it is small, and it is not worth a
+   * second number that would then have to be kept in step with the first.
+   */
+  const hit = (p: Player): Player => ({ ...p, power: p.power * power });
+  return {
+    ...club,
+    lineup: club.lineup.map(hit),
+    // The bench hits here too — pinchHit() writes a bench man into the lineup
+    // mid-game, and a pinch hitter who ignored the park would be the one man
+    // in the building playing a different game.
+    ...(club.bench ? { bench: club.bench.map(hit) } : {}),
+  };
 }
 
 /** The starter, for callers that only want to name him. */
 export const starterOf = (t: Team): Pitcher => t.rotation[0]!;
+
+// -------------------------------------------------------------- the parks
+
+/**
+ * THIRTY BUILDINGS, one per club.
+ *
+ * ⚠️ THE PARK IS READ OFF THE CLUB, NOT CHOSEN TO BALANCE ANYTHING — the same
+ * rule the identity tags follow, and for the same reason. New England is a
+ * three-hundred-and-ten-foot wall in left because that is what the Minutemen
+ * are; Denver is the deepest outfield in the league because the club is called
+ * the Void and a fly ball that dies on the track is what a void does. A fence
+ * cut to move a win rate is a fence that will not survive the next re-cast of
+ * the roster behind it.
+ *
+ * ⚠️ AND THE THIRTY AVERAGE TO NEUTRAL, WHICH IS THE PART THAT IS ARITHMETIC.
+ * NEUTRAL_SIZE is set where the league's RUNS come out level, so switching
+ * parks on redistributes offence between clubs without moving the run
+ * environment the whole engine was tuned around. `node scripts/parks.ts`
+ * prints every park's size and factor and the league's mean; run it after
+ * touching any fence below.
+ *
+ * ⚠️ A PARK IS NOT A HOME-FIELD ADVANTAGE. atPark() gives it to BOTH lineups,
+ * and a club plays half its schedule away, so a bandbox is a scoreboard rather
+ * than an edge. What it DOES do is reward a roster that fits it — Detroit's
+ * enormous power in a park with a 420-foot centre is the league's oldest joke
+ * about itself, and it is meant to cost them.
+ *
+ * The lines run 302–355 and centre 390–420, which is roughly the real spread.
+ * `foul` is acreage: 0.70 is the seats on top of the line, 1.25 is a catcher
+ * with room to run.
+ */
+export const PARKS = {
+  // ---- the three two-club towns
+
+  /** Short porch in right, bought and paid for. The BIG_INNING club's building. */
+  NYE: { name: 'The Cathedral', left: 318, center: 408, right: 314, foul: 0.85 },
+  /** Across the river and twenty feet deeper everywhere that matters. */
+  NYV: { name: 'Ironworks Park', left: 335, center: 408, right: 330, foul: 1.0 },
+  /** Symmetric, warm, and more foul ground than anywhere but the plains. */
+  LAC: { name: 'The Basin', left: 330, center: 395, right: 330, foul: 1.25 },
+  /** The aqueduct runs behind the bleachers. Ordinary in every dimension. */
+  LAA: { name: 'Cistern Field', left: 330, center: 400, right: 330, foul: 1.0 },
+  /** South side. Wide open, and the phone in the pen never stops. */
+  CHF: { name: 'Engine House', left: 330, center: 400, right: 335, foul: 1.05 },
+  /** The ivy, and no foul ground at all — the seats are on the field. */
+  CHI: { name: 'The Trellis', left: 355, center: 400, right: 353, foul: 0.75 },
+
+  // ---- and the rest, alphabetically
+
+  /** An old yard nobody has been allowed to modernise. Deep and awkward. */
+  ALB: { name: 'The Grange', left: 348, center: 410, right: 340, foul: 1.1 },
+  /** The warehouse in right is close enough to hit. */
+  BAL: { name: 'The Wharf', left: 333, center: 400, right: 318, foul: 0.9 },
+  /** Cold off the lake, deep to centre, and the wind is never behind you. */
+  BUF: { name: 'The Drift', left: 345, center: 412, right: 345, foul: 1.2 },
+  /** A bandbox on the river. Nobody here has ever walked on purpose either. */
+  CIN: { name: 'The Sty', left: 328, center: 404, right: 325, foul: 0.85 },
+  /** High wall in left, and a long way to everywhere else. */
+  CLE: { name: 'The Rivetworks', left: 325, center: 405, right: 325, foul: 1.0 },
+  /**
+   * THE BIGGEST OUTFIELD IN THE LEAGUE, and the club is named for it. A fly
+   * ball hit here does not get robbed, it simply stops existing.
+   */
+  DEN: { name: 'The Void', left: 352, center: 420, right: 352, foul: 1.05 },
+  /**
+   * ⚠️ THE LEAGUE'S MOST POWER, IN ITS SECOND-DEEPEST PARK, AND THAT IS THE
+   * POINT. Detroit is written as enormous bats and no legs; putting them in a
+   * 420-foot centre field is the building disagreeing with the roster, which
+   * is the most interesting thing a park can do to a club.
+   */
+  DET: { name: 'The Foundry Yard', left: 342, center: 420, right: 330, foul: 1.1 },
+  /** Domed, quirky, and the turf lets everything through. */
+  FLA: { name: 'The Tank', left: 335, center: 404, right: 335, foul: 1.0 },
+  /** Enormous alleys. Balls land in them and men keep running. */
+  KCF: { name: 'The Yardworks', left: 330, center: 410, right: 330, foul: 1.0 },
+  /** Deep, still, and hot. Get to their starter early or not at all. */
+  MEM: { name: 'The Landing', left: 340, center: 408, right: 336, foul: 1.1 },
+  /** Short and loud, with a roof to keep the weather off the fireworks. */
+  MIL: { name: 'The Cooperage', left: 335, center: 396, right: 335, foul: 0.85 },
+  /** Limestone, and a centre field that goes on a while. */
+  MIN: { name: 'The Mill', left: 339, center: 404, right: 328, foul: 1.0 },
+  /**
+   * ⚠️ THE SMALLEST-POWER CLUB IN THE LEAGUE, IN ONE OF ITS LARGEST PARKS,
+   * which is the same joke as Detroit told the other way round. Maine singles
+   * you to death and steals the base it needs, and the park is built for
+   * exactly that: no home runs, and room for a ball to land in.
+   */
+  MNE: { name: 'The Pound', left: 350, center: 415, right: 338, foul: 1.2 },
+  /**
+   * ⚠️ THE SMALLEST PARK IN THE LEAGUE. Three hundred and two feet down the
+   * line in right and the crowd is standing on the foul line. It plays at 1.064
+   * — the strongest park factor there is — and the Minutemen grind out long
+   * counts in front of it all summer.
+   */
+  NEM: { name: 'The Common', left: 310, center: 390, right: 302, foul: 0.7 },
+  /** Heavy, wet air. The ball goes where it is hit and no further. */
+  NOL: { name: 'The Quarter', left: 332, center: 402, right: 332, foul: 1.0 },
+  /** Wind, dust, and the most foul ground anybody plays in. */
+  OKC: { name: 'The Section', left: 345, center: 408, right: 345, foul: 1.25 },
+  /** A brick bandbox. Quiet for six innings and then it is 6-0. */
+  PHI: { name: 'The Navy Yard', left: 329, center: 401, right: 330, foul: 0.85 },
+  /** Dry desert air, and a centre field nobody has reached on the fly. */
+  PHX: { name: 'The Kiln', left: 330, center: 407, right: 335, foul: 0.95 },
+  /** Short down the right-field line, and a long walk to the left one. */
+  PIT: { name: 'The Puddle', left: 325, center: 399, right: 320, foul: 0.9 },
+  /** Marine air off the sound. Everything dies about ten feet short. */
+  SEA: { name: 'The Cloudbank', left: 340, center: 412, right: 336, foul: 1.2 },
+  /** The wind comes off the water in right and hands it back to you. */
+  SFO: { name: 'The Horn', left: 339, center: 404, right: 350, foul: 1.05 },
+  /** The one genuinely ordinary building in the league. */
+  STL: { name: 'The Crossing', left: 336, center: 400, right: 335, foul: 1.0 },
+  /** Heat, and a ball that carries. They out-slug you and they know it. */
+  TEX: { name: 'The Skillet', left: 326, center: 398, right: 322, foul: 0.85 },
+  /** Symmetric turf under a lid. Nothing to say about it, which is itself news. */
+  TOR: { name: 'The Terminal', left: 328, center: 400, right: 328, foul: 1.0 },
+} as const satisfies Record<string, Park>;
+
+/**
+ * THE DEEPEST FENCE IN THE LEAGUE, in feet — what the overhead camera is scaled
+ * to fit.
+ *
+ * ⚠️ IT IS THE DEEPEST PARK, NOT THE FURTHEST BALL, and the difference was a
+ * failing test. Sizing it to hold the hardest shot anybody hits means 505 feet
+ * (MAX_CARRY_FT in plot.ts), which would draw every building in the league a
+ * fifth smaller so that the rare 500-foot home run could stay on the canvas.
+ * The camera's job is to frame the PARK. A monster shot has always sailed past
+ * the top of the frame — the old camera was scaled to WALL_FT at 400 while
+ * balls could already carry 505 — and it should keep doing so.
+ *
+ * ⚠️ IT IS DERIVED, NOT TYPED, so cutting DEN's centre field or adding a
+ * thirty-first club with a deeper one cannot leave the camera scaled for a park
+ * that no longer exists. The camera is fixed at this one scale for every
+ * building — see makeCam(), which explains why that is the point rather than a
+ * shortcut.
+ */
+export const DEEPEST_REACH_FT = Math.max(
+  ...Object.values(PARKS).map((p) => Math.max(p.left, p.center, p.right)),
+);
 
 /**
  * THE THIRTY, in the order the start screen deals them out — the three
@@ -2478,32 +2882,32 @@ export const starterOf = (t: Team): Pitcher => t.rotation[0]!;
 const WRITTEN: readonly Team[] = [
   // The big markets. Two clubs each, and the money is the reason they can —
   // though only one of the six is actually spending it. See LAA and LAC.
-  { name: 'New York City Empire', abbr: 'NYE', lineup: NYE, rotation: NYE_ARMS, bullpen: NYE_PEN, bench: NYE_BENCH, identity: IDENTITIES.BIG_INNING },
-  { name: 'New York Vets', abbr: 'NYV', lineup: NYV, rotation: NYV_ARMS, bullpen: NYV_PEN, bench: NYV_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'Los Angeles Comets', abbr: 'LAC', lineup: LAC, rotation: LAC_ARMS, bullpen: LAC_PEN, bench: LAC_BENCH, identity: IDENTITIES.TRACK_TEAM },
-  { name: 'Los Angeles Aqueducts', abbr: 'LAA', lineup: LAA, rotation: LAA_ARMS, bullpen: LAA_PEN, bench: LAA_BENCH, identity: IDENTITIES.SMALL_BALL },
-  { name: 'Chicago Firemen', abbr: 'CHF', lineup: CHF, rotation: CHF_ARMS, bullpen: CHF_PEN, bench: CHF_BENCH, identity: IDENTITIES.QUICK_HOOK },
-  { name: 'Chicago Ivy', abbr: 'CHI', lineup: CHI, rotation: CHI_ARMS, bullpen: CHI_PEN, bench: CHI_BENCH, identity: IDENTITIES.GRINDERS },
+  { name: 'New York City Empire', abbr: 'NYE', lineup: NYE, rotation: NYE_ARMS, bullpen: NYE_PEN, bench: NYE_BENCH, identity: IDENTITIES.BIG_INNING, park: PARKS.NYE },
+  { name: 'New York Vets', abbr: 'NYV', lineup: NYV, rotation: NYV_ARMS, bullpen: NYV_PEN, bench: NYV_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.NYV },
+  { name: 'Los Angeles Comets', abbr: 'LAC', lineup: LAC, rotation: LAC_ARMS, bullpen: LAC_PEN, bench: LAC_BENCH, identity: IDENTITIES.TRACK_TEAM, park: PARKS.LAC },
+  { name: 'Los Angeles Aqueducts', abbr: 'LAA', lineup: LAA, rotation: LAA_ARMS, bullpen: LAA_PEN, bench: LAA_BENCH, identity: IDENTITIES.SMALL_BALL, park: PARKS.LAA },
+  { name: 'Chicago Firemen', abbr: 'CHF', lineup: CHF, rotation: CHF_ARMS, bullpen: CHF_PEN, bench: CHF_BENCH, identity: IDENTITIES.QUICK_HOOK, park: PARKS.CHF },
+  { name: 'Chicago Ivy', abbr: 'CHI', lineup: CHI, rotation: CHI_ARMS, bullpen: CHI_PEN, bench: CHI_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.CHI },
 
   // One-club towns. Toronto is the only one outside the country, which is the
   // whole joke in its name — nobody travels like they do.
-  { name: 'Albany Holdouts', abbr: 'ALB', lineup: ALB, rotation: ALB_ARMS, bullpen: ALB_PEN, bench: ALB_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'Baltimore Crabbers', abbr: 'BAL', lineup: BAL, rotation: BAL_ARMS, bullpen: BAL_PEN, bench: BAL_BENCH, identity: IDENTITIES.SMALL_BALL },
-  { name: 'Buffalo Snowplows', abbr: 'BUF', lineup: BUF, rotation: BUF_ARMS, bullpen: BUF_PEN, bench: BUF_BENCH, identity: IDENTITIES.IRON_ARMS },
-  { name: 'Cincinnati Pigs', abbr: 'CIN', lineup: CIN, rotation: CIN_ARMS, bullpen: CIN_PEN, bench: CIN_BENCH, identity: IDENTITIES.HACKERS },
-  { name: 'Cleveland Rivets', abbr: 'CLE', lineup: CLE, rotation: CLE_ARMS, bullpen: CLE_PEN, bench: CLE_BENCH, identity: IDENTITIES.BIG_INNING },
-  { name: 'Denver Void', abbr: 'DEN', lineup: DEN, rotation: DEN_ARMS, bullpen: DEN_PEN, bench: DEN_BENCH, identity: IDENTITIES.QUICK_HOOK },
-  { name: 'Detroit Foundry', abbr: 'DET', lineup: DET, rotation: DET_ARMS, bullpen: DET_PEN, bench: DET_BENCH, identity: IDENTITIES.BIG_INNING },
-  { name: 'Florida Stingrays', abbr: 'FLA', lineup: FLA, rotation: FLA_ARMS, bullpen: FLA_PEN, bench: FLA_BENCH, identity: IDENTITIES.TRACK_TEAM },
-  { name: 'Kansas City Freight', abbr: 'KCF', lineup: KCF, rotation: KCF_ARMS, bullpen: KCF_PEN, bench: KCF_BENCH, identity: IDENTITIES.HACKERS },
-  { name: 'Memphis Riverboats', abbr: 'MEM', lineup: MEM, rotation: MEM_ARMS, bullpen: MEM_PEN, bench: MEM_BENCH, identity: IDENTITIES.IRON_ARMS },
-  { name: 'Milwaukee Coopers', abbr: 'MIL', lineup: MIL, rotation: MIL_ARMS, bullpen: MIL_PEN, bench: MIL_BENCH, identity: IDENTITIES.BIG_INNING },
-  { name: 'Minneapolis Millers', abbr: 'MIN', lineup: MIN, rotation: MIN_ARMS, bullpen: MIN_PEN, bench: MIN_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'Maine Lobsters', abbr: 'MNE', lineup: MNE, rotation: MNE_ARMS, bullpen: MNE_PEN, bench: MNE_BENCH, identity: IDENTITIES.SMALL_BALL },
-  { name: 'New England Minutemen', abbr: 'NEM', lineup: NEM, rotation: NEM_ARMS, bullpen: NEM_PEN, bench: NEM_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'New Orleans Spirit', abbr: 'NOL', lineup: NOL, rotation: NOL_ARMS, bullpen: NOL_PEN, bench: NOL_BENCH, identity: IDENTITIES.HACKERS },
-  { name: 'Oklahoma City Dustbowl', abbr: 'OKC', lineup: OKC, rotation: OKC_ARMS, bullpen: OKC_PEN, bench: OKC_BENCH, identity: IDENTITIES.IRON_ARMS },
-  { name: 'Philadelphia Ironsides', abbr: 'PHI', lineup: PHI, rotation: PHI_ARMS, bullpen: PHI_PEN, bench: PHI_BENCH, identity: IDENTITIES.BIG_INNING },
+  { name: 'Albany Holdouts', abbr: 'ALB', lineup: ALB, rotation: ALB_ARMS, bullpen: ALB_PEN, bench: ALB_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.ALB },
+  { name: 'Baltimore Crabbers', abbr: 'BAL', lineup: BAL, rotation: BAL_ARMS, bullpen: BAL_PEN, bench: BAL_BENCH, identity: IDENTITIES.SMALL_BALL, park: PARKS.BAL },
+  { name: 'Buffalo Snowplows', abbr: 'BUF', lineup: BUF, rotation: BUF_ARMS, bullpen: BUF_PEN, bench: BUF_BENCH, identity: IDENTITIES.IRON_ARMS, park: PARKS.BUF },
+  { name: 'Cincinnati Pigs', abbr: 'CIN', lineup: CIN, rotation: CIN_ARMS, bullpen: CIN_PEN, bench: CIN_BENCH, identity: IDENTITIES.HACKERS, park: PARKS.CIN },
+  { name: 'Cleveland Rivets', abbr: 'CLE', lineup: CLE, rotation: CLE_ARMS, bullpen: CLE_PEN, bench: CLE_BENCH, identity: IDENTITIES.BIG_INNING, park: PARKS.CLE },
+  { name: 'Denver Void', abbr: 'DEN', lineup: DEN, rotation: DEN_ARMS, bullpen: DEN_PEN, bench: DEN_BENCH, identity: IDENTITIES.QUICK_HOOK, park: PARKS.DEN },
+  { name: 'Detroit Foundry', abbr: 'DET', lineup: DET, rotation: DET_ARMS, bullpen: DET_PEN, bench: DET_BENCH, identity: IDENTITIES.BIG_INNING, park: PARKS.DET },
+  { name: 'Florida Stingrays', abbr: 'FLA', lineup: FLA, rotation: FLA_ARMS, bullpen: FLA_PEN, bench: FLA_BENCH, identity: IDENTITIES.TRACK_TEAM, park: PARKS.FLA },
+  { name: 'Kansas City Freight', abbr: 'KCF', lineup: KCF, rotation: KCF_ARMS, bullpen: KCF_PEN, bench: KCF_BENCH, identity: IDENTITIES.HACKERS, park: PARKS.KCF },
+  { name: 'Memphis Riverboats', abbr: 'MEM', lineup: MEM, rotation: MEM_ARMS, bullpen: MEM_PEN, bench: MEM_BENCH, identity: IDENTITIES.IRON_ARMS, park: PARKS.MEM },
+  { name: 'Milwaukee Coopers', abbr: 'MIL', lineup: MIL, rotation: MIL_ARMS, bullpen: MIL_PEN, bench: MIL_BENCH, identity: IDENTITIES.BIG_INNING, park: PARKS.MIL },
+  { name: 'Minneapolis Millers', abbr: 'MIN', lineup: MIN, rotation: MIN_ARMS, bullpen: MIN_PEN, bench: MIN_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.MIN },
+  { name: 'Maine Lobsters', abbr: 'MNE', lineup: MNE, rotation: MNE_ARMS, bullpen: MNE_PEN, bench: MNE_BENCH, identity: IDENTITIES.SMALL_BALL, park: PARKS.MNE },
+  { name: 'New England Minutemen', abbr: 'NEM', lineup: NEM, rotation: NEM_ARMS, bullpen: NEM_PEN, bench: NEM_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.NEM },
+  { name: 'New Orleans Spirit', abbr: 'NOL', lineup: NOL, rotation: NOL_ARMS, bullpen: NOL_PEN, bench: NOL_BENCH, identity: IDENTITIES.HACKERS, park: PARKS.NOL },
+  { name: 'Oklahoma City Dustbowl', abbr: 'OKC', lineup: OKC, rotation: OKC_ARMS, bullpen: OKC_PEN, bench: OKC_BENCH, identity: IDENTITIES.IRON_ARMS, park: PARKS.OKC },
+  { name: 'Philadelphia Ironsides', abbr: 'PHI', lineup: PHI, rotation: PHI_ARMS, bullpen: PHI_PEN, bench: PHI_BENCH, identity: IDENTITIES.BIG_INNING, park: PARKS.PHI },
   // ⚠️ PHOENIX IS STEADY AND IT LOOKS LIKE A MISTAKE. "Two Hundred Innings
   // Bly" reads as IRON ARMS and it was, for one measurement: it cost them five
   // points of win rate, because `hook` multiplies limitOf(), limitOf() already
@@ -2512,13 +2916,13 @@ const WRITTEN: readonly Team[] = [
   // Their identity is the one thing no simulated game can price — see the
   // club's own header. Against a person they are the hardest club in the
   // league, and the tag for that is honesty about the sim.
-  { name: 'Phoenix Flames', abbr: 'PHX', lineup: PHX, rotation: PHX_ARMS, bullpen: PHX_PEN, bench: PHX_BENCH, identity: IDENTITIES.STEADY },
-  { name: 'Pittsburgh Puddlers', abbr: 'PIT', lineup: PIT, rotation: PIT_ARMS, bullpen: PIT_PEN, bench: PIT_BENCH, identity: IDENTITIES.HACKERS },
-  { name: 'Seattle Rain-Men', abbr: 'SEA', lineup: SEA, rotation: SEA_ARMS, bullpen: SEA_PEN, bench: SEA_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'San Francisco Foghorns', abbr: 'SFO', lineup: SFO, rotation: SFO_ARMS, bullpen: SFO_PEN, bench: SFO_BENCH, identity: IDENTITIES.SMALL_BALL },
-  { name: 'St. Louis Ferryman', abbr: 'STL', lineup: STL, rotation: STL_ARMS, bullpen: STL_PEN, bench: STL_BENCH, identity: IDENTITIES.GRINDERS },
-  { name: 'Texas Wildcats', abbr: 'TEX', lineup: TEX, rotation: TEX_ARMS, bullpen: TEX_PEN, bench: TEX_BENCH, identity: IDENTITIES.HACKERS },
-  { name: 'Toronto Travelers', abbr: 'TOR', lineup: TOR, rotation: TOR_ARMS, bullpen: TOR_PEN, bench: TOR_BENCH, identity: IDENTITIES.STEADY },
+  { name: 'Phoenix Flames', abbr: 'PHX', lineup: PHX, rotation: PHX_ARMS, bullpen: PHX_PEN, bench: PHX_BENCH, identity: IDENTITIES.STEADY, park: PARKS.PHX },
+  { name: 'Pittsburgh Puddlers', abbr: 'PIT', lineup: PIT, rotation: PIT_ARMS, bullpen: PIT_PEN, bench: PIT_BENCH, identity: IDENTITIES.HACKERS, park: PARKS.PIT },
+  { name: 'Seattle Rain-Men', abbr: 'SEA', lineup: SEA, rotation: SEA_ARMS, bullpen: SEA_PEN, bench: SEA_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.SEA },
+  { name: 'San Francisco Foghorns', abbr: 'SFO', lineup: SFO, rotation: SFO_ARMS, bullpen: SFO_PEN, bench: SFO_BENCH, identity: IDENTITIES.SMALL_BALL, park: PARKS.SFO },
+  { name: 'St. Louis Ferryman', abbr: 'STL', lineup: STL, rotation: STL_ARMS, bullpen: STL_PEN, bench: STL_BENCH, identity: IDENTITIES.GRINDERS, park: PARKS.STL },
+  { name: 'Texas Wildcats', abbr: 'TEX', lineup: TEX, rotation: TEX_ARMS, bullpen: TEX_PEN, bench: TEX_BENCH, identity: IDENTITIES.HACKERS, park: PARKS.TEX },
+  { name: 'Toronto Travelers', abbr: 'TOR', lineup: TOR, rotation: TOR_ARMS, bullpen: TOR_PEN, bench: TOR_BENCH, identity: IDENTITIES.STEADY, park: PARKS.TOR },
 ];
 
 // ------------------------------------------------- how far apart they are

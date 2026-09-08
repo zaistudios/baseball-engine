@@ -90,11 +90,27 @@ import {
   type GameState,
   type Side,
 } from './game.ts';
-import { HOME, AWAY, LEAGUE, LEAGUE_SOURCE, statsOf, type Team } from './teams.ts';
+import {
+  HOME,
+  AWAY,
+  LEAGUE,
+  LEAGUE_SOURCE,
+  parkFoulAngle,
+  parkPower,
+  wallAt,
+  DEEPEST_REACH_FT,
+  statsOf,
+  type Team,
+} from './teams.ts';
 import {
   clearCustomLeague,
+  deleteSlot,
   leagueStatus,
+  listSlots,
+  loadSlot,
+  MAX_SLOT_NAME,
   saveCustomLeague,
+  saveSlot,
   serialiseLeague,
   storedLeagueProblems,
   storedLeagueText,
@@ -148,6 +164,7 @@ import {
   GROUPS,
   HITTER_FIELDS,
   IDENTITY_FIELDS,
+  PARK_FIELDS,
   addPerson,
   coerce,
   groupOf,
@@ -157,7 +174,9 @@ import {
   valueOf,
   withArsenalShare,
   withClubField,
+  withIdentity,
   withIdentityField,
+  withParkField,
   withPersonField,
   workingCopy,
   type Field,
@@ -166,7 +185,7 @@ import {
 import { fieldBall, reachOf } from './defense.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
-import { knob } from './identity.ts';
+import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
 import { momentOn, decide, valueShift, type Moment } from './moments.ts';
 import { formOf, formLabel, inForm } from './form.ts';
 import { BRACKET, OFFENCE, PARITY, SERIES, STREAK, cleanRules, roundsIn } from './rules.ts';
@@ -836,6 +855,8 @@ function resolvePitch(): void {
       runnersInScoringPosition: risp,
       stuff,
       foulBoost: FOUL_BOOST,
+      // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
+      foulPopAngle: parkFoulAngle(game.home.park),
       assist: assist(),
     };
     const before = atBat;
@@ -1170,6 +1191,9 @@ function resolveTheirSwing(): void {
         runnersInScoringPosition: risp,
         stuff,
         foulBoost: FOUL_BOOST,
+        // The building both clubs are hitting in. Same park for the computer's
+        // swings as for yours — see parkFoulAngle() in teams.ts.
+        foulPopAngle: parkFoulAngle(game.home.park),
       };
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
@@ -1243,7 +1267,10 @@ function showFoul(runnerSpeed: number): boolean {
     direction: swing.direction,
     speed: runnerSpeed,
     safe: false,
-    chaserNum: place(swing).fielderNum,
+    chaserNum: place(swing, game.home.park).fielderNum,
+    // The fence this one went toward, so the drawn ball and the sentence
+    // under it agree. See newReplay's own note.
+    wallFt: wallAt(swing.direction, game.home.park),
   });
   return true;
 }
@@ -1253,7 +1280,7 @@ function finishAtBat(): void {
   // Where it landed decides whether it is a hit at all, what it is worth, AND
   // what the scorer says. The contest needs the glove of whoever it was hit at.
   const align = fieldingAlignment(game);
-  const placed = withPlacement(atBat.result!, { reachAt: reachOf(align) });
+  const placed = withPlacement(atBat.result!, { reachAt: reachOf(align), park: game.home.park });
   const result = placed.result;
   const batter = currentBatter(game);
 
@@ -1289,6 +1316,8 @@ function finishAtBat(): void {
           direction: result.hit.direction,
           speed: batter.speed,
           safe: result.hit.isHit || !!fielding?.error,
+          // The same fence place() just used — see newReplay's note on wallFt.
+          wallFt: wallAt(result.hit.direction, game.home.park),
           doublePlay: !!fielding?.doublePlay,
           error: !!fielding?.error,
           // Only a foul out sets this, and only because nobody stands in foul
@@ -1923,7 +1952,9 @@ function dpadOffPre(): void {
  * the wall arc near the top — the at-bat view is painted over completely while
  * it is up, which is what makes the cut read as a cut.
  */
-const OH_CAM = makeCam(canvas.width, canvas.height);
+// ⚠️ ONE SCALE FOR EVERY PARK — see makeCam(). Fitted to the deepest fence in
+// the league so a bandbox draws small and The Void draws enormous.
+const OH_CAM = makeCam(canvas.width, canvas.height, undefined, DEEPEST_REACH_FT);
 /** The two field colours, matched to game.html's palette. */
 const OH_PALETTE = { field: '#1d2b1f', dirt: '#3a2e20' };
 
@@ -1959,6 +1990,9 @@ if (import.meta.env.DEV) {
       direction,
       speed: 1,
       safe: !outcome.includes('out'),
+      // The debug hook draws the park the game is actually in, or the field
+      // under the ball would not be the one it was plotted against.
+      wallFt: wallAt(direction, game.home.park),
       ...extra,
     });
     return outcome;
@@ -2030,7 +2064,7 @@ function drawField(now: number): void {
     const oh = overheadAlpha(replay, rn);
     if (oh > 0) {
       ctx.globalAlpha = oh;
-      drawOverhead(ctx, OH_CAM, replay, rn, OH_PALETTE);
+      drawOverhead(ctx, OH_CAM, replay, rn, { ...OH_PALETTE, wall: (d) => wallAt(d, game.home.park) });
       ctx.globalAlpha = 1;
     }
   }
@@ -3105,6 +3139,60 @@ let looping = false;
 // --------------------------------------------------------- the pre-game card
 
 /**
+ * ⚠️ EVERY CLUB NAME, BIO, BLURB AND PARK NAME IS SOMEBODY ELSE'S TEXT. All of
+ * it is written by whoever is holding the keyboard — the editor, or a pasted
+ * league — and all of it goes into innerHTML. A `<` in a bio would otherwise
+ * eat the rest of the panel.
+ *
+ * ⚠️ IT WAS SCOPED TO THE START SCREEN AND IS MODULE-WIDE NOW. The league
+ * screen was the only place user text reached innerHTML when this was written;
+ * the park name put a second one on the pre-game card, and a second copy of an
+ * escape function is how one of them ends up not being called.
+ */
+const escapeText = (s: string): string =>
+  s.replace(/[&<>"]/g, (c) => `&${{ '&': 'amp', '<': 'lt', '>': 'gt', '"': 'quot' }[c]};`);
+
+/**
+ * THE BUILDING, on the card, in one line.
+ *
+ * ⚠️ IT SAYS WHAT THE PARK DOES, NOT JUST WHAT IT IS CALLED. "The Common,
+ * 310/390/302" is trivia; "plays big" or "plays small" is the thing that
+ * changes how you should manage the next nine innings, and it is the reading
+ * parkPower() already has. A name with no verdict beside it is decoration.
+ *
+ * ⚠️ AND IT SAYS IT ABOUT BOTH CLUBS. The wording is deliberately about the
+ * scoreboard rather than about the home side — a park is not an edge, it is the
+ * weather. See atPark().
+ *
+ * Empty for a club with no park, which is every club in a league imported from
+ * a build before parks existed.
+ */
+function parkLine(home: Team): string {
+  const p = home.park;
+  if (!p) return '';
+  const f = parkPower(p);
+  // Bands off the measured league spread — 0.95 to 1.065 across the thirty.
+  const verdict =
+    f >= 1.03
+      ? 'plays small — the ball carries out of here'
+      : f >= 1.008
+        ? 'plays a little small'
+        : f > 0.992
+          ? 'plays fair'
+          : f > 0.975
+            ? 'plays a little big'
+            : 'plays big — fly balls go to die';
+  const room =
+    p.foul >= 1.15 ? ' · acres of foul ground' : p.foul <= 0.85 ? ' · no foul ground at all' : '';
+  return (
+    `<div class="panel dim" style="text-align:center">` +
+    `<b style="color:var(--ink)">${escapeText(p.name)}</b> &nbsp; ` +
+    `${p.left} / ${p.center} / ${p.right} ft &nbsp;·&nbsp; ${verdict}${room}` +
+    `</div>`
+  );
+}
+
+/**
  * A FRANCHISE MOMENT, on the days moments.ts says there is one.
  *
  * ⚠️ IT REUSES #pre, THE PRE-GAME OVERLAY, rather than adding an element.
@@ -3531,6 +3619,12 @@ function showPregame(s: Season, m: Matchup, cursor?: string): void {
     `<div class="wrap">` +
     `<h1>${dayLabel(s)}</h1>` +
     `<h2>${m.away} AT ${m.home}</h2>` +
+    // ⚠️ WHOSE BUILDING IT IS, AND WHAT IT DOES, BEFORE A PITCH IS THROWN. A
+    // park is the one thing on this card that applies to BOTH clubs, so it
+    // belongs across the top rather than inside either panel — putting it in
+    // the home club's half would read as a home-field advantage, which is
+    // exactly what atPark() is written not to be.
+    parkLine(teamOf(s, m.home)) +
     `<div class="vs">${side(m.away, 'away')}${side(m.home, 'home')}</div>` +
     (elsewhere ? `<div class="panel dim">also today &nbsp; ${elsewhere}</div>` : '') +
     `<div class="panel"><table class="line"><thead><tr>` +
@@ -4429,6 +4523,13 @@ function pregame(): void {
   let box = leagueStatus() === 'broken' ? (storedLeagueText() ?? '') : '';
 
   /**
+   * What is typed in the shelf's name field, held for the same reason `box` is
+   * — the redraw that follows filing a league would otherwise eat the name
+   * somebody is still correcting after a refusal.
+   */
+  let slotName = '';
+
+  /**
    * THE EDITOR'S THREE NULLABLE LOCALS, which are its whole navigation — same
    * pattern as `mode` and `mine` above, and for the same reason.
    *
@@ -4440,15 +4541,6 @@ function pregame(): void {
   let editClub: number | null = null;
   let editWho: { group: Group; index: number } | null = null;
 
-  /**
-   * ⚠️ EVERY PIECE OF THIS SCREEN IS SOMEBODY ELSE'S TEXT. A club name, a bio,
-   * a parser's complaint about a paste — all of it is written by whoever is
-   * holding the keyboard and all of it is going into innerHTML, which is the
-   * one place in this file where that is true. A `<` in a bio would otherwise
-   * eat the rest of the panel.
-   */
-  const escapeText = (s: string): string =>
-    s.replace(/[&<>"]/g, (c) => `&${{ '&': 'amp', '<': 'lt', '>': 'gt', '"': 'quot' }[c]};`);
   /** What this franchise will play under, edited in place by the rules screen. */
   let rules: Rules = { ...DEFAULT_RULES };
   /** Whether the player has pressed START on that screen. */
@@ -4644,7 +4736,47 @@ function pregame(): void {
         ? ''
         : `<button data-lg="shipped"><b>BACK TO THE SHIPPED LEAGUE</b><br>` +
           `drops the one you imported</button>`) +
+      shelf() +
       `<button data-lg="back"><b>BACK</b><br>nothing is changed</button>`;
+  };
+
+  /**
+   * THE SHELF — every league you have kept, and the field for keeping another.
+   *
+   * ⚠️ IT IS ON THE LEAGUE SCREEN AND NOT BEHIND A CARD OF ITS OWN. A league
+   * you cannot find is a league you did not save: the same reason CUSTOMIZE
+   * ended up on the club picker as well as the mode screen. This screen is
+   * already the one place somebody thinks about leagues as documents, so the
+   * shelf goes where they are standing.
+   *
+   * ⚠️ WHAT IS FILED IS THE ACTIVE LEAGUE, NOT THE BOX. The box may hold a
+   * paste that has not been checked, or nothing at all; "keep this league"
+   * means the clubs you are playing, which is the only reading of it that is
+   * never a surprise. Paste first, USE it, then keep it.
+   */
+  const shelf = (): string => {
+    const slots = listSlots();
+    const rows = slots
+      .map(
+        (n) =>
+          `<button data-slot="${escapeText(n)}"><b>LOAD ${escapeText(n.toUpperCase())}</b><br>` +
+          `play these clubs instead</button>` +
+          `<button data-drop="${escapeText(n)}"><b>DROP ${escapeText(n.toUpperCase())}</b><br>` +
+          `off the shelf — the league you are playing is untouched</button>`,
+      )
+      .join('');
+    return (
+      `<div class="chalk">THE SHELF · ${slots.length} KEPT</div>` +
+      `<div class="dim" style="grid-column:1/-1;line-height:1.7">` +
+      'Keep the clubs you are playing under a name, and load any of them back later. ' +
+      'A kept league is a copy — loading one replaces what you are playing, and a franchise ' +
+      'already in progress still keeps the clubs it started with.</div>' +
+      `<div style="grid-column:1/-1"><input id="slotbox" spellcheck="false" maxlength="${MAX_SLOT_NAME}" ` +
+      `placeholder="Name it — deadball, my thirty, 1994…" value="${escapeText(slotName)}"></div>` +
+      `<button data-lg="keep"><b>KEEP THIS LEAGUE</b><br>files the clubs you are playing ` +
+      `under that name</button>` +
+      rows
+    );
   };
 
   /**
@@ -4795,6 +4927,39 @@ function pregame(): void {
         (club.identity ?? {}) as unknown as Record<string, unknown>,
         'data-ed="identity"',
       ) +
+      /**
+       * ⚠️ THE EIGHT ARE A STARTING POINT, NOT A LIST YOU PICK FROM. Every
+       * field above stays editable after one lands — the archetype is copied
+       * onto the club, not referenced — so this is the difference between a
+       * dropdown of eight ways to play and a way to write a ninth. Four knobs
+       * typed from nothing is a form nobody fills in; four knobs with
+       * GRINDERS already in them is a form somebody edits.
+       */
+      `<div class="edmix"><span>start from one of the eight — every field stays yours</span>` +
+      Object.keys(IDENTITIES)
+        .map(
+          (k) =>
+            `<button class="edtiny" data-preset="${k}">${escapeText(
+              IDENTITIES[k as IdentityKey].name,
+            )}</button>`,
+        )
+        .join('') +
+      '</div>' +
+      /**
+       * ⚠️ THE PARK IS THE CLUB'S BUILDING, NOT THE CLUB'S ADVANTAGE, and the
+       * blurb has to say so or every league anybody builds will be thirty
+       * bandboxes. atPark() gives it to BOTH lineups; naming a park 1.2 makes
+       * for a high-scoring night, not a club that wins more.
+       */
+      `<div class="edmix"><span>the park — both clubs hit here, so this is the ` +
+      `scoreboard, not an edge. name it to switch it on, clear the name to drop it. ` +
+      `what it does to the ball is derived from the fences — see the rank on the card` +
+      `</span></div>` +
+      rows(
+        PARK_FIELDS,
+        (club.park ?? {}) as unknown as Record<string, unknown>,
+        'data-ed="park"',
+      ) +
       '</div></div>' +
       GROUPS.map(list).join('') +
       `<div class="edbar" style="grid-column:1/-1">` +
@@ -4872,6 +5037,17 @@ function pregame(): void {
       `<span class="nm">${escapeText(c.name)}</span>` +
       `<span class="who"><b style="color:${RANK_COLOUR[label] ?? 'var(--dim)'}">` +
       `${escapeText(label)}</b>${who ? ` · ${escapeText(who)}` : ''}</span>` +
+      // ⚠️ THE PARK IS ON THE PICKER TOO, and not only on the franchise card.
+      // An exhibition never sees that card — you pick two clubs and the next
+      // thing is a pitch — so without this the building you chose to play in
+      // was invisible in the one mode where choosing it is the whole screen.
+      // The separator is inside the second half rather than between the two,
+      // because this line wraps on a narrow card and a dangling "·" at the end
+      // of the first row reads as a missing word.
+      (c.park
+        ? `<span class="who dim">${escapeText(c.park.name)}` +
+          `<span> ${c.park.left}/${c.park.center}/${c.park.right}</span></span>`
+        : '') +
       `</button>`
     );
   };
@@ -5017,6 +5193,17 @@ function pregame(): void {
       }
       return;
     }
+    if (kind === 'park') {
+      const f = PARK_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withParkField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+      }
+      return;
+    }
 
     const group = el2.dataset['group'] as Group | undefined;
     const index = Number(el2.dataset['index']);
@@ -5079,12 +5266,37 @@ function pregame(): void {
     // ---- the league screen. Everything here either changes nothing or ends
     // in a reload, because LEAGUE is a module constant half the file already
     // holds a reference into. See drawLeague().
+    // ---- the shelf. Both of these are on the league screen, so they read the
+    // two fields back for the same reason the buttons below them do.
+    const slotGo = btn.dataset['slot'];
+    const slotDrop = btn.dataset['drop'];
+    if (slotGo !== undefined || slotDrop !== undefined) {
+      box = (document.getElementById('leaguebox') as HTMLTextAreaElement | null)?.value ?? box;
+      slotName = (document.getElementById('slotbox') as HTMLInputElement | null)?.value ?? slotName;
+      if (slotGo !== undefined) {
+        // Ends in a reload like every other way of changing the league — see
+        // the note above `lg`.
+        const problems = loadSlot(slotGo, LEAGUE_SOURCE);
+        if (problems === null) location.reload();
+        else {
+          leagueSays = problems;
+          drawn();
+        }
+      } else {
+        deleteSlot(slotDrop!);
+        leagueSays = [`Dropped "${slotDrop}". The league you are playing is unchanged.`];
+        drawn();
+      }
+      return;
+    }
+
     const lg = btn.dataset['lg'];
     if (lg) {
       const boxEl = document.getElementById('leaguebox') as HTMLTextAreaElement | null;
       // Read back before ANY redraw — the element is about to be replaced, and
       // a paste that only lived in the DOM would go with it.
       box = boxEl?.value ?? box;
+      slotName = (document.getElementById('slotbox') as HTMLInputElement | null)?.value ?? slotName;
       if (lg === 'back') {
         mode = null;
         leagueSays = [];
@@ -5110,6 +5322,16 @@ function pregame(): void {
           leagueSays = problems;
           drawn();
         }
+      } else if (lg === 'keep') {
+        // ⚠️ LEAGUE_SOURCE, NOT LEAGUE, for the reason FILL THE BOX gives —
+        // what is filed has to be the uncompressed document, or loading a slot
+        // would apply parity to a league that had already had it applied once.
+        const problems = saveSlot(slotName, serialiseLeague(LEAGUE_SOURCE));
+        if (problems === null) {
+          leagueSays = [`Kept as "${slotName.trim()}".`];
+          slotName = '';
+        } else leagueSays = problems;
+        drawn();
       } else if (lg === 'edit') {
         editing = workingCopy(LEAGUE_SOURCE);
         editClub = null;
@@ -5117,6 +5339,20 @@ function pregame(): void {
         leagueSays = [];
         drawn();
       }
+      return;
+    }
+
+    // ---- one of the eight, copied onto the club being edited. It redraws
+    // rather than only writing the model, because unlike a keystroke this
+    // changes six controls at once and the form has to catch up.
+    const preset = btn.dataset['preset'];
+    if (preset && editing && editClub !== null) {
+      editing = replaceClub(
+        editing,
+        editClub,
+        withIdentity(editing[editClub]!, IDENTITIES[preset as IdentityKey]),
+      ) as Team[];
+      drawn();
       return;
     }
 

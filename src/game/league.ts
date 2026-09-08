@@ -75,6 +75,39 @@ export const ARM_OPTIONAL = ['speedBonus', 'break', 'clutch', 'stamina'] as cons
 /** The four knobs on an Identity. knob() defaults each to 1, so all are optional. */
 export const IDENTITY_KNOBS = ['aggression', 'running', 'hook', 'bunt'] as const;
 
+/** A park's three fences, in feet. All required — a layout is not half a layout. */
+export const PARK_FENCES = ['left', 'center', 'right'] as const;
+
+/**
+ * HOW SHORT AND HOW DEEP A FENCE MAY BE, and both ends are engine facts rather
+ * than taste.
+ *
+ * Under 150 the fence is inside the infield: zoneFor() in placement.ts calls
+ * everything short of 150 feet `infield`, and a wall band sitting under that
+ * would swallow the branch and name ground balls as balls off the wall.
+ *
+ * Over 500 nobody can reach it. MAX_CARRY_FT in plot.ts clamps the hardest ball
+ * anybody hits at 505 feet, so a fence past that is a park in which the home
+ * run does not exist — and the table would still call them, leaving every one
+ * of them drawn short of a wall it was supposed to have cleared.
+ */
+export const FENCE_MIN_FT = 150;
+export const FENCE_MAX_FT = 500;
+
+/**
+ * The ceiling on foul acreage.
+ *
+ * ⚠️ IT IS NOT THE ONE NUMBER RULE AND IT IS NOT TASTE EITHER. parkFoulAngle()
+ * turns this into the bar caughtFoul() cuts the foul population at, and that
+ * population runs from -45° to 78°. At 3 the bar is 69° — already nine degrees
+ * deep into a range where hit.ts measured that foul outs start eating
+ * strikeouts that should have happened, and a tenth of a run a side with them.
+ * Past there the knob stops describing foul ground and starts rewriting the
+ * strikeout rate, and by 41 every foul ball in the game is an out. Refused with
+ * the reason rather than left as a trap.
+ */
+export const FOUL_MAX = 3;
+
 type Bag = Record<string, unknown>;
 
 const bag = (v: unknown): Bag | null =>
@@ -208,10 +241,70 @@ function checkIdentity(raw: unknown, where: string, r: Report): void {
   }
   if (!isText(id['name'])) r.add(where, 'identity needs a name.');
   if (!isText(id['blurb'])) r.add(where, 'identity needs a blurb.');
+  /**
+   * ⚠️ AND A HIRE LINE, WHICH WAS MISSING AND IS NOT DECORATION. moments.ts
+   * reads `identity.hire` for the detail on the manager moment — the whole
+   * point of that field is that the screen offers you a first-base coach
+   * rather than a stat block. Every shipped identity has one because they all
+   * go through the identity() factory; a hand-written or editor-made one had
+   * nothing to stop it going without, and the failure surfaced two thirds of
+   * the way through a franchise as the word "undefined" on a decision screen.
+   */
+  if (!isText(id['hire'])) {
+    r.add(where, 'identity needs a hire line — what the manager moment offers you.');
+  }
   for (const k of IDENTITY_KNOBS) {
     if (id[k] !== undefined && !isRating(id[k])) {
       r.add(where, `identity ${k} must be a number, zero or above, or left off.`);
     }
+  }
+}
+
+/**
+ * A ballpark. Same shape of rule as an identity: present means complete.
+ *
+ * ⚠️ EVERY FIELD IS REQUIRED, WHICH IS NOT HOW THE IDENTITY KNOBS WORK, and the
+ * difference is that a park has no sensible default for half of itself. An
+ * identity knob left off is 1.0 — "this manager does the ordinary thing" — and
+ * reads correctly. A park with a left-field fence and no right-field fence is
+ * not a park with an ordinary right field; it is a building with a hole in it,
+ * and wallAt() would interpolate the whole of right field out of a number
+ * nobody wrote. Leave the park off entirely, or give it all four.
+ *
+ * ⚠️ THE BOUNDS ARE ENGINE FACTS, NOT TIDINESS. See FENCE_MIN_FT, FENCE_MAX_FT
+ * and FOUL_MAX above — each one names the thing in the engine it protects. A
+ * park at 340/500/340 is a silly park and passes, exactly like a 3.0 power
+ * rating does; a park at 340/900/340 is one nobody can hit a home run in and is
+ * refused by name.
+ */
+function checkPark(raw: unknown, where: string, r: Report): void {
+  const p = bag(raw);
+  if (!p) {
+    r.add(where, 'park is not an object — leave it off entirely if the club has none.');
+    return;
+  }
+  if (!isText(p['name'])) r.add(where, 'park needs a name.');
+  for (const k of PARK_FENCES) {
+    const v = p[k];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      r.add(where, `park ${k} must be a distance in feet.`);
+    } else if (v < FENCE_MIN_FT || v > FENCE_MAX_FT) {
+      r.add(
+        where,
+        `park ${k} is ${v}ft — fences run ${FENCE_MIN_FT} to ${FENCE_MAX_FT} feet. ` +
+          'Shorter is inside the infield; longer is a park nobody can homer in.',
+      );
+    }
+  }
+  const foul = p['foul'];
+  if (!isRating(foul)) {
+    r.add(where, 'park foul must be a number, zero or above — 1 is ordinary foul ground.');
+  } else if (foul > FOUL_MAX) {
+    r.add(
+      where,
+      `park foul is ${foul} — keep it at ${FOUL_MAX} or under, or foul pops stop being ` +
+        'a park and start being the strikeout rate.',
+    );
   }
 }
 
@@ -268,6 +361,7 @@ function checkClub(raw: unknown, index: number, r: Report): void {
   }
 
   if (t['identity'] !== undefined) checkIdentity(t['identity'], where, r);
+  if (t['park'] !== undefined) checkPark(t['park'], where, r);
 }
 
 // ------------------------------------------------------------ the whole thing
@@ -508,6 +602,150 @@ export function saveCustomLeague(
 export function clearCustomLeague(): void {
   try {
     localStorage.removeItem(KEY);
+  } catch {
+    /* nothing stored to clear, then */
+  }
+}
+
+// ---------------------------------------------------------- the named slots
+
+/**
+ * A LEAGUE YOU KEEP, UNDER A NAME.
+ *
+ * ⚠️ THE ACTIVE DOCUMENT DID NOT MOVE, AND THAT IS THE WHOLE DESIGN. KEY is
+ * still the one league the game plays, still read by loadCustomLeague(),
+ * leagueStatus() and storedLeagueProblems() exactly as before. These are COPIES
+ * filed beside it. So there is no migration, no pointer to chase on the boot
+ * path, and a league imported before slots existed is still the active one
+ * after — the feature is additive to a degree that the load path cannot tell it
+ * happened.
+ *
+ * ⚠️ WHY ONE KEY WAS NOT ENOUGH. A single slot means a custom league can only
+ * ever be THE custom league: keeping a deadball year and a thirty-club fantasy
+ * world at the same time is impossible, so nobody builds the second one. The
+ * import box was already transport for handing a league to somebody else; this
+ * is the shelf you put your own on.
+ *
+ * ponytail: the prefix IS the index. No manifest key listing what exists, no
+ * per-slot metadata, no compression, no pointer at the active slot. An index
+ * that can disagree with the keys it indexes is a bug waiting for a browser to
+ * fail one setItem out of two, and Storage can already enumerate itself.
+ */
+const SLOT = `${KEY}:`;
+
+/**
+ * The longest a slot name may be. It is a row on a menu, not a document.
+ *
+ * ⚠️ THE CAP IS THE SCREEN'S, NOT STORAGE'S. localStorage would take a name of
+ * any length; the league screen draws these in a fixed-width console list and a
+ * name that runs off it is a slot you cannot tell from the one below it.
+ */
+export const MAX_SLOT_NAME = 24;
+
+/**
+ * What is wrong with a slot name, or null if it will do.
+ *
+ * Trimmed before anything else, because " my league" and "my league" are the
+ * same shelf to a person and two keys to a Map.
+ */
+export function checkSlotName(name: string): string | null {
+  const n = name.trim();
+  if (n.length === 0) return 'A saved league needs a name.';
+  if (n.length > MAX_SLOT_NAME) return `Keep the name to ${MAX_SLOT_NAME} characters or fewer.`;
+  return null;
+}
+
+/**
+ * Every league on the shelf, in alphabetical order.
+ *
+ * ⚠️ length/key() RATHER THAN Object.keys(localStorage). Both work in a
+ * browser, but only these two are the Storage interface — the index properties
+ * are a convenience the spec layers on top, and every fake storage anybody
+ * writes for a test implements the methods and not the proxy.
+ */
+export function listSlots(): readonly string[] {
+  const names: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k !== null && k.startsWith(SLOT)) names.push(k.slice(SLOT.length));
+    }
+  } catch {
+    // Private window, or storage is off. There is no shelf, then.
+    return [];
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
+/** The document filed under a name, whether or not it is any good. */
+export function slotText(name: string): string | null {
+  try {
+    return localStorage.getItem(SLOT + name.trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * File a document under a name. Returns the problems, or null when it went in.
+ *
+ * ⚠️ IT GOES THROUGH checkLeague() TOO, and the reason is not symmetry. A slot
+ * is loaded MUCH later than it is saved — that is what a shelf is for — so a
+ * document allowed onto it unvalidated is a failure that surfaces weeks after
+ * the mistake, on a screen that cannot say what was typed. Thirty clubs is
+ * microseconds; refusing at the moment somebody is still looking at what they
+ * wrote is worth all of them.
+ *
+ * ⚠️ AND THE CANONICAL FORM IS WHAT IS STORED, never the caller's text, so a
+ * slot and the active league are byte-identical for the same clubs.
+ */
+export function saveSlot(name: string, text: string): readonly string[] | null {
+  const bad = checkSlotName(name);
+  if (bad) return [bad];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return [`That is not JSON. ${e instanceof Error ? e.message : ''}`.trim()];
+  }
+
+  const check = checkLeague(parsed);
+  if (!check.ok) return check.problems;
+
+  try {
+    localStorage.setItem(SLOT + name.trim(), serialiseLeague(check.teams));
+  } catch {
+    // ⚠️ SAID OUT LOUD, because the shelf has a ceiling and a silent one is
+    // worse than a low one. The document is ~230 kB against a 5 MB budget, so
+    // this is roughly twenty leagues — reachable by somebody actually using
+    // the feature, and a refusal nobody reports looks like a league that
+    // vanished.
+    return ['The browser refused to store it — private window, or storage is full.'];
+  }
+  return null;
+}
+
+/**
+ * Make a filed league the one the game plays. Returns problems, or null.
+ *
+ * ⚠️ IT GOES THROUGH saveCustomLeague() LIKE ANY OTHER PASTE. One gate, one
+ * storage path — the rule the editor already follows. A slot written by an
+ * older build, or hand-edited in the browser's own storage inspector, is held
+ * to exactly the rules a typed document is, and a slot that has gone bad cannot
+ * take the active league down with it because nothing is written unless it
+ * passes.
+ */
+export function loadSlot(name: string, current: readonly Team[]): readonly string[] | null {
+  const text = slotText(name);
+  if (text === null) return [`There is no saved league called "${name.trim()}".`];
+  return saveCustomLeague(text, current);
+}
+
+/** Take one off the shelf. The active league is untouched either way. */
+export function deleteSlot(name: string): void {
+  try {
+    localStorage.removeItem(SLOT + name.trim());
   } catch {
     /* nothing stored to clear, then */
   }

@@ -156,8 +156,8 @@ describe('placing the ball', () => {
 });
 
 describe('the stretch', () => {
-  const inSpace = { gapFt: GAP_FT + 10, inTheGap: true, distFt: 340, dirDeg: -10, zone: 'left-center' as const, fielderNum: 7 };
-  const atHim = { gapFt: 5, inTheGap: false, distFt: 250, dirDeg: -10, zone: 'left' as const, fielderNum: 7 };
+  const inSpace = { gapFt: GAP_FT + 10, inTheGap: true, distFt: 340, dirDeg: -10, zone: 'left-center' as const, fielderNum: 7, wallFt: 400 };
+  const atHim = { gapFt: 5, inTheGap: false, distFt: 250, dirDeg: -10, zone: 'left' as const, fielderNum: 7, wallFt: 400 };
 
   it('a deep single in space becomes a double', () => {
     expect(stretch('single', inSpace)).toBe('double');
@@ -336,17 +336,17 @@ describe('the scorer says where it went', () => {
   });
 
   it('says "gap" on a ball into one', () => {
-    const p = { gapFt: 200, inTheGap: true, distFt: 360, dirDeg: -14, zone: 'left-center' as const, fielderNum: 7 };
+    const p = { gapFt: 200, inTheGap: true, distFt: 360, dirDeg: -14, zone: 'left-center' as const, fielderNum: 7, wallFt: 400 };
     expect(describePlay('double', hit(), p)).toContain('gap');
   });
 
   it('names the fielder on a ground out', () => {
-    const p = { gapFt: 4, inTheGap: false, distFt: 120, dirDeg: -20, zone: 'infield' as const, fielderNum: 6 };
+    const p = { gapFt: 4, inTheGap: false, distFt: 120, dirDeg: -20, zone: 'infield' as const, fielderNum: 6, wallFt: 400 };
     expect(describePlay('ground_out', hit(), p)).toContain('short');
   });
 
   it('puts the distance on a home run', () => {
-    const p = { gapFt: 90, inTheGap: false, distFt: 415, dirDeg: 5, zone: 'wall' as const, fielderNum: 8 };
+    const p = { gapFt: 90, inTheGap: false, distFt: 415, dirDeg: 5, zone: 'wall' as const, fielderNum: 8, wallFt: 400 };
     expect(describePlay('home_run', hit(), p)).toMatch(/41\d feet/);
   });
 });

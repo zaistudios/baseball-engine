@@ -29,7 +29,7 @@ import type { AtBatResult } from '../core/atBat.ts';
 import { CLEAN, type FieldingResult } from '../core/fielding.ts';
 import type { Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
-import type { Team } from './teams.ts';
+import { atPark, type Team } from './teams.ts';
 import {
   bringInRelief,
   newStaff,
@@ -131,12 +131,32 @@ export interface StarterPick {
   penLegs?: Readonly<Record<string, number>>;
 }
 
+/**
+ * ⚠️ THE PARK IS APPLIED HERE, AND THIS IS THE ONLY PLACE IT IS APPLIED.
+ *
+ * Every game in the engine opens through this function — the one you play
+ * (main.ts) and the three simulated behind it every afternoon (sim.ts) — so
+ * one call covers both, and a played game and a headless one cannot end up
+ * hitting in different buildings. That is not a convenience; standings mix the
+ * two, and a park that only applied to the game on screen would put your club's
+ * runs on a different scale from everybody else's.
+ *
+ * It also means no call site downstream had to be told. GameState holds these
+ * two Team objects and all thirteen statsOf() readers go through them, so
+ * resolution and the pre-game card and the hover panel all follow at once.
+ *
+ * The HOME club's park, because that is whose building it is. See atPark() for
+ * why both lineups get it.
+ */
 export function newGame(
-  home: Team,
-  away: Team,
+  homeClub: Team,
+  awayClub: Team,
   regulation = 9,
   starters?: { home?: StarterPick; away?: StarterPick },
 ): GameState {
+  const park = homeClub.park;
+  const home = atPark(homeClub, park);
+  const away = atPark(awayClub, park);
   return {
     home,
     away,

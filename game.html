@@ -209,6 +209,17 @@
         -webkit-user-select: text; user-select: text;
       }
       #start textarea:focus { outline: none; border-color: var(--hot); }
+      /* ---- the shelf's name field. Same materials as the box above it and
+         the same user-select escape, because the body's user-select:none
+         applies to anything you have to put a caret in — but one line tall,
+         because a slot name is a label and not a document. */
+      #start input {
+        width: 100%; padding: 8px;
+        background: #0a0f0c; color: var(--ink); border: 1px solid var(--line);
+        font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        -webkit-user-select: text; user-select: text;
+      }
+      #start input:focus { outline: none; border-color: var(--hot); }
       /* What the validator had to say. One line per complaint, and it has to
          stay readable at twenty-five of them. */
       #start .says {

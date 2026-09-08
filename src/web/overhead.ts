@@ -56,9 +56,25 @@ export interface Cam {
   centre: { x: number; y: number };
 }
 
-export function makeCam(w: number, h: number, pxPerFt?: number): Cam {
+export function makeCam(
+  w: number,
+  h: number,
+  pxPerFt?: number,
+  /**
+   * The furthest a ball has to be drawable, in feet. Only read when pxPerFt is
+   * left to fit — see the note below.
+   *
+   * ⚠️ THE CAMERA IS FIXED AND DOES NOT FOLLOW THE PARK, WHICH IS THE POINT.
+   * Rescaling per building so each one filled the canvas would draw every park
+   * the same size, and the layout — the whole reason a park exists — would be
+   * invisible. One scale, set to fit the deepest fence in the league plus the
+   * overshoot a home run gets, and then a 302-foot corner LOOKS like a 302-foot
+   * corner next to a 420-foot centre field.
+   */
+  reachFt = WALL_FT,
+): Cam {
   const px =
-    pxPerFt ?? Math.min((h - 60) / WALL_FT, (w / 2 - 14) / (WALL_FT * Math.SQRT1_2));
+    pxPerFt ?? Math.min((h - 60) / reachFt, (w / 2 - 14) / (reachFt * Math.SQRT1_2));
   const home = { x: w / 2, y: h - 44 * (px / 0.92) };
   const baseR = (BASE_FT * px) / Math.SQRT2;
   return { w, h, home, pxPerFt: px, baseR, centre: { x: home.x, y: home.y - baseR } };
@@ -137,13 +153,25 @@ export function newReplay(o: {
   held?: number[];
   thrownOut?: { at: number; speed: number };
   chaserNum?: number;
+  /**
+   * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
+   * out of the park. Omitted is the 400-foot bowl.
+   *
+   * ⚠️ IT HAS TO MATCH WHAT placement.ts USED, for exactly the reason the note
+   * below gives about direction. plot.ts clamps a non-home-run to `wall - 8`
+   * and shoves a home run past it, so a replay plotted against a different
+   * fence from the one the play-by-play was written against draws the ball
+   * somewhere the sentence did not put it — a wall-ball double landing forty
+   * feet inside the fence it was supposed to have hit.
+   */
+  wallFt?: number;
 }): Replay {
   return {
     startedAt: o.now,
     // Direction matters to the plot for fouls only, and it must be the same
     // call placement.ts makes or the ball is drawn somewhere the play-by-play
     // did not put it.
-    plot: plotBatted(o.outcome, o.exitVelocity, o.launchAngle, o.direction),
+    plot: plotBatted(o.outcome, o.exitVelocity, o.launchAngle, o.direction, o.wallFt),
     direction: o.direction,
     outcome: o.outcome,
     speed: o.speed,
@@ -166,6 +194,16 @@ export interface OverheadOpts {
   field: string;
   dirt: string;
   sfx?: Sfx;
+  /**
+   * THE FENCE, AS A FUNCTION OF DIRECTION — the park's outline. Omitted draws
+   * the 400-foot bowl this file has always drawn, which is what the roguelike
+   * and a park-less exhibition are played in.
+   *
+   * It is a callback rather than a Park because this file is the roguelike's
+   * and has no business importing thirty ball clubs. game/main.ts hands it
+   * `(d) => wallAt(d, game.home.park)`.
+   */
+  wall?: (dirDeg: number) => number;
 }
 
 /**
@@ -450,14 +488,32 @@ export function drawOverhead(
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.fillRect(0, 0, cam.w, cam.h);
 
-  const wallPx = WALL_FT * cam.pxPerFt;
-  const rad = (d: number) => ((d - 90) * Math.PI) / 180;
+  const wallFt = opts.wall ?? (() => WALL_FT);
+
+  /**
+   * The fence, as a path from the left-field line round to the right.
+   *
+   * ⚠️ IT IS SAMPLED, NOT AN ARC, AND THAT IS THE WHOLE VISIBLE PAYOFF OF A
+   * LAYOUT. An arc can only draw a park that is the same distance in every
+   * direction — which is the bowl this file drew for its whole life. Walking
+   * the ninety degrees between the foul lines and asking wallAt() at each step
+   * is what puts a short porch in right and a 420-foot notch in centre on the
+   * screen. Two degrees a step is smooth at any canvas size this game runs at.
+   */
+  const fencePath = (): void => {
+    ctx.moveTo(cam.home.x, cam.home.y);
+    for (let d = -FOUL_DEG; d <= FOUL_DEG; d += 2) {
+      const p = overheadPoint(wallFt(d), d, cam.home, cam.pxPerFt);
+      ctx.lineTo(p.x, p.y);
+    }
+    const end = overheadPoint(wallFt(FOUL_DEG), FOUL_DEG, cam.home, cam.pxPerFt);
+    ctx.lineTo(end.x, end.y);
+  };
 
   // Fair territory: the wedge between the foul lines, out to the wall.
   ctx.fillStyle = opts.field;
   ctx.beginPath();
-  ctx.moveTo(cam.home.x, cam.home.y);
-  ctx.arc(cam.home.x, cam.home.y, wallPx, rad(-FOUL_DEG), rad(FOUL_DEG));
+  fencePath();
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
@@ -474,7 +530,7 @@ export function drawOverhead(
   ctx.strokeStyle = 'rgba(216,216,192,0.4)';
   ctx.lineWidth = 2;
   for (const d of [-FOUL_DEG, FOUL_DEG]) {
-    const end = overheadPoint(WALL_FT, d, cam.home, cam.pxPerFt);
+    const end = overheadPoint(wallFt(d), d, cam.home, cam.pxPerFt);
     ctx.beginPath();
     ctx.moveTo(cam.home.x, cam.home.y);
     ctx.lineTo(end.x, end.y);
@@ -483,7 +539,14 @@ export function drawOverhead(
   ctx.strokeStyle = 'rgba(216,216,192,0.55)';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.arc(cam.home.x, cam.home.y, wallPx, rad(-FOUL_DEG), rad(FOUL_DEG));
+  // ⚠️ THE FENCE ONLY, NOT fencePath() — that one starts at home plate so it
+  // can be filled as a wedge, and stroking it would draw both foul lines a
+  // second time in the wall's heavier colour.
+  for (let d = -FOUL_DEG; d <= FOUL_DEG; d += 2) {
+    const p = overheadPoint(wallFt(d), d, cam.home, cam.pxPerFt);
+    if (d === -FOUL_DEG) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
   ctx.stroke();
 
   // The bags. Outlines only, and no runners on them — the engine has ALREADY

@@ -55,8 +55,8 @@ const MAX_CARRY_FT = 505;
  * is being reconciled to a verdict already in the book, and the velocity is the
  * only real information available to do it with.
  */
-const justOut = (exitVelocityMph: number): number =>
-  WALL_FT + 2 + Math.max(0, exitVelocityMph - 95) * 0.9;
+const justOut = (exitVelocityMph: number, wallFt: number): number =>
+  wallFt + 2 + Math.max(0, exitVelocityMph - 95) * 0.9;
 
 /**
  * Drag, as one number: the share of the vacuum range a real ball keeps.
@@ -268,6 +268,19 @@ export function plotBatted(
    * still does not, so every existing caller is unaffected by the default.
    */
   directionDeg = 0,
+  /**
+   * THE FENCE IN THIS DIRECTION, in feet. Defaults to the 400-foot bowl this
+   * file has always drawn, which is what a game with no park is played in — the
+   * roguelike, an exhibition between clubs nobody gave a building to, and every
+   * test written before parks existed.
+   *
+   * ⚠️ THE CALLER RESOLVES THE DIRECTION, NOT THIS FUNCTION. A park is three
+   * fences and an easing curve (wallAt() in teams.ts) and this file is the
+   * roguelike's leaf — it takes a number so that the web layer never has to
+   * import game code. place() in placement.ts is what turns a park into this
+   * number.
+   */
+  wallFt = WALL_FT,
 ): Plot {
   const foul = outcome === 'foul' || outcome === 'foul_out';
   if (launchAngleDeg < GROUND_ANGLE) {
@@ -311,8 +324,8 @@ export function plotBatted(
   // WALL_FT - 8, which is a double off the fence and reads like one.
   distFt =
     outcome === 'home_run'
-      ? Math.max(distFt, justOut(exitVelocityMph))
-      : Math.min(distFt, WALL_FT - 8);
+      ? Math.max(distFt, justOut(exitVelocityMph, wallFt))
+      : Math.min(distFt, wallFt - 8);
 
   // ⚠️ THE FOUL CLAMP COMES BEFORE THE FAIR ONE, and it has a much lower floor.
   // The 60ft minimum below is right for a ball in play — nothing fair finishes

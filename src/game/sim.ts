@@ -45,7 +45,7 @@ import {
   type PlayLog,
   type Side,
 } from './game.ts';
-import { statsOf, HOME, AWAY } from './teams.ts';
+import { statsOf, parkFoulAngle, HOME, AWAY } from './teams.ts';
 import { fatigue, shouldRelieve } from './bullpen.ts';
 import { fieldBall, reachOf } from './defense.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
@@ -188,6 +188,8 @@ export function playAiAtBat(
       runnersInScoringPosition: risp,
       stuff,
       foulBoost: FOUL_BOOST,
+      // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
+      foulPopAngle: parkFoulAngle(g.home.park),
     };
     ab = swingAt(ab, input, rng);
   }
@@ -202,7 +204,7 @@ export function playAiAtBat(
   // Where it landed decides whether it is a hit at all, and what it is worth.
   // See placement.ts — the contest needs the glove of whoever it was hit at.
   const align = fieldingAlignment(g);
-  const result = withPlacement(ab.result!, { reachAt: reachOf(align) }).result;
+  const result = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park }).result;
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =

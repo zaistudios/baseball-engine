@@ -10,8 +10,19 @@
  *  3. the bounds a validator enforces are the bounds the ENGINE actually has,
  *     asserted against the engine rather than restated.
  */
-import { describe, it, expect } from 'vitest';
-import { checkLeague, serialiseLeague, MAX_PROBLEMS } from '../league.ts';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import {
+  checkLeague,
+  serialiseLeague,
+  MAX_PROBLEMS,
+  MAX_SLOT_NAME,
+  saveSlot,
+  loadSlot,
+  listSlots,
+  slotText,
+  deleteSlot,
+  loadCustomLeague,
+} from '../league.ts';
 import { LEAGUE_AS_WRITTEN, type Team } from '../teams.ts';
 import { bracketFor, BRACKET } from '../rules.ts';
 import { assignPositions } from '../defense.ts';
@@ -229,5 +240,122 @@ describe('the bracket fits the league', () => {
 
   it('leaves every shipped choice alone at thirty clubs', () => {
     for (const choice of BRACKET) expect(bracketFor(choice.value, 30)).toBe(choice.value);
+  });
+});
+
+/**
+ * THE SHELF.
+ *
+ * localStorage does not exist in the test environment — the same stub
+ * moments.test.ts and save.test.ts install, plus the two members listSlots()
+ * actually uses. `length` and `key()` are the Storage interface; the index
+ * properties `Object.keys()` would read are not, which is exactly why the
+ * implementation does not use them.
+ */
+function fakeStorage() {
+  const map = new Map<string, string>();
+  return {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+    get length() {
+      return map.size;
+    },
+    key: (i: number) => [...map.keys()][i] ?? null,
+    _raw: map,
+  };
+}
+
+describe('leagues on a shelf', () => {
+  let store: ReturnType<typeof fakeStorage>;
+  beforeEach(() => {
+    store = fakeStorage();
+    vi.stubGlobal('localStorage', store);
+  });
+
+  const doc = () => serialiseLeague(LEAGUE_AS_WRITTEN);
+
+  it('files a league and hands it back byte for byte', () => {
+    expect(saveSlot('deadball', doc())).toBeNull();
+    expect(listSlots()).toEqual(['deadball']);
+    expect(slotText('deadball')).toBe(doc());
+  });
+
+  it('refuses a document that would not load, before it reaches the shelf', () => {
+    const broken = copy();
+    broken[0]!.lineup = broken[0]!.lineup.slice(0, 8);
+    expect(saveSlot('eight men', serialiseLeague(broken))).not.toBeNull();
+    expect(listSlots()).toEqual([]);
+  });
+
+  it('refuses a name that is nothing, or a name that is a paragraph', () => {
+    expect(saveSlot('   ', doc())).toEqual(['A saved league needs a name.']);
+    expect(saveSlot('x'.repeat(MAX_SLOT_NAME + 1), doc())?.[0]).toMatch(/characters or fewer/);
+    expect(listSlots()).toEqual([]);
+  });
+
+  it('treats a padded name as the same shelf', () => {
+    expect(saveSlot('  spacious  ', doc())).toBeNull();
+    expect(listSlots()).toEqual(['spacious']);
+    expect(slotText('spacious')).not.toBeNull();
+  });
+
+  it('lists what is filed and nothing else in storage', () => {
+    // ⚠️ THE ACTIVE LEAGUE IS NOT A SLOT. It lives under the bare key, and a
+    // prefix scan that caught it would show a phantom league called "" on the
+    // shelf — which is the failure the trailing colon exists to prevent.
+    store._raw.set('asb-league', doc());
+    store._raw.set('asb-season', '{"whatever":1}');
+    saveSlot('mine', doc());
+    expect(listSlots()).toEqual(['mine']);
+  });
+
+  it('sorts the shelf', () => {
+    for (const n of ['zulu', 'alpha', 'mike']) saveSlot(n, doc());
+    expect(listSlots()).toEqual(['alpha', 'mike', 'zulu']);
+  });
+
+  it('loading a slot makes it the active league', () => {
+    const mine = copy();
+    mine[0]!.name = 'Portland Tidewater';
+    saveSlot('mine', serialiseLeague(mine));
+    expect(loadSlot('mine', LEAGUE_AS_WRITTEN)).toBeNull();
+    expect(loadCustomLeague()![0]!.name).toBe('Portland Tidewater');
+  });
+
+  it('loading a slot that is not there says so and changes nothing', () => {
+    expect(loadSlot('ghost', LEAGUE_AS_WRITTEN)?.[0]).toMatch(/no saved league called "ghost"/);
+    expect(loadCustomLeague()).toBeNull();
+  });
+
+  it('deleting one leaves the rest and the active league alone', () => {
+    saveSlot('keep', doc());
+    saveSlot('drop', doc());
+    loadSlot('keep', LEAGUE_AS_WRITTEN);
+    deleteSlot('drop');
+    expect(listSlots()).toEqual(['keep']);
+    expect(loadCustomLeague()).not.toBeNull();
+  });
+
+  it('survives storage being switched off entirely', () => {
+    vi.stubGlobal('localStorage', {
+      get length(): number {
+        throw new Error('nope');
+      },
+      key: () => null,
+      getItem: () => {
+        throw new Error('nope');
+      },
+      setItem: () => {
+        throw new Error('nope');
+      },
+      removeItem: () => {
+        throw new Error('nope');
+      },
+    });
+    expect(listSlots()).toEqual([]);
+    expect(slotText('anything')).toBeNull();
+    expect(saveSlot('anything', doc())?.[0]).toMatch(/refused to store/);
+    expect(() => deleteSlot('anything')).not.toThrow();
   });
 });

@@ -34,7 +34,8 @@
 import type { HitResult } from '../core/hit.ts';
 import { isHit, isOut, type Outcome } from '../core/hitTables.ts';
 import type { AtBatResult } from '../core/atBat.ts';
-import { plotBatted, nearestFielder, FIELDERS, WALL_FT } from '../web/plot.ts';
+import { plotBatted, nearestFielder, FIELDERS } from '../web/plot.ts';
+import { wallAt, type Park } from './teams.ts';
 
 /** Where on the field it finished, in words. */
 export type Zone =
@@ -60,6 +61,16 @@ export interface Placement {
   fielderNum: number;
   /** True when it landed a long way from anybody. */
   inTheGap: boolean;
+  /**
+   * THE FENCE THIS BALL WAS HIT TOWARD, in feet — 400 in a park-less game.
+   *
+   * ⚠️ IT IS ON THE PLACEMENT BECAUSE stretch() NEEDS IT AND HAS NO OTHER WAY
+   * TO GET IT. "Deep enough to stretch" is a different number of feet in a
+   * 302-foot corner than in a 420-foot centre field, and a fixed threshold
+   * would mean the single-to-double upgrade simply never fired in the small
+   * parks — see the note on the upgrade itself.
+   */
+  wallFt: number;
 }
 
 /**
@@ -134,6 +145,16 @@ export const AT_HIM_FT = 24;
  */
 export const TRIPLE_GAP_FT = 51;
 
+/**
+ * How far out a single has to land, as a share of the fence it went toward,
+ * before geometry will stretch it to a double.
+ *
+ * 0.8 of the neutral 400-foot wall is 320 feet, which is the number this rule
+ * was measured at and shipped with. Expressed as a share so that it means the
+ * same thing in a park whose corner is 302 feet away. See stretch().
+ */
+export const DEEP_SHARE = 0.8;
+
 const feetXY = (distFt: number, dirDeg: number) => {
   const rad = (dirDeg * Math.PI) / 180;
   return { x: Math.sin(rad) * distFt, y: Math.cos(rad) * distFt };
@@ -166,8 +187,8 @@ function gapTo(distFt: number, dirDeg: number, num: number): number {
  */
 const WALL_BAND_FT = 14;
 
-function zoneFor(distFt: number, dirDeg: number): Zone {
-  if (distFt >= WALL_FT - WALL_BAND_FT && distFt <= WALL_FT) return 'wall';
+function zoneFor(distFt: number, dirDeg: number, wallFt: number): Zone {
+  if (distFt >= wallFt - WALL_BAND_FT && distFt <= wallFt) return 'wall';
   if (distFt < 150) return 'infield';
   if (distFt < 200) return 'shallow';
   // Down the line is a direction thing, not a distance thing.
@@ -222,8 +243,15 @@ const foulCatcher = (dirDeg: number): number => {
  * would be under it. `inTheGap` is false by construction, which also keeps
  * stretch() from ever looking at one.
  */
-export function place(hit: HitResult): Placement {
-  const plot = plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction);
+export function place(hit: HitResult, park?: Park): Placement {
+  /**
+   * ⚠️ THE PARK IS RESOLVED TO ONE NUMBER HERE, and this is the only place it
+   * happens. plot.ts is the roguelike's leaf and must not import game code, so
+   * it takes a fence in feet; wallAt() is what turns three fences and an easing
+   * curve into that number for the direction this particular ball went.
+   */
+  const wallFt = wallAt(hit.direction, park);
+  const plot = plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, wallFt);
   const dirDeg = hit.direction;
 
   if (hit.outcome === 'foul' || hit.outcome === 'foul_out') {
@@ -234,6 +262,7 @@ export function place(hit: HitResult): Placement {
       gapFt: 0,
       fielderNum: foulCatcher(dirDeg),
       inTheGap: false,
+      wallFt,
     };
   }
 
@@ -243,10 +272,11 @@ export function place(hit: HitResult): Placement {
   return {
     distFt: plot.distFt,
     dirDeg,
-    zone: zoneFor(plot.distFt, dirDeg),
+    zone: zoneFor(plot.distFt, dirDeg, wallFt),
     gapFt,
     fielderNum: f.num,
     inTheGap: gapFt >= GAP_FT,
+    wallFt,
   };
 }
 
@@ -264,7 +294,15 @@ export function place(hit: HitResult): Placement {
 export function stretch(outcome: Outcome, p: Placement): Outcome {
   if (outcome === 'single') {
     // Rare, and it has to be genuinely deep AND genuinely in space.
-    if (p.inTheGap && p.distFt > 320) return 'double';
+    //
+    // ⚠️ THE BAR IS A SHARE OF THE FENCE, NOT 320 FEET, AND IT HAD TO BECOME
+    // ONE. 320 is exactly four fifths of the neutral 400-foot wall, so a
+    // park-less game is unchanged to the foot — but plot.ts clamps every
+    // non-home-run to `wallFt - 8`, and in New England's 302-foot right-field
+    // corner nothing in play can reach 320 at all. A fixed bar would have meant
+    // the upgrade silently never firing in the smallest parks, which is the
+    // "threshold nothing can cross" failure GAP_FT's own header describes.
+    if (p.inTheGap && p.distFt > p.wallFt * DEEP_SHARE) return 'double';
     return 'single';
   }
   if (outcome === 'double') {
@@ -412,6 +450,12 @@ export function withPlacement(
      * means league average everywhere — see contest().
      */
     reachAt?: (fielderNum: number) => number;
+    /**
+     * THE BUILDING. Omitted is the 400-foot bowl — a park-less exhibition, or
+     * any test that does not care where the fence is. Both clubs get the HOME
+     * club's park; see atPark() in teams.ts.
+     */
+    park?: Park;
   } = {},
 ): {
   result: AtBatResult;
@@ -424,7 +468,7 @@ export function withPlacement(
     return { result, placement: null, text, verdict: null };
   }
 
-  const p = place(result.hit);
+  const p = place(result.hit, opts.park);
   // A foul is not a play and has nobody standing where it landed — place()
   // zeroes its gap by construction, which would read as "robbed" every time.
   const live = p.zone !== 'foul-ground';

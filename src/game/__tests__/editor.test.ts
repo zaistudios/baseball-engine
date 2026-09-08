@@ -28,15 +28,23 @@ import {
   replaceClub,
   withArsenalShare,
   withClubField,
+  withIdentity,
   withIdentityField,
   withPersonField,
   workingCopy,
 } from '../editor.ts';
 import { checkLeague } from '../league.ts';
+import { IDENTITIES } from '../identity.ts';
 import { LEAGUE_SOURCE } from '../teams.ts';
 import type { Team } from '../teams.ts';
 
 const league = () => workingCopy(LEAGUE_SOURCE);
+
+/** Every complaint as one string, for asserting the right one was made. */
+const said = (l: readonly Team[]): string => {
+  const check = checkLeague(l);
+  return check.ok ? '' : check.problems.join('\n');
+};
 
 /** Every test's last line. Says which club broke rather than just "false". */
 const stillLoads = (l: readonly Team[]): void => {
@@ -69,26 +77,73 @@ describe('editing a club', () => {
 
   /**
    * ⚠️ AN IDENTITY THAT EXISTS BUT IS EMPTY IS A VALIDATION ERROR, not an
-   * absent one — checkIdentity() wants a name and a blurb the moment the key is
-   * there at all. So clearing both fields has to take the whole block away, and
-   * this is the test that says so.
+   * absent one — checkIdentity() wants a name, a blurb and a hire line the
+   * moment the key is there at all. So clearing all three has to take the whole
+   * block away, and this is the test that says so.
    */
   it('drops the identity block when the last of it is cleared', () => {
     let club = league()[0]!;
     expect(club.identity).toBeDefined();
-    club = withIdentityField(club, 'name', '');
-    club = withIdentityField(club, 'blurb', '');
+    for (const k of ['name', 'blurb', 'hire']) club = withIdentityField(club, k, '');
     expect(club.identity).toBeUndefined();
     stillLoads(replaceClub(league(), 0, club));
   });
 
-  it('builds the identity block back up from nothing', () => {
-    let club = withIdentityField(league()[0]!, 'name', '');
+  /**
+   * ⚠️ AND TWO OF THREE IS NOT EMPTY. The alternative — dropping the block the
+   * moment the name and blurb go — would silently bin a hire line somebody had
+   * written, which is the one thing this file's own header says the editor
+   * must not do. Refusing loudly is the trade: the save names the club, and
+   * the field that is still holding the block open is on the screen.
+   */
+  it('keeps the block alive while any of the three still has text in it', () => {
+    let club = league()[0]!;
+    club = withIdentityField(club, 'name', '');
     club = withIdentityField(club, 'blurb', '');
+    expect(club.identity).toBeDefined();
+    expect(said(replaceClub(league(), 0, club))).toMatch(/identity needs a name/);
+  });
+
+  it('builds the identity block back up from nothing', () => {
+    let club = league()[0]!;
+    for (const k of ['name', 'blurb', 'hire']) club = withIdentityField(club, k, '');
     club = withIdentityField(club, 'name', 'GRINDERS');
     club = withIdentityField(club, 'blurb', 'They foul everything off.');
+    club = withIdentityField(club, 'hire', 'A hitting coach who counts pitches out loud.');
     expect(club.identity?.name).toBe('GRINDERS');
     stillLoads(replaceClub(league(), 0, club));
+  });
+
+  /**
+   * ⚠️ THE PRESET COPIES, AND THAT IS THE WHOLE POINT OF IT. A club holding a
+   * reference into IDENTITIES would edit the other twenty-nine that shared it.
+   */
+  it('starts an identity from one of the eight and then lets you edit it', () => {
+    let club = withIdentity(league()[0]!, IDENTITIES.TRACK_TEAM);
+    expect(club.identity).toEqual(IDENTITIES.TRACK_TEAM);
+    expect(club.identity).not.toBe(IDENTITIES.TRACK_TEAM);
+
+    club = withIdentityField(club, 'name', 'JAILBREAK');
+    club = withIdentityField(club, 'running', 2.4);
+    expect(club.identity?.name).toBe('JAILBREAK');
+    expect(club.identity?.running).toBe(2.4);
+    // ...and the archetype it came from is untouched.
+    expect(IDENTITIES.TRACK_TEAM.name).toBe('TRACK TEAM');
+    expect(IDENTITIES.TRACK_TEAM.running).toBe(2);
+    stillLoads(replaceClub(league(), 0, club));
+  });
+
+  /**
+   * ⚠️ EVERY ONE OF THE EIGHT HAS TO SURVIVE THE VALIDATOR, because the preset
+   * buttons offer all eight and a club is saved through checkLeague(). This is
+   * the test that would have caught `hire` going missing: an archetype the
+   * editor can put on a club and the save then refuses is the exact failure
+   * this file's header says a second copy of a vocabulary produces.
+   */
+  it('offers eight archetypes the save will accept', () => {
+    for (const id of Object.values(IDENTITIES)) {
+      stillLoads(replaceClub(league(), 0, withIdentity(league()[0]!, id)));
+    }
   });
 });
 

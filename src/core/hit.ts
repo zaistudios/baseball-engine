@@ -168,6 +168,24 @@ export interface SwingInput {
    */
   foulBoost?: number;
   /**
+   * HOW HIGH A FOUL HAS TO BE HIT FOR SOMEBODY TO GET UNDER IT, in this
+   * building. Omitted is FOUL_POP_ANGLE — a park with ordinary foul ground,
+   * which is every game played before parks existed and every game played
+   * without one now.
+   *
+   * ⚠️ IT IS A BAR, NOT A RATE, AND THAT IS WHAT KEEPS IT FREE. caughtFoul()
+   * rolls nothing: the launch angle is a value the swing has ALREADY rolled, so
+   * moving this bar cannot add a draw to the rng stream and cannot desynchronise
+   * a seeded game. See the note on caughtFoul().
+   *
+   * ⚠️ THE BAND IS TINY. The foul population runs to 78° and the default bar
+   * takes the top three degrees of it, so one degree is a third of the effect.
+   * teams.ts derives this from a park's `foul` acreage and holds the whole
+   * league inside 73.5°–76.5°; see parkFoulAngle() there for why that ceiling
+   * is not negotiable.
+   */
+  foulPopAngle?: number;
+  /**
    * THE PITCHER'S STUFF, as a multiplier on the hitter's effective contact.
    * Below 1 is a pitch that is hard to time. Computed by stuffFactor() in
    * pitcher.ts from his break and his clutch, so those two ratings land on the
@@ -294,7 +312,8 @@ export const FOUL_POP_ANGLE = 75;
  * would have re-rolled every subsequent pitch of every game in the project. The
  * randomness is real; it is just already spent.
  */
-export const caughtFoul = (launchAngle: number): boolean => launchAngle >= FOUL_POP_ANGLE;
+export const caughtFoul = (launchAngle: number, popAngle = FOUL_POP_ANGLE): boolean =>
+  launchAngle >= popAngle;
 
 /**
  * WHERE A FOUL BALL ACTUALLY GOES — outside the lines, which is the one thing
@@ -940,9 +959,11 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
     rng.range(-SPRAY_DEG, SPRAY_DEG),
   );
 
-  // A foul goes outside the lines, and a soft steep one gets caught.
+  // A foul goes outside the lines, and a soft steep one gets caught — in a
+  // park with the room to catch it. See SwingInput.foulPopAngle.
   const foul = rolled === 'foul';
-  const outcome: Outcome = foul && caughtFoul(launchAngle) ? 'foul_out' : rolled;
+  const outcome: Outcome =
+    foul && caughtFoul(launchAngle, input.foulPopAngle) ? 'foul_out' : rolled;
 
   return {
     outcome,
