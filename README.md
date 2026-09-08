@@ -55,8 +55,23 @@ npm run export  # fold it into ONE html file you can play offline
 npm run release # ...and ship that file as a GitHub release
 ```
 
+The measurement scripts are the other half of the engine, and each one answers
+one question. Run the relevant one after touching what it measures — every
+balance number quoted in this README came out of one of them.
+
+```bash
+node scripts/league.ts     # the round robin — does a better roster finish higher
+node scripts/balance.ts    # what a game LOOKS like: runs, hits, K rate, pitches
+node scripts/parks.ts      # every park's size and factor, and whether they average to neutral
+node scripts/parkplay.ts   # the same two clubs in all thirty buildings
+node scripts/parkruns.ts   # did the parks move the run environment (they must not)
+node scripts/parkladder.ts # did the parks break the ladder (they must not)
+node scripts/scenes.ts     # what the replay captions cost, and how often each fires
+node scripts/hrswap.ts     # the probe that proved geometry cannot decide a home run
+```
+
 `npm run export` writes **`dist/basedball-v<version>.html`** — the whole
-game in a single 231 kB file with nothing external in it. Double-click it, put it
+game in a single 336 kB file with nothing external in it. Double-click it, put it
 on a USB stick, email it to yourself. It is a classic script at the end of
 `<body>` rather than a module, because browsers refuse to fetch ES modules
 across a `file://` origin and opening by double-click is the entire point.
@@ -126,7 +141,7 @@ scanlines and a blinking cursor do most of it; the type is **Press Start 2P**
 as base64 rather than linked. That is the rule the screen cannot break —
 `npm run export` folds everything into ONE file to be opened off a USB stick,
 so a font that has to be fetched is a font that is not there. It costs 19 kB of
-a 295 kB export and it is the one 8-bit mark CSS could not fake. It is used for
+a 336 kB export and it is the one 8-bit mark CSS could not fake. It is used for
 the FURNITURE only — the marquee, the prompt, the value on a dial, the letters
 on a cap — because a club called Los Angeles Aqueducts set in an 8×8 face is
 three lines of stairs.
@@ -233,10 +248,12 @@ relievers had no cross-game rest at all. They do now; see below.
 
 **The clubs are not fixed.** `CUSTOMIZE` on the title screen — and on the club
 picker, where somebody actually decides they want a different club — opens the
-editor: names, ratings, identities and all four roster lists, club by club.
-Whatever it saves is what the game plays, and every screen follows: the
-pickers, the schedule, the standings, the rank on the pre-game card. Rename a
-club, re-rate a shortstop, cut the league to six, write thirty of your own.
+editor: names, ratings, identities, **ballparks** and all four roster lists,
+club by club. Whatever it saves is what the game plays, and every screen
+follows: the pickers, the schedule, the standings, the rank on the pre-game
+card. Rename a club, re-rate a shortstop, move a fence, cut the league to six,
+write thirty of your own — and **keep as many leagues as you like on the
+shelf**.
 
 - **The editor is the way in; the box is transport.** `IMPORT OR EXPORT` behind
   it hands you the league as JSON — ~230 kB over 8,700 lines
@@ -271,6 +288,40 @@ club, re-rate a shortstop, cut the league to six, write thirty of your own.
   franchises without losing the one you are in. The playoff bracket is pinned to
   the league size at kickoff, so a four-club league cannot be asked for an
   eight-club postseason.
+
+### The shelf — leagues you keep, plural
+
+**One storage key meant a custom league could only ever be THE custom league.**
+You could not hold a deadball year and a thirty-club fantasy world at the same
+time, so nobody ever built the second one. The import box was already transport
+for handing a league to somebody else; this is the shelf you put your own on.
+
+`KEEP THIS LEAGUE` on the league screen files the clubs you are playing under a
+name, and every kept league gets a `LOAD` and a `DROP` beside it.
+
+- **The active document did not move.** It is still the one key
+  `loadCustomLeague()` reads, and named copies live beside it under
+  `asb-league:<name>`. There is no migration, no pointer to chase on the boot
+  path, and a league imported before the shelf existed is still the active one
+  after — the load path cannot tell the feature happened.
+- **Loading a slot goes through `saveCustomLeague()` like any other paste**, so
+  there is still exactly one gate and one storage path. A slot written by an
+  older build, or hand-edited in the browser's own storage inspector, is held to
+  the rules a typed document is — and a slot that has gone bad cannot take the
+  active league down with it, because nothing is written unless it passes.
+- **Filing it validates it too**, and that is not symmetry for its own sake. A
+  slot is loaded much later than it is saved — that is what a shelf is for — so
+  a document allowed on unvalidated is a mistake that surfaces weeks later on a
+  screen that cannot say what was typed.
+- ⚠️ **A slot is a copy, and copies cost.** The document is ~230 kB against a
+  5 MB `localStorage` budget, so the shelf holds roughly twenty leagues before
+  the browser starts refusing writes. The save path reports the refusal by name
+  rather than silently losing a league, which is the one thing worse than the
+  cap.
+- **`length`/`key()` rather than `Object.keys(localStorage)`.** Both work in a
+  browser, but only those two are the Storage interface — the index properties
+  are a convenience the spec layers on top, and every fake storage anybody
+  writes for a test implements the methods and not the proxy.
 
 ### Every club plays its own way
 
@@ -315,6 +366,111 @@ points of win rate, because `hook` multiplies `limitOf()`, `limitOf()` already
 scales by stamina, and that staff runs 0.84–1.05. Riding a low-stamina arm 28%
 past a limit that is already short is not a philosophy, it is abuse. Their real
 identity is the one no simulated game can price — see the club's own header.
+
+**The eight are a starting point, not a list you pick from.** A club carries its
+identity *inline* — it is not a reference into `IDENTITIES` — so a pasted league
+could always carry a ninth archetype nobody wrote. What was missing was a way in
+that was not typing four knobs from nothing, so the editor offers all eight as
+buttons that **copy** an archetype onto the club and leave every field editable
+afterwards. Four knobs with GRINDERS already in them is a form somebody edits;
+four empty ones is a form nobody fills in.
+
+⚠️ **`hire` was a real hole, and it was invisible until two thirds of the way
+through a franchise.** `moments.ts` prints `identity.hire` as the detail on the
+manager moment — the line that makes the screen offer you a first-base coach
+rather than a stat block — but it was set only by the `identity()` factory. It
+was not in the editor's fields and not checked by `checkIdentity()`, so any
+hand-written or editor-made identity put the word **`undefined`** on a decision
+screen. It is required now, and the shipped thirty go through the same check.
+
+### Where they play it
+
+**Thirty clubs, thirty ballparks, and a park is a LAYOUT** — a name, three
+fences and how much foul ground there is. Everything the engine does with one is
+*derived* from those four numbers, so a 310-foot wall and a 0.95 power factor
+can never disagree about the same building. Move a fence and the factor follows.
+
+|   | what each number reaches |
+|---|---|
+| **left / center / right** | `parkPower()`, the multiplier on every hitter in the building — and `wallAt()`, the fence the replay draws and the distance a home run is reported at |
+| **foul** | `foulPopAngle()`, how much of the foul population somebody can get under — `caughtFoul()` in `hit.ts` |
+
+The park is read off the club, not chosen to balance anything — the same rule
+the identity tags follow. New England is a 310-foot wall in left because that is
+what the Minutemen are; Denver is the deepest outfield in the league because the
+club is called the **Void** and a fly ball that dies on the track is what a void
+does. Detroit has the most power in the league and its second-deepest centre
+field, which is the building disagreeing with the roster on purpose.
+
+| park | fences | factor | runs | HR | cheapest HR |
+|---|---|---|---|---|---|
+| **The Common** (NEM) | 310/390/302 | 1.065 | 5.20 | 2.68 | 366 ft |
+| The Yardworks (KCF) | 330/410/330 | 1.000 | 3.96 | 1.95 | 387 ft |
+| The Section (OKC) | 345/408/345 | 0.976 | 3.62 | 1.90 | 390 ft |
+| **The Void** (DEN) | 352/420/352 | 0.950 | 3.30 | 1.64 | 401 ft |
+
+*Same two clubs, 300 games in each building. `node scripts/parkplay.ts`.*
+
+- **A park is a scoreboard, not an edge.** `atPark()` gives the building to
+  **both** lineups and a club plays half its schedule away. What it *does* do is
+  reward a roster that fits it, which is why Detroit's power in a 420-foot centre
+  field is meant to cost them.
+- **It is applied once, inside `newGame()`.** Both the game you play and the
+  three simulated behind it every afternoon open through that function, so the
+  standings cannot mix two scales — and every one of the thirteen `statsOf()`
+  readers downstream followed without being told.
+- **It moves the bats, not the arms**, which is `leagueUnder()`'s rule for
+  `offence` and is right here for the same reason: weakening a staff to raise
+  scoring in a bandbox would make every ERA in the record book a lie about the
+  pitchers.
+- **The thirty average to neutral.** `NEUTRAL_SIZE` is set where the league's
+  *runs* come out level, so switching parks on redistributes offence without
+  moving the run environment the whole engine was tuned around. Measured over
+  2,400 games each way, parks on and stripped: runs per club **4.391 → 4.378**
+  (−0.30%), strikeout rate 22.41 → 22.45%, foul-outs 1.74 → 1.76% of plate
+  appearances, and the roster-value/win-rate correlation **0.533 → 0.536**.
+  Run `node scripts/parks.ts` after touching any fence.
+- **Across the thirty**, ranked against the layout: size against runs **−0.971**,
+  size against home runs **−0.967**, fence depth against the cheapest home run
+  **+0.912**, foul acreage against the foul-out rate **+0.953**. Four mechanisms,
+  four confirmations that each one actually reaches the field — which is the
+  check that would have caught `parkFoulAngle()` in its first hour, when it
+  derived a number and nothing threaded it into the swing.
+
+⚠️ **`WALL_FT` IS THE TRAP.** `WALL_FT = 400` in `plot.ts` looks like where a
+park belongs and is exactly the wrong place. `plotBatted()` is a *picture
+reconciled to a verdict already in the book* — the outcome table calls
+`home_run` first and `justOut()` shoves the flight over whatever fence is there
+— so a per-park wall alone would change the replay and not one result.
+
+⚠️ **AND GEOMETRY CANNOT DECIDE A HOME RUN, WHICH WAS MEASURED RATHER THAN
+ASSUMED.** The obvious next step is to let the fence vote the way `contest()`
+votes on hit-or-out: demote a table-homer whose flight never reached the wall,
+promote a double that cleared it, matched so the rate holds. Counted over 52,417
+balls in play against the neutral 400-foot bowl:
+
+```
+table home runs                       11,316
+...whose flight never reached 400ft    6,683   (59% of them)
+doubles that would have cleared it        154
+```
+
+The flight model and the outcome table are not on the same scale for home runs
+and never were — `plot.ts`'s own note on `justOut()` says so, and **59%** is what
+its "sometimes" turns out to mean. A matched swap would delete three fifths of
+the home runs in the game and hand back two hundred. So **the fence decides where
+a home run is drawn and the park decides how often one is hit**, two mechanisms
+on purpose. `scripts/hrswap.ts` is the probe; re-run it before anybody tries this
+again.
+
+**You can see it.** The pre-game card carries the building across the top, above
+both clubs — *"The Pound · 350 / 415 / 338 ft · plays big — fly balls go to die ·
+acres of foul ground"* — the club picker shows every park's name and fences, and
+the overhead replay draws the real outline: the fence is **sampled** every two
+degrees rather than struck as an arc, so a short porch in right and a 420-foot
+notch in centre are on the screen. The camera is fixed at one scale for every
+building, which is the point — rescaling per park so each one filled the canvas
+would draw them all the same size and the layout would be invisible.
 
 ### The pen gets tired too
 
@@ -782,9 +938,19 @@ as the league's. `balance.ts` above has no such problem.
 
 ### What is deliberately not in it yet
 
-Pinch hitting and substitutions, a productive ground out, defensive shifts, and
-a box score. The roguelike layer (`run.ts`, `division.ts`, `opponent.ts`)
-is untouched and still builds — this sits beside it, not on top of it.
+A productive ground out and defensive shifts. **Pinch hitting and the box score
+were on this list and are not any more** — the bench is real (`pinchHit()` in
+`game.ts`, `manageBench()` in `sim.ts`, and the computer goes to its bench
+between hitters the same way it goes to its pen) and the final screen reads a
+full box score straight off the `GameState`.
+
+Still nothing in the door for a **second year**: no draft, no free agency, no
+ageing, no development. `career.ts` is the shelf you put a finished season on,
+not an offseason. A park is editable but its shape is the only thing about the
+world that is; there are no wall heights, no altitude, and no weather.
+
+The roguelike layer (`run.ts`, `division.ts`, `opponent.ts`) is untouched and
+still builds — this sits beside it, not on top of it.
 
 ## Play it
 
@@ -1150,6 +1316,86 @@ Still not drawn: an extra-base hit stops the batter at first rather than
 running him to second or third. There is no play there and no call, so it
 reads as the replay ending rather than as a contradiction — but it is the
 obvious next thing if the replay gets another pass.
+
+### The replay says what just happened
+
+⚠️ **IT WAS SILENT, AND IT WAS THE SAME LENGTH EVERY TIME.** `finishAtBat()` set
+`flash = ''` the moment there was a replay to show, so the one screen the player
+watches after every swing said **nothing** — and the beat was the same second
+and a half whether it was a routine grounder to short or a three-run shot into
+the seats. A game where the biggest thing that can happen looks exactly like the
+most ordinary thing has no reward in it, and both get skipped.
+
+`scene.ts` answers one question — *given what just happened, what does the
+broadcast put on the screen and how long does it stay there* — and decides
+nothing about the game. Every fact it reads was already settled by
+`placement.ts`, `inning.ts` and `game.ts`, so it is pure and tested without a
+canvas.
+
+**The caption is free and the time is not, and that is the whole pacing design.**
+The overhead already holds on every ball in play, so writing two lines over that
+hold costs nothing — which is what stops an ordinary single from being nothing.
+Extra milliseconds are spent only where they are earned.
+
+| tier | fires | pays | what reaches it |
+|---|---|---|---|
+| **routine** | 77.0% | 0 ms | `GROUND OUT · TO SHORT`, `BASE HIT`, `POPPED UP` |
+| **solid** | 17.5% | 220 ms | `RBI SINGLE`, `INTO THE GAP`, `OFF THE WALL`, `ERROR`, `TWO` |
+| **big** | 4.7% | 620 ms | `HOME RUN`, `TRIPLE`, `ROBBED`, `HE DELIVERS` |
+| **huge** | 0.7% | 1150 ms | `GRAND SLAM`, `THREE-RUN SHOT`, `WALK-OFF` (+500) |
+
+**The bill: 3.94 seconds added to a nine-inning game**, measured over 15,564
+balls in play. `node scripts/scenes.ts` prints it, and also how often each
+caption fires — *a tier nothing ever reaches is dead code with a comment on it.*
+
+It reuses `placement.ts`'s own vocabulary rather than inventing a second one. A
+hit is about the **place** it went (`INTO THE GAP`, `TO LEFT FIELD`); an out is
+about the **man** who took it (`TO SHORT`) — which is the same split
+`describePlay()` makes, for the same reason.
+
+### And a big spot announces itself
+
+**Late in a close game the screen tells you where you are** —
+*`9TH · TWO DOWN · TYING RUN IN SCORING POSITION`* — before the pitch rather
+than after it.
+
+⚠️ **THE RULE IS "ONE SWING CHANGES WHO IS WINNING",** not a table of innings
+and margins, and stating it that way is what makes it scale with the bases by
+itself: `|deficit| <= men on + 1`, late. Two down by two with nobody on is not a
+moment; two down by two with two on is. Bases loaded down four is, and the same
+expression says so with no special case for the grand slam.
+
+**It is symmetric on purpose.** A one-run lead in the ninth with the tying run
+aboard is the tensest thing in the sport from *both* dugouts, and the screen must
+not be able to say it only counts when you are the one hitting.
+
+- **It describes the situation, never the odds.** "Tying run at second" is
+  something you can see on the field and now know to feel; a win probability is
+  a number that tells you the game has already decided how this goes.
+- **It fires only when the line changes.** A tight ninth is high leverage for
+  every hitter in it, and a card that reappeared before all four of them would
+  stop meaning *look at this* by the second one. Comparing the text means the
+  card marks the moment the situation **turned**.
+- **It does not block.** You can throw the next pitch straight through it.
+- **Extra innings are always late**, at any season length — the tenth of a
+  seven-inning game is extras and its seventh is its ninth.
+
+Three things measurement changed, and all three would have shipped looking fine:
+
+- ⚠️ **`INTO THE GAP` fired on 0.2% of balls in play** against a bare `DOUBLE`
+  on 9.3%. The caption was keyed off `inTheGap`, which is a **fielder** distance
+  — deliberately the top fifth of doubles, and the right input for `stretch()`.
+  A caption is about where the ball went, so it reads the zone. Now 2.3%.
+- ⚠️ **An out in a big spot fired on 10.9%** — about six a game, more often than
+  a home run, so the caption meant to mark tension was the second most common
+  thing on screen. A close game is not a jam: it needs men on base to be an
+  escape. `OUT OF THE JAM` with two down, `HE GETS HIM` otherwise.
+- ⚠️ **The caption is timed off the END of the replay, not the start.** It is a
+  lower third, so it covers home plate and the race to first; a fixed delay put
+  it over a groundout while the runner was still running. Anchored to the end, it
+  appears once the ball has finished doing whatever it was going to do — on
+  every kind of play, without anything having to know which kind this was. The
+  window grows with the beat the tier bought, which is what that beat is *for*.
 
 ### Runners do baseball things now
 
