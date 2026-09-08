@@ -186,6 +186,13 @@ import { fieldBall, reachOf } from './defense.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
+import {
+  momentLine,
+  sceneFor,
+  situationOf,
+  TIER_COLOUR,
+  type Scene,
+} from './scene.ts';
 import { momentOn, decide, valueShift, type Moment } from './moments.ts';
 import { formOf, formLabel, inForm } from './form.ts';
 import { BRACKET, OFFENCE, PARITY, SERIES, STREAK, cleanRules, roundsIn } from './rules.ts';
@@ -366,6 +373,31 @@ let replay: Replay | null = null;
 /** What to draw in 'resolve'. */
 let flash = '';
 let flashUntil = 0;
+
+/**
+ * WHAT THE BROADCAST IS SAYING ABOUT THE PLAY ON THE SCREEN — see scene.ts.
+ *
+ * Lives exactly as long as `replay` does: built beside it in finishAtBat, drawn
+ * over it in drawField, and dropped with it in the frame loop.
+ */
+let scene: Scene | null = null;
+
+/**
+ * THE HIGH-LEVERAGE CARD, and its two-step life.
+ *
+ * `momentPending` is set when the next hitter's spot is worth announcing, and
+ * `momentText` is it actually on the screen — the frame loop moves one to the
+ * other when the previous play's replay cuts away, because a moment card
+ * competing with a replay is two things nobody reads. `lastMoment` is the line
+ * already used, so the same sentence cannot fire four hitters running.
+ */
+let momentPending: string | null = null;
+let momentText: string | null = null;
+let momentFrom = 0;
+let lastMoment = '';
+
+/** How long the high-leverage card stays up. Long enough to read once. */
+const MOMENT_MS = 1700;
 let lastGrade = '';
 
 /**
@@ -1297,8 +1329,31 @@ function finishAtBat(): void {
 
   const half = inningLabel(game);
   const wasBatting = battingSide(game);
+  // ⚠️ READ BEFORE recordPlay, NOT FROM log.before — that field is the BASES
+  // before the play and nothing else, and leverage needs the inning, the outs
+  // and both scores as they stood when this man walked up.
+  const spotHeWalkedInto = situationOf(game, wasBatting);
   const { game: next, log } = recordPlay(game, result, fielding);
   game = next;
+
+  // WHAT THE BROADCAST MAKES OF IT. Built from the state BEFORE the play —
+  // leverage is a fact about the spot he walked into, not about the one he
+  // left behind him. See scene.ts.
+  scene =
+    result.kind === 'in_play'
+      ? sceneFor({
+          outcome: result.hit.outcome,
+          placement: placed.placement,
+          verdict: placed.verdict,
+          runs: log.runs,
+          error: !!fielding?.error,
+          doublePlay: !!fielding?.doublePlay,
+          exitVelocity: result.hit.exitVelocity,
+          before: spotHeWalkedInto,
+          gameOver: game.over,
+          walkOff: game.over && game.ending === 'walk_off',
+        })
+      : null;
 
   // Cut to the overhead. Built HERE and not at contact because two of the
   // things it needs are only known now: whether the defence booted it, and
@@ -1318,6 +1373,8 @@ function finishAtBat(): void {
           safe: result.hit.isHit || !!fielding?.error,
           // The same fence place() just used — see newReplay's note on wallFt.
           wallFt: wallAt(result.hit.direction, game.home.park),
+          // The beat this play earned. A routine grounder adds nothing.
+          holdMs: scene?.hold ?? 0,
           doublePlay: !!fielding?.doublePlay,
           error: !!fielding?.error,
           // Only a foul out sets this, and only because nobody stands in foul
@@ -1366,6 +1423,18 @@ function finishAtBat(): void {
   }
 
   atBat = newAtBat();
+  // THE MOMENT THE NEXT MAN WALKS INTO, queued rather than shown — the replay
+  // of the play that just ended is still on the screen, and two cards at once
+  // is neither of them. The frame loop promotes it when the replay cuts away.
+  //
+  // ⚠️ ONLY WHEN THE LINE CHANGES. A tight ninth is high leverage for every
+  // hitter in it, and a card that reappeared before all four of them would stop
+  // meaning "look at this" by the second one. Comparing the text means the card
+  // marks the moment the situation TURNED — a run in, an out made, a man
+  // aboard — which is the thing actually worth looking up for.
+  const nextLine = game.over ? null : momentLine(situationOf(game, battingSide(game)));
+  if (nextLine && nextLine !== lastMoment) momentPending = nextLine;
+  lastMoment = nextLine ?? '';
   bunting = false;
   previous = [];
   pitch = null;
@@ -1995,7 +2064,38 @@ if (import.meta.env.DEV) {
       wallFt: wallAt(direction, game.home.park),
       ...extra,
     });
+    // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.
+    // Frame-level tuning of a scene is the whole reason to be able to freeze
+    // one, and a replay with no words over it is what the feature looked like
+    // before scene.ts. `runs` and the situation are taken from the live game,
+    // so a hook fired in the ninth of a tied game gets the ninth's treatment.
+    scene = sceneFor({
+      outcome,
+      placement: place(
+        { outcome, exitVelocity, launchAngle, direction } as never,
+        game.home.park,
+      ),
+      verdict: null,
+      runs: outcome === 'home_run' ? 1 : 0,
+      error: false,
+      doublePlay: false,
+      exitVelocity,
+      before: situationOf(game, battingSide(game)),
+      gameOver: false,
+      walkOff: false,
+    });
     return outcome;
+  };
+  // The high-leverage card, on demand. It normally fires off a situation the
+  // game has to reach, which is not a thing you can wait for while tuning the
+  // twelve pixels the band is off by.
+  (window as unknown as Record<string, unknown>)['__moment'] = (
+    line = momentLine({ ...situationOf(game, battingSide(game)), inning: 9, us: 3, them: 4 }) ??
+      '9TH · TWO DOWN · TYING RUN IN SCORING POSITION',
+  ) => {
+    momentText = line;
+    momentFrom = performance.now();
+    return line;
   };
   // Step the play to an exact millisecond and hand back the frame. Frame-level
   // tuning without having to catch a two-second animation live.
@@ -2065,9 +2165,97 @@ function drawField(now: number): void {
     if (oh > 0) {
       ctx.globalAlpha = oh;
       drawOverhead(ctx, OH_CAM, replay, rn, { ...OH_PALETTE, wall: (d) => wallAt(d, game.home.park) });
+      // The caption rides the same alpha as the picture under it, so the two
+      // cut in and out as one thing rather than the words outliving the field.
+      if (scene) drawScene(scene, rn - replay.startedAt, replayLength(replay));
       ctx.globalAlpha = 1;
     }
   }
+  drawMoment(now);
+}
+
+/**
+ * THE CAPTION OVER THE REPLAY — the whole reward half of a scene.
+ *
+ * ⚠️ IT IS TIMED OFF THE END OF THE REPLAY, NOT OFF THE START, and a fixed
+ * delay was the first cut and wrong. The caption is a lower third: it covers
+ * the bottom of the frame, which is where home plate, the catcher and the race
+ * to first all are. Coming up half a second after the cut put it over a
+ * groundout while the runner was still running — the play hidden behind the
+ * words describing it. Anchored to the end instead, it appears once the ball
+ * has finished doing whatever it was going to do, on every kind of play,
+ * without anything having to know which kind this was.
+ *
+ * ⚠️ AND THE WINDOW GROWS WITH THE BEAT THE PLAY EARNED, which is what the
+ * extra hold in scene.ts is FOR. A routine out gets its word for nine hundred
+ * milliseconds; a grand slam gets its two lines for two full seconds, because
+ * that is the time the tier bought.
+ */
+function drawScene(s: Scene, t: number, total: number): void {
+  const from = total - (CAPTION_MS + s.hold);
+  const inK = Math.max(0, Math.min(1, (t - from) / 180));
+  if (inK <= 0) return;
+  const big = s.tier === 'big' || s.tier === 'huge';
+  const y = canvas.height - (s.detail ? 54 : 40);
+
+  ctx.save();
+  ctx.globalAlpha *= inK;
+  ctx.fillStyle = 'rgba(9,13,11,0.82)';
+  ctx.fillRect(0, y - 24, canvas.width, s.detail ? 62 : 44);
+  // A rule in the tier's colour, so the size of the moment reads before the
+  // words do — the same trick the pre-game card plays with the rank label.
+  ctx.fillStyle = TIER_COLOUR[s.tier];
+  ctx.fillRect(0, y - 24, canvas.width, 2);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = TIER_COLOUR[s.tier];
+  ctx.font = `${big ? 22 : 16}px ui-monospace, monospace`;
+  ctx.fillText(s.title, canvas.width / 2, y);
+  if (s.detail) {
+    ctx.fillStyle = '#9aa896';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText(s.detail, canvas.width / 2, y + 20);
+  }
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+/**
+ * How long the caption is up on an ordinary play. A big one adds the beat its
+ * tier bought on top of this — see drawScene().
+ */
+const CAPTION_MS = 900;
+
+/**
+ * THE HIGH-LEVERAGE CARD — the moment getting its own scene rather than
+ * borrowing the replay's.
+ *
+ * ⚠️ IT DOES NOT BLOCK. The player can throw the next pitch straight through
+ * it, and at 8x it is gone before they could have read it anyway. A card that
+ * had to be dismissed would turn the tensest half-inning in the game into the
+ * one with the most button presses in it.
+ */
+function drawMoment(now: number): void {
+  if (!momentText) return;
+  const t = now - momentFrom;
+  if (t > MOMENT_MS) {
+    momentText = null;
+    return;
+  }
+  // Up fast, held, then out — the fade is only on the tail.
+  const a = Math.min(1, t / 140) * Math.min(1, (MOMENT_MS - t) / 420);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(9,13,11,0.86)';
+  ctx.fillRect(0, 96, canvas.width, 46);
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillRect(0, 96, canvas.width, 2);
+  ctx.fillRect(0, 140, canvas.width, 2);
+  ctx.textAlign = 'center';
+  ctx.font = '13px ui-monospace, monospace';
+  ctx.fillText(momentText, canvas.width / 2, 124);
+  ctx.restore();
+  ctx.textAlign = 'left';
 }
 
 /** Where the pitch crosses, given its nominal location. */
@@ -3081,7 +3269,16 @@ function frame(): void {
 function step(): void {
   const now = performance.now();
 
-  if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) replay = null;
+  if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
+    replay = null;
+    scene = null;
+    // The replay has cut away, so the screen is free for the next man's card.
+    if (momentPending) {
+      momentText = momentPending;
+      momentFrom = now;
+      momentPending = null;
+    }
+  }
 
   if (auto) autoStep();
 

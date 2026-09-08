@@ -523,12 +523,12 @@ const ZONE_WORDS: Record<Zone, string> = {
  * ponytail: one zone gets a special case because one zone needs one. The other
  * eight name a place and take any preposition you give them.
  */
-const whereWords = (p: Placement, prep: 'to' | 'into'): string =>
+export const whereWords = (p: Placement, prep: 'to' | 'into'): string =>
   p.zone === 'down-the-line'
     ? `down the ${p.dirDeg < 0 ? 'left' : 'right'}-field line`
     : `${prep} ${ZONE_WORDS[p.zone]}`;
 
-const POSITION_WORD: Record<number, string> = {
+export const POSITION_WORD: Record<number, string> = {
   1: 'the pitcher', 2: 'the catcher', 3: 'first', 4: 'second', 5: 'third',
   6: 'short', 7: 'left', 8: 'center', 9: 'right',
 };

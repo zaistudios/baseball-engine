@@ -129,6 +129,17 @@ export interface Replay {
    */
   chaserNum?: number;
   /**
+   * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
+   * earns. Absent is the ordinary hold, which is what a foul, an exhibition and
+   * the roguelike all get.
+   *
+   * ⚠️ THE NUMBER COMES FROM game/scene.ts AND THIS FILE MUST NOT GUESS AT IT.
+   * How much of an occasion a play is depends on the score, the inning and the
+   * men on base, none of which the replay knows or should learn — it is a
+   * picture of a ball, not a reader of the game state. It is handed a length.
+   */
+  holdMs?: number;
+  /**
    * Which of the replay's sounds have already played.
    *
    * Keyed rather than a queue of timers because the game clock stops behind a
@@ -165,6 +176,8 @@ export function newReplay(o: {
    * feet inside the fence it was supposed to have hit.
    */
   wallFt?: number;
+  /** The beat this play earned. See Replay.holdMs. */
+  holdMs?: number;
 }): Replay {
   return {
     startedAt: o.now,
@@ -182,6 +195,7 @@ export function newReplay(o: {
     held: o.held ?? [],
     ...(o.thrownOut === undefined ? {} : { thrownOut: o.thrownOut }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
+    ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
   };
 }
@@ -288,9 +302,15 @@ export const replayLength = (r: Replay): number => {
   // because it is an out and an out is worth a moment.
   if (r.outcome === 'foul') return REPLAY_CUT_MS + r.plot.hangMs + FOUL_HOLD_MS;
   const race = raceFor(r);
+  // ⚠️ THE EXTRA BEAT IS ADDED TO BOTH ARMS OF THE MAX, and putting it on only
+  // the first would make it disappear on exactly the plays worth watching. A
+  // ball hit into the gap has a long race, so the race arm is usually the one
+  // that wins — hold it on only the hang-time arm and a triple would get the
+  // same beat as a groundout while a home run got a whole extra second.
+  const extra = r.holdMs ?? 0;
   return Math.max(
-    REPLAY_CUT_MS + r.plot.hangMs + REPLAY_HOLD_MS,
-    Math.max(race.runMs, race.throwMs ?? 0) + REPLAY_CALL_MS,
+    REPLAY_CUT_MS + r.plot.hangMs + REPLAY_HOLD_MS + extra,
+    Math.max(race.runMs, race.throwMs ?? 0) + REPLAY_CALL_MS + extra,
   );
 };
 
