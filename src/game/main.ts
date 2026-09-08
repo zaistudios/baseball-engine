@@ -27,8 +27,8 @@ import type { SwingInput, PitchLocation } from '../core/hit.ts';
 import { ballArrivalMs, computeOffsetMs, grade } from '../core/timing.ts';
 import {
   ARM_MS,
-  DELIVERY_MS,
-  RELEASE_AT_MS,
+  deliveryOf,
+  tempoWord,
   RELEASE_LABEL,
   RELEASE_SHORT,
   controlOf,
@@ -445,6 +445,17 @@ let callSpot: PitchLocation = 'middle';
  * so there is nothing for a speed setting to be tempted by.
  */
 let deliveryAt = 0;
+
+/**
+ * THE TEMPO THIS DELIVERY IS BEING GRADED AGAINST, snapshotted when the arm
+ * starts for the same reason `deliveryAt` is.
+ *
+ * ⚠️ NOT READ OFF `callType` AT RELEASE TIME. The pitch buttons are disabled
+ * through 'winding' so it cannot currently change mid-sweep — but the whole
+ * point of the lock note above is that two inputs to one control disagreeing
+ * about when it is live is the bug nobody finds. A snapshot cannot disagree.
+ */
+let deliveryPitch: PitchType = 'fastball';
 
 /**
  * How the last one left the hand, or null before the first pitch of an at-bat.
@@ -1025,7 +1036,12 @@ function cyclePen(by: number): void {
  * worst command in the league to your best arm.
  */
 const releaseWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
-  releaseWindowMs(kind, COMMAND[currentPitcher(game).signature], assist());
+  releaseWindowMs(
+    kind,
+    COMMAND[currentPitcher(game).signature],
+    assist(),
+    deliveryOf(deliveryPitch).scale,
+  );
 
 /**
  * START THE DELIVERY. The press that used to throw the pitch now only begins
@@ -1034,6 +1050,7 @@ const releaseWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
 function startDelivery(): void {
   if (game.over || youBat() || phase !== 'calling') return;
   deliveryAt = performance.now();
+  deliveryPitch = callType;
   releaseGrade = null;
   // The pen is disarmed by anything that changes what you are looking at, and
   // the arm coming set is exactly that. Same rule as throwing the pitch was.
@@ -1065,12 +1082,14 @@ function release(at: number): void {
   // pitch — see ARM_MS, which exists because the second half of a double-tap
   // lands here and used to cost one.
   if (at - deliveryAt < ARM_MS) return;
+  const tempo = deliveryOf(deliveryPitch);
   pitchToThem(
     gradeRelease(
       // Same clock, same sign convention as the swing: negative is early.
-      at - (deliveryAt + RELEASE_AT_MS),
+      at - (deliveryAt + tempo.releaseAtMs),
       COMMAND[currentPitcher(game).signature],
       assist(),
+      tempo.scale,
     ),
     at,
   );
@@ -2414,9 +2433,17 @@ function drawCall(): void {
  */
 const BAR = { x: 24, y: 296, w: 252, h: 14 } as const;
 
-/** Milliseconds into the sweep, as an x on the bar. Clamped to the bar. */
-const barX = (ms: number): number =>
-  BAR.x + (Math.max(0, Math.min(DELIVERY_MS, ms)) / DELIVERY_MS) * BAR.w;
+/**
+ * Milliseconds into the sweep, as an x on the bar. Clamped to the bar.
+ *
+ * ⚠️ THE BAR IS THE SAME WIDTH FOR EVERY PITCH AND THE SWEEP IS NOT, which is
+ * the whole point: a curveball's 1250ms is drawn across the same 252 pixels as
+ * a fastball's 880, so the marker CRAWLS on the slow pitches and SNAPS on the
+ * quick ones. Scaling the bar's width to the sweep instead would have made
+ * every pitch look and feel identical again, which is the thing being fixed.
+ */
+const barX = (ms: number, sweepMs: number): number =>
+  BAR.x + (Math.max(0, Math.min(sweepMs, ms)) / sweepMs) * BAR.w;
 
 /** What each verdict is painted in. Gold rewards, red costs, dim is the shrug. */
 const RELEASE_COLOR: Record<ReleaseGrade, string> = {
@@ -2428,9 +2455,13 @@ const RELEASE_COLOR: Record<ReleaseGrade, string> = {
 };
 
 function drawDelivery(now: number): void {
+  // ⚠️ THE TEMPO BEING DRAWN IS THE ONE BEING GRADED. Same snapshot the release
+  // reads, so the line you aim at is the line you are measured from — the
+  // fault-5 rule, that the picture and the verdict are one event.
+  const tempo = deliveryOf(phase === 'winding' ? deliveryPitch : callType);
   const band = (halfWidthMs: number, fill: string): void => {
-    const a = barX(RELEASE_AT_MS - halfWidthMs);
-    const b = barX(RELEASE_AT_MS + halfWidthMs);
+    const a = barX(tempo.releaseAtMs - halfWidthMs, tempo.sweepMs);
+    const b = barX(tempo.releaseAtMs + halfWidthMs, tempo.sweepMs);
     ctx.fillStyle = fill;
     ctx.fillRect(a, BAR.y, b - a, BAR.h);
   };
@@ -2441,7 +2472,7 @@ function drawDelivery(now: number): void {
   // where a press does nothing at all is a place on the bar rather than a
   // surprise. See ARM_MS.
   ctx.fillStyle = '#131a14';
-  ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS) - BAR.x, BAR.h);
+  ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS, tempo.sweepMs) - BAR.x, BAR.h);
   band(releaseWindow('good'), '#243320');
   band(releaseWindow('perfect'), '#3d5733');
 
@@ -2451,7 +2482,7 @@ function drawDelivery(now: number): void {
 
   // The release point. One line, and it is the thing you are aiming the press
   // at — the bands either side of it are what that press is worth.
-  const rx = barX(RELEASE_AT_MS);
+  const rx = barX(tempo.releaseAtMs, tempo.sweepMs);
   ctx.strokeStyle = '#cfd6c4';
   ctx.beginPath();
   ctx.moveTo(rx, BAR.y - 3);
@@ -2469,7 +2500,7 @@ function drawDelivery(now: number): void {
   if (at !== null) {
     ctx.fillStyle =
       phase === 'winding' ? '#e8e8d8' : RELEASE_COLOR[releaseGrade ?? 'good'];
-    ctx.fillRect(barX(at) - 1, BAR.y - 4, 2, BAR.h + 8);
+    ctx.fillRect(barX(at, tempo.sweepMs) - 1, BAR.y - 4, 2, BAR.h + 8);
   }
 
   ctx.font = '10px ui-monospace, monospace';
@@ -2482,7 +2513,11 @@ function drawDelivery(now: number): void {
     ctx.fillText(RELEASE_LABEL[releaseGrade], BAR.x, BAR.y + BAR.h + 15);
   } else {
     ctx.fillStyle = '#7a8a6a';
-    ctx.fillText('SPACE starts the arm — SPACE again to let go', BAR.x, BAR.y + BAR.h + 15);
+    ctx.fillText(
+      `SPACE starts the arm — SPACE again to let go · ${callType} is ${tempoWord(callType)}`,
+      BAR.x,
+      BAR.y + BAR.h + 15,
+    );
   }
 }
 
@@ -2988,7 +3023,11 @@ function renderControls(): void {
 
   const pitches = arms.map(
     (t, i) =>
-      `<button data-pitch="${t}"${locked} class="${t === callType ? 'on' : ''}">${t}<br><kbd>${i + 1}</kbd></button>`,
+      // ⚠️ THE TEMPO IS ON THE BUTTON. Six pitches that each ask for a
+      // different press is only a mechanic if you can see which is which
+      // BEFORE you call one — otherwise it is the bar behaving oddly.
+      `<button data-pitch="${t}"${locked} class="${t === callType ? 'on' : ''}">${t}` +
+      `<br><kbd>${i + 1} · ${tempoWord(t)}</kbd></button>`,
   ).join('');
   // Drawn in reading order, which IS the grid order, which is the key order.
   // ALL_LOCATIONS is the single source for all three.
@@ -3367,7 +3406,9 @@ function step(): void {
   // press. Letting go at the end of the sweep is a pitch that got away, which
   // is the honest outcome and not a free take. DELIVERY_MS is set to outlast
   // the widest late press that still grades; delivery.test.ts holds it there.
-  if (phase === 'winding' && now >= deliveryAt + DELIVERY_MS) releaseAs('wild');
+  if (phase === 'winding' && now >= deliveryAt + deliveryOf(deliveryPitch).sweepMs) {
+    releaseAs('wild');
+  }
 
   if (phase === 'windup') {
     // THE COMPUTER’S BAT, whichever of the two of you it is hitting for: watch

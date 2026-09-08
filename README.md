@@ -1189,6 +1189,46 @@ tips his grip before the windup, the Veteran leaks it at release, and the
 Foundry gives you nothing per pitch at all — against a machine the count is the
 only read you have left.
 
+### Six pitches, six deliveries
+
+**Every pitch used to ask for the identical press** — 700ms into a 1000ms sweep,
+whichever of the six you called. So the one decision the mound offers, *what to
+throw*, had no effect on the act of throwing it: six buttons, one motion, and
+after an inning your hands stop reading the bar because they already know where
+the line is. That is what made it repetitive, and it was not a feedback problem.
+
+A pitch is an arm action now, and arm actions differ:
+
+| pitch | sweep | release | window | on screen |
+|---|---|---|---|---|
+| fastball | 880ms | 560ms | ×1.10 | quick |
+| sinker | 900 | 600 | ×1.05 | quick |
+| slider | 950 | 650 | ×0.95 | even |
+| knuckleball | 1000 | 700 | ×0.80 | even |
+| changeup | 1150 | 830 | ×0.92 | slow |
+| curveball | 1250 | 920 | ×0.90 | long |
+
+**Mixing pitches costs you your rhythm, and that is the point.** Coming to the
+changeup straight off a fastball is a 270ms difference in when to let go — the
+changeup's own deception, turned on the man throwing it. Sitting on the fastball
+all night is the one sequence that costs nothing, which is exactly the trade a
+pitcher makes. The hard pitches to command are the ones with the best tables
+behind them, so calling the curveball is a bet rather than a free upgrade.
+
+The bar is the **same width for every pitch and the sweep is not**, so the
+marker crawls on a curveball and snaps on a fastball. Scaling the bar to the
+sweep would have made all six look identical again. The tempo is written on the
+pitch button (`1 · quick`) so you can see which is which *before* you call one —
+otherwise it is just the bar behaving oddly.
+
+⚠️ Still one press. `delivery.ts` rules out wind-up stages, arm slots and double
+meters and none of them are here — the same single graded press against
+different geometry. `RELEASE_CONTROL` is untouched, so **`good` is still exactly
+1.0** and your copy of an arm still belongs to the league the sim measures. It
+never reaches the computer: `autoStep()` throws at `good` directly and never
+grades a release. Confirmed — `npm run sim` is unchanged to the decimal at 4.45
+runs per team.
+
 ## The pitcher pitches to a plan
 
 **Rewritten 2026-08-16, and it is the largest change to how the game plays

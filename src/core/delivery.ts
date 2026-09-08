@@ -45,6 +45,8 @@
  * was — main.ts multiplies ZONE_FATIGUE_PENALTY on top of this — because two
  * independent things multiplying is precisely what `control` is for.
  */
+import type { PitchType } from './hitTables.ts';
+
 
 /**
  * SIGN CONVENTION — the same one core/timing.ts states for the swing, and it
@@ -77,6 +79,87 @@ export const DELIVERY_MS = 1000;
 
 /** Where in the sweep the ball should leave the hand. */
 export const RELEASE_AT_MS = 700;
+
+/**
+ * ⚠️ THE TWO NUMBERS ABOVE ARE THE DEFAULT, NOT THE ONLY ANSWER ANY MORE.
+ *
+ * WHY. Every pitch in the game asked for the identical press — 700ms into a
+ * 1000ms sweep — whichever of the six you called. So the one decision the
+ * mound actually offers, WHAT TO THROW, had no effect whatever on the act of
+ * throwing it: six buttons, one motion, and after an inning your hands stop
+ * reading the bar at all because they already know where the line is. That is
+ * the repetition, and it is not a lack of feedback, it is a lack of anything
+ * to feel.
+ *
+ * WHAT REPLACES IT. A pitch is an arm action, and arm actions differ. The
+ * fastball is quick and lets go early; the curveball is a long slow wind you
+ * have to wait out; the changeup has to be held past where the fastball went.
+ * So the tempo comes off the pitch, and MIXING pitches costs you your rhythm —
+ * which is the thing that makes a mixed sequence a real decision rather than a
+ * dropdown, and the thing a repeated fastball now deliberately does not cost.
+ *
+ * ⚠️ IT IS STILL ONE PRESS. The ponytail note at the top of this file rules out
+ * wind-up stages, arm slots and double meters, and none of them are here — this
+ * is the same single graded press against different geometry.
+ *
+ * ⚠️ `scale` NARROWS OR WIDENS THE WINDOWS AND IS THE TRADEOFF. The pitches
+ * that are hardest to command are the ones with the best tables behind them, so
+ * calling the curveball is a bet rather than a free upgrade. It multiplies the
+ * SAME windows COMMAND and the difficulty assist already multiply — there is no
+ * second grading path, and RELEASE_CONTROL is untouched, so `good` is still
+ * exactly 1.0 and the league your copy of an arm belongs to has not moved.
+ *
+ * ⚠️ THIS ONLY EVER REACHES A HUMAN ON THE MOUND. autoStep() throws at 'good'
+ * directly and never grades a release, so the headless sim and the computer's
+ * half are byte-identical to before. Confirmed against scripts/balance.ts.
+ *
+ * ⚠️ EVERY ROW IS BOUND BY TWO INEQUALITIES, and delivery.test.ts checks all
+ * six rather than the old pair of constants:
+ *
+ *   releaseAtMs + widest_loose <= sweepMs     the sweep outlasts a late press
+ *   ARM_MS      + widest_loose <  releaseAtMs the dead region stays inside wild
+ *
+ * where widest_loose is 130 × 1.15 (painter) × 1.6 (rookie) × scale. Adding a
+ * slower pitch or an easier level fails that test rather than silently clipping
+ * a press the player meant.
+ */
+export interface Delivery {
+  /** Press to empty hand. The forced 'wild' lands here. */
+  sweepMs: number;
+  /** Where in that sweep the ball should go. */
+  releaseAtMs: number;
+  /** Multiplies every release window. Below 1 is a harder pitch to repeat. */
+  scale: number;
+}
+
+export const DELIVERIES: Record<PitchType, Delivery> = {
+  // Quick, early, and the most forgiving of the six. It is the pitch you go
+  // back to when the rhythm is gone, which is what a fastball is for.
+  fastball: { sweepMs: 880, releaseAtMs: 560, scale: 1.1 },
+  // The fastball's cousin, a touch longer through the bottom.
+  sinker: { sweepMs: 900, releaseAtMs: 600, scale: 1.05 },
+  // Middle tempo, and the first one that asks for something.
+  slider: { sweepMs: 950, releaseAtMs: 650, scale: 0.95 },
+  // ⚠️ HELD PAST WHERE THE FASTBALL WENT, which is the whole pitch. Coming to
+  // it straight off a fastball is a 270ms difference in when to let go, and
+  // that mis-press is the changeup's own deception turned on the man throwing it.
+  changeup: { sweepMs: 1150, releaseAtMs: 830, scale: 0.92 },
+  // The long slow wind. Latest release in the game and you have to wait it out.
+  curveball: { sweepMs: 1250, releaseAtMs: 920, scale: 0.9 },
+  // Nobody repeats a knuckleball, including you. Ordinary tempo, narrowest
+  // window — this is the per-PITCH half of what COMMAND.knuckler already says
+  // about the per-ARM half.
+  knuckleball: { sweepMs: 1000, releaseAtMs: 700, scale: 0.8 },
+};
+
+/**
+ * The delivery for a pitch, or the neutral default when nobody said which.
+ *
+ * The fallback is the old pair of constants exactly, so any caller that has not
+ * been told about pitch types keeps the behaviour it was written against.
+ */
+export const deliveryOf = (type?: PitchType): Delivery =>
+  (type && DELIVERIES[type]) || { sweepMs: DELIVERY_MS, releaseAtMs: RELEASE_AT_MS, scale: 1 };
 
 /**
  * BEFORE THIS, THE ARM HAS NOT COME FORWARD AND THERE IS NOTHING TO LET GO OF.
@@ -131,8 +214,13 @@ const positive = (n: number): number => (Number.isFinite(n) && n > 0 ? n : 1);
  * @param command  the arm's COMMAND[signature]; >1 widens every window
  * @param assist   the difficulty level's assist; >1 widens every window
  */
-export const releaseWindowMs = (kind: ReleaseWindow, command = 1, assist = 1): number =>
-  RELEASE_WINDOWS_MS[kind] * positive(command) * positive(assist);
+export const releaseWindowMs = (
+  kind: ReleaseWindow,
+  command = 1,
+  assist = 1,
+  /** The pitch's own difficulty — see DELIVERIES. 1 is the neutral default. */
+  scale = 1,
+): number => RELEASE_WINDOWS_MS[kind] * positive(command) * positive(assist) * positive(scale);
 
 /**
  * Grade a release. Pure, synchronous, no engine underneath it — the same
@@ -140,15 +228,15 @@ export const releaseWindowMs = (kind: ReleaseWindow, command = 1, assist = 1): n
  *
  * @param offsetMs signed milliseconds, negative early / positive late
  */
-export function gradeRelease(offsetMs: number, command = 1, assist = 1): ReleaseGrade {
+export function gradeRelease(offsetMs: number, command = 1, assist = 1, scale = 1): ReleaseGrade {
   // A non-finite offset means the clock, not the pitcher. It cannot be graded
   // as anything, and 'wild' is the only grade that does not reward it.
   if (!Number.isFinite(offsetMs)) return 'wild';
 
   const magnitude = Math.abs(offsetMs);
-  if (magnitude <= releaseWindowMs('perfect', command, assist)) return 'perfect';
-  if (magnitude <= releaseWindowMs('good', command, assist)) return 'good';
-  if (magnitude <= releaseWindowMs('loose', command, assist)) {
+  if (magnitude <= releaseWindowMs('perfect', command, assist, scale)) return 'perfect';
+  if (magnitude <= releaseWindowMs('good', command, assist, scale)) return 'good';
+  if (magnitude <= releaseWindowMs('loose', command, assist, scale)) {
     return offsetMs < 0 ? 'early' : 'late';
   }
   return 'wild';
@@ -199,4 +287,18 @@ export const RELEASE_SHORT: Record<ReleaseGrade, string> = {
   early: 'rushed',
   late: 'dragged',
   wild: 'wild',
+};
+
+/**
+ * WHAT THE TEMPO IS CALLED ON SCREEN, for the pitch buttons and the bar.
+ *
+ * ⚠️ DERIVED FROM THE RELEASE POINT RATHER THAN A SECOND TABLE. A hand-written
+ * word per pitch is a thing that goes quietly wrong the first time somebody
+ * retunes a number above it and does not scroll down — the same failure the
+ * release band had before it was drawn off releaseWindowMs(). Retune a row and
+ * the word follows it.
+ */
+export const tempoWord = (type: PitchType): string => {
+  const r = DELIVERIES[type].releaseAtMs;
+  return r <= 600 ? 'quick' : r <= 700 ? 'even' : r <= 850 ? 'slow' : 'long';
 };

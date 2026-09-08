@@ -13,8 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ARM_MS,
-  DELIVERY_MS,
-  RELEASE_AT_MS,
+  DELIVERIES,
   RELEASE_CONTROL,
   RELEASE_LABEL,
   RELEASE_SHORT,
@@ -125,9 +124,15 @@ describe('the invariants the design rests on', () => {
   it('leaves room for the latest release any arm on any level can still get graded', () => {
     const command = Math.max(...Object.values(COMMAND));
     const assist = Math.max(...LEVELS.map((l) => l.assist));
-    expect(RELEASE_AT_MS + releaseWindowMs('loose', command, assist)).toBeLessThanOrEqual(
-      DELIVERY_MS,
-    );
+    // ⚠️ EVERY PITCH, NOT THE OLD PAIR OF CONSTANTS. Each of the six has its own
+    // sweep and release point now — see DELIVERIES — so the invariant is six
+    // inequalities and a slow new pitch has to clear it too.
+    for (const [type, d] of Object.entries(DELIVERIES)) {
+      expect(
+        d.releaseAtMs + releaseWindowMs('loose', command, assist, d.scale),
+        `${type} sweep is too short for its own latest gradable release`,
+      ).toBeLessThanOrEqual(d.sweepMs);
+    }
   });
 
   /**
@@ -140,11 +145,42 @@ describe('the invariants the design rests on', () => {
   it('swallows only presses that could not have graded as anything but wild', () => {
     const command = Math.max(...Object.values(COMMAND));
     const assist = Math.max(...LEVELS.map((l) => l.assist));
-    const earliestGradable = RELEASE_AT_MS - releaseWindowMs('loose', command, assist);
-    expect(ARM_MS).toBeLessThan(earliestGradable);
-    // Said the other way, off the function itself: a press at the very end of
-    // the dead region is wild for every arm on every level.
-    expect(gradeRelease(ARM_MS - RELEASE_AT_MS, command, assist)).toBe('wild');
+    for (const [type, d] of Object.entries(DELIVERIES)) {
+      const earliestGradable = d.releaseAtMs - releaseWindowMs('loose', command, assist, d.scale);
+      expect(ARM_MS, `${type} lets the dead region eat a gradable press`).toBeLessThan(
+        earliestGradable,
+      );
+      // Said the other way, off the function itself: a press at the very end of
+      // the dead region is wild for every arm on every level.
+      expect(gradeRelease(ARM_MS - d.releaseAtMs, command, assist, d.scale)).toBe('wild');
+    }
+  });
+
+  /**
+   * ⚠️ THE POINT OF THE WHOLE TABLE. If two pitches ask for the same press at
+   * the same moment they are the same pitch to throw, and the repetition this
+   * was built to fix is back. Release points have to be genuinely apart.
+   */
+  it('gives the six pitches genuinely different deliveries', () => {
+    const releases = Object.values(DELIVERIES).map((d) => d.releaseAtMs);
+    expect(new Set(releases).size).toBe(releases.length);
+    // The fastball and the changeup are the pair the deception rests on, and
+    // the gap between them has to be big enough to actually mis-time.
+    expect(DELIVERIES.changeup.releaseAtMs - DELIVERIES.fastball.releaseAtMs).toBeGreaterThan(200);
+    // Nobody is quicker than the fastball or slower than the curveball.
+    expect(Math.min(...releases)).toBe(DELIVERIES.fastball.releaseAtMs);
+    expect(Math.max(...releases)).toBe(DELIVERIES.curveball.releaseAtMs);
+  });
+
+  it('never widens a window past the default — a pitch is a cost, not a buff', () => {
+    // ⚠️ ONLY THE FASTBALL AND THE SINKER ARE ALLOWED ABOVE 1, and only just.
+    // A scale well over 1 would make calling one pitch a free accuracy upgrade
+    // rather than a rhythm you have to hold.
+    for (const [type, d] of Object.entries(DELIVERIES)) {
+      expect(d.scale, `${type} scale`).toBeGreaterThan(0.5);
+      expect(d.scale, `${type} scale`).toBeLessThanOrEqual(1.1);
+    }
+    expect(DELIVERIES.knuckleball.scale).toBeLessThan(DELIVERIES.fastball.scale);
   });
 
   it('has a price and both labels for every grade', () => {
