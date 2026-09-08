@@ -23,6 +23,7 @@
  * pleasant way to unit-test `gh release create`.
  */
 import { readFileSync, existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const dry = process.argv.includes('--dry-run');
@@ -43,7 +44,11 @@ const die = (msg) => {
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 const tag = `v${version}`;
-const file = `dist/baseball-engine-${tag}.html`;
+// The name bundle.mjs writes for the `game` page (NAMES.game there). The game
+// was renamed to Basedball and this string was not, so every release since
+// pointed at a file the build does not produce. If it drifts again the
+// missing-file check below stops the release rather than shipping nothing.
+const file = `dist/basedball-${tag}.html`;
 
 // ---- the build has to exist, and `npm run release` is what puts it there.
 // Checked anyway: running this file directly is the obvious way to skip it,
@@ -81,7 +86,7 @@ const steps = [
     '--generate-notes',
     // The one line the notes must not lose. Generated notes are appended
     // under it, so the commit log still tells the story.
-    '--notes', `**Download \`baseball-engine-${tag}.html\` below and double-click it.** ` +
+    '--notes', `**Download \`${basename(file)}\` below and double-click it.** ` +
       `That is the whole install — one file, no Node, no clone, no network. Works off a USB stick.\n`,
   ]],
 ];

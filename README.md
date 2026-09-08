@@ -13,7 +13,15 @@ and direction. Design notes live outside this repo.
 
 ## Status
 
-Rebuild in progress. Playable end to end: a full nine-encounter run in the browser, or a single encounter in the terminal.
+**Both are playable end to end, and the baseball game is where the work is.**
+
+- **Basedball** — nine innings against the computer, both halves; a franchise
+  season of a length you set, with a bracket and a champion at the end of it;
+  thirty clubs in thirty ballparks, 26 men to a club, and an editor that lets
+  you rewrite any of it without touching the repo. Shipped as one html file:
+  [the latest release](https://github.com/zaistudios/baseball-engine/releases/latest).
+- **The roguelike** — a full nine-encounter run in the browser, or a single
+  encounter in the terminal. Still builds, still passes, not being extended.
 
 ```
 src/core/
@@ -47,6 +55,36 @@ src/cli/
 
 **A whole nine-inning game, both halves played, you against the computer.** No
 roguelike: no run, no shop, no money, no divisions. The engine foundation.
+
+```
+src/game/
+  main.ts        the playable screen — you hit the bottom half, you pitch the top
+  game.ts        a whole nine-inning game: two teams, both halves, real innings
+  sim.ts         the same at-bat with no human in it — the computer's half
+  ai.ts          the computer manager: what it throws you, and how it hits you
+  teams.ts       ⚠️ EDIT HERE FIRST — thirty clubs, nine hitters and six arms each
+  depth.ts       eighteen written men become a 26-man club
+  depthNames.ts  the 240 names the depth is not allowed to generate
+  identity.ts    HOW a club plays, as against what it is worth (the Tecmo layer)
+  value.ts       one number for a player, one for a club, and its rank of thirty
+  rotation.ts    who starts tonight, and what his last start cost him
+  bullpen.ts     an arm gets tired, and somebody has to come get him
+  defense.ts     nine men standing somewhere, and the ball reaching one of them
+  placement.ts   where the ball actually went, and what the geometry is worth
+  running.ts     the running game — steals, and taking the extra base
+  form.ts        hot and cold: what a man is doing THIS week
+  streak.ts      the barrel streak — the arcade score hung on squaring one up
+  stats.ts       the box score, folded out of the at-bats as they happen
+  franchise.ts   one season: a schedule, a bracket, a champion
+  moments.ts     the season stops and asks you something it earned the right to
+  career.ts      the shelf — every finished season on this machine
+  rules.ts       what your league decided before it played a game
+  league.ts      export the thirty clubs as JSON, edit them, paste them back
+  editor.ts      the club editor, minus the screen
+  scene.ts       what the replay is ABOUT, in two lines and a length
+  difficulty.ts  how hard the swing is, and how honest the clock is
+  tuning.ts      the knobs somebody will actually want to turn
+```
 
 ```bash
 npm run game    # play it — opens /game.html
@@ -959,12 +997,11 @@ npm run dev     # then open http://localhost:5173
 npm run demo    # check + build + fold it all into ONE html file
 ```
 
-`npm run demo` writes `dist/basedball-roguelike-v<version>.html` (the roguelike) — the version
-comes from package.json, so it is `v1.1.0` today — the entire game
-in a single file with nothing external in it. Double-click it to play offline,
-drag it into itch.io, or drop it on any static host. It also writes
-`dist/artifact.html`, the same game with the document shell stripped for
-posting as a Claude Artifact.
+`npm run demo` writes `dist/basedball-roguelike-v<version>.html` (the roguelike),
+the version taken from package.json — the entire game in a single file with
+nothing external in it. Double-click it to play offline, drag it into itch.io,
+or drop it on any static host. It also writes `dist/artifact-index.html`, the
+same game with the document shell stripped for posting as a Claude Artifact.
 
 Baseball has been robotized. A full run is **nine encounters** climbing three
 divisions — **The Holdouts** (the last human league), **The Splice**
