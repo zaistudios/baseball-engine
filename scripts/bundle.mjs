@@ -19,8 +19,8 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 /**
  * WHICH PAGE WAS BUILT. 'index' is the roguelike, 'game' is the baseball game.
  *
- * Passed as argv rather than inferred, because both land in dist/ and guessing
- * wrong would ship a confident, working, entirely different game.
+ * Passed as argv rather than inferred, because guessing wrong would ship a
+ * confident, working, entirely different game.
  */
 const page = process.argv[2] ?? 'index';
 const NAMES = { index: 'basedball-roguelike', game: 'basedball' };
@@ -29,9 +29,16 @@ if (!NAMES[page]) {
   throw new Error(`unknown page ${page}`);
 }
 
-const html = readFileSync(`dist/${page}.html`, "utf8");
+/**
+ * Where vite put THIS page's build. Each page has its own directory because
+ * vite empties its outDir every build — see the note in vite.config.ts. The
+ * deliverables below still go up in `dist/`, which nothing empties.
+ */
+const build = `dist/build-${page}`;
 
-const assets = readdirSync('dist/assets');
+const html = readFileSync(`${build}/${page}.html`, "utf8");
+
+const assets = readdirSync(`${build}/assets`);
 if (assets.length !== 1) {
   // Almost always means an image escaped inlining. vite.config.ts forces
   // assetsInlineLimit so every PNG under assets/ becomes a data: URI inside
@@ -42,7 +49,7 @@ if (assets.length !== 1) {
       `If any of those are images, check build.assetsInlineLimit in vite.config.ts.`,
   );
 }
-const js = readFileSync(`dist/assets/${assets[0]}`, 'utf8');
+const js = readFileSync(`${build}/assets/${assets[0]}`, 'utf8');
 
 // A literal </script> in the bundle would close the tag early and the page
 // would render the rest of the game as text. Nothing in this codebase writes

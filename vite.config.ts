@@ -21,6 +21,22 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   build: {
+    /**
+     * ⚠️ EACH PAGE BUILDS INTO ITS OWN DIRECTORY, and that is not tidiness.
+     *
+     * Both pages used to build straight into `dist/`, and vite empties its
+     * outDir on every build — so `npm run demo` (the roguelike) and
+     * `npm run export` (the game) each deleted the other's output. Whichever
+     * you ran last was the only one you had, and `dist/` never said which.
+     *
+     * The intermediates go here; bundle.mjs reads them from here and writes
+     * the DELIVERABLES — the versioned one-file builds and the artifact
+     * fragments — up in `dist/`, where their names already differ and nothing
+     * empties anything. Run both in either order and both survive.
+     *
+     * vite.game.config.ts overrides this to dist/build-game.
+     */
+    outDir: 'dist/build-index',
     modulePreload: false,
     /**
      * EVERY ASSET IS INLINED AS A data: URI, whatever its size.

@@ -141,8 +141,11 @@ uncommitted code can never be rebuilt from its own tag — and refuses a version
 that already shipped. `node scripts/release.mjs --dry-run` shows what it would
 do without doing any of it.
 
-⚠️ `npm run demo` (the roguelike) and `npm run export` (this game) both clear
-`dist/`, so each wipes the other's output. Run whichever one you want last.
+`npm run demo` (the roguelike) and `npm run export` (this game) used to both
+clear `dist/`, so each silently wiped the other's output and `dist/` never said
+which one you had. Each page now builds into its own `dist/build-<page>/` and
+only the finished files land in `dist/`, where their names already differ.
+**Run them in either order; both survive.**
 
 The game opens on a **start screen** with two modes:
 

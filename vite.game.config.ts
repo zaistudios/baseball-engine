@@ -20,6 +20,9 @@ export default mergeConfig(
   base,
   defineConfig({
     build: {
+      // Its own directory, so building this page does not empty the other
+      // one's. See the note on `outDir` in vite.config.ts.
+      outDir: 'dist/build-game',
       rollupOptions: { input: 'game.html' },
     },
   }),
