@@ -50,6 +50,7 @@ import { fatigue, shouldRelieve } from './bullpen.ts';
 import { fieldBall, reachOf } from './defense.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement } from './placement.ts';
+import { pickShift } from './shift.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { newGame } from './game.ts';
 import { knob } from './identity.ts';
@@ -204,7 +205,21 @@ export function playAiAtBat(
   // Where it landed decides whether it is a hit at all, and what it is worth.
   // See placement.ts — the contest needs the glove of whoever it was hit at.
   const align = fieldingAlignment(g);
-  const result = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park }).result;
+  // WHAT THE DEFENCE CALLED. ⚠️ THE COMPUTER IS ON BOTH SIDES OF THIS ONE.
+  // playAiAtBat is the HEADLESS path — main.ts resolves both of its own halves
+  // in finishAtBat() — so the men in the field here are never the human's, and
+  // reading GameState.shift would apply his call to games he is not in.
+  //
+  // It matters that this shifts at all: a franchise plays fourteen other games
+  // a night through here and one on screen, and standings mix the two. A shift
+  // that only existed in the game being watched would put the player's club on
+  // a different run environment from everybody else's.
+  const shift = pickShift(batter, {
+    outs: g.outs,
+    runnerOnThird: g.bases[2] !== null,
+    late: g.inning >= 7,
+  });
+  const result = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift }).result;
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =
@@ -222,7 +237,7 @@ export function playAiAtBat(
   let charged = g;
   for (let i = 0; i < pitches; i++) charged = countPitch(charged);
 
-  const played = recordPlay(charged, result, fielding);
+  const played = recordPlay(charged, result, fielding, shift);
   return {
     ...played,
     atBat: {

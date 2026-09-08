@@ -379,11 +379,15 @@ export interface Fielder {
  * Where the nine stand, in standard depth. Feet and degrees from home, same
  * polar frame as everything else here.
  *
- * ponytail: ONE alignment. No shifts, no playing in with a man on third, no
- * pulling the corners for a bunt, no outfield depth by hitter. A batter-only
- * game can read "somebody was standing there" and nothing finer, and every
- * one of those variations is a decision the defence would be making — which
- * is the thing this whole subsystem is not allowed to do.
+ * ⚠️ THIS IS STANDARD DEPTH, NOT THE ONLY ALIGNMENT ANY MORE. It was "ONE
+ * alignment, no shifts, no playing in with a man on third" until 2026-09-08,
+ * on the reasoning that a shift is a decision the defence would be making and
+ * the roguelike's defence makes none. That is still true HERE — this table and
+ * this file are unchanged, and the roguelike still plays everyone straight up.
+ *
+ * The full game does make that decision: game/shift.ts builds moved tables out
+ * of this one and hands them to nearestFielder() below. Standard depth stays
+ * the default at every seam, so nothing that does not ask for a shift gets one.
  */
 export const FIELDERS: readonly Fielder[] = [
   { num: 1, distFt: 60, dirDeg: 0 }, // pitcher
@@ -407,11 +411,20 @@ export const FIELDERS: readonly Fielder[] = [
  * dot that moves. This picks WHO chases. It does not decide whether he gets
  * there; see the scope note at the top of this file.
  */
-export function nearestFielder(distFt: number, dirDeg: number): Fielder {
+export function nearestFielder(
+  distFt: number,
+  dirDeg: number,
+  /**
+   * Where the nine are actually standing. Defaults to standard depth, so the
+   * roguelike and every existing test keep the one alignment they were written
+   * against; game/shift.ts hands in a moved table. See its header.
+   */
+  fielders: readonly Fielder[] = FIELDERS,
+): Fielder {
   const ball = feetXY(distFt, dirDeg);
-  let best = FIELDERS[0]!;
+  let best = fielders[0]!;
   let bestD = Infinity;
-  for (const f of FIELDERS) {
+  for (const f of fielders) {
     const p = feetXY(f.distFt, f.dirDeg);
     const d = (p.x - ball.x) ** 2 + (p.y - ball.y) ** 2;
     if (d < bestD) {

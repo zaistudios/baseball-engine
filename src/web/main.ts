@@ -68,7 +68,7 @@ import {
 import { drawSprite, SPRITE_SPECS, assetCount, hasAsset, slug } from './sprites.ts';
 import { callPlay } from './scorecard.ts';
 import { saveRun, loadRun, clearRun } from './save.ts';
-import { plotBatted } from './plot.ts';
+import { plotBatted, FIELDERS } from './plot.ts';
 import {
   makeCam,
   basePoint,
@@ -269,6 +269,8 @@ if (import.meta.env.DEV) {
   ) => {
     replay = {
       startedAt: gameNow(),
+      // The roguelike has no defensive manager and never shifts. See plot.ts.
+      fielders: FIELDERS,
       plot: plotBatted(outcome, exitVelocity, launchAngle),
       direction,
       outcome,
@@ -781,6 +783,7 @@ function finishPitch(pitch: ThrownPitch, text: string): void {
       const h = result.hit;
       replay = {
         startedAt: gameNow(),
+        fielders: FIELDERS,
         plot: plotBatted(h.outcome, h.exitVelocity, h.launchAngle),
         direction: h.direction,
         outcome: h.outcome,

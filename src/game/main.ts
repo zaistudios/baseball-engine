@@ -183,6 +183,7 @@ import {
   type Group,
 } from './editor.ts';
 import { fieldBall, reachOf } from './defense.ts';
+import { SHIFTS, SHIFT_WORDS, SHIFT_BLURB, SHIFT_ON, fieldersFor, pickShift, pullScore, type Shift } from './shift.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
@@ -546,6 +547,27 @@ const batTravel = (): number =>
 
 
 const youBat = (): boolean => battingSide(game) === YOU;
+
+/**
+ * WHAT THE DEFENCE IS IN, RIGHT NOW.
+ *
+ * ⚠️ DERIVED, NOT STORED, and that is the whole reason it cannot go stale. An
+ * at-bat ends in several places in this file and a `let currentShift` would
+ * have to be reset in every one of them — which is exactly the bug the moment
+ * card and the bunt flag have each shipped once already. This is a pure
+ * function of the game state, so there is nothing to reset.
+ *
+ * When YOU are hitting, the computer picks its alignment off the man in the
+ * box. When you are in the field it is whatever you called — see GameState.shift.
+ */
+const shiftNow = (): Shift =>
+  youBat()
+    ? pickShift(currentBatter(game), {
+        outs: game.outs,
+        runnerOnThird: game.bases[2] !== null,
+        late: game.inning >= 7,
+      })
+    : game.shift ?? 'straight';
 
 /**
  * WHICH RELIEVER IS COMING IN, an index into what is left in the pen.
@@ -942,6 +964,20 @@ function resolvePitch(): void {
  * Go to your bullpen. Only legal between batters, same as the real rule, and
  * enforced by only ever being reachable from the 'calling' phase.
  */
+/**
+ * Move the defence. Only meaningful while YOU are the one in the field, which
+ * is the only phase the key and the panel are live in.
+ *
+ * ⚠️ IT IS A GAME-STATE CHANGE, not a UI toggle, because sim.ts reads it when
+ * it plays out the computer's half — see GameState.shift. Setting it on a
+ * local would move the dots and change nothing about the baseball.
+ */
+function cycleShift(step = 1): void {
+  const at = SHIFTS.indexOf(game.shift ?? 'straight');
+  game = { ...game, shift: SHIFTS[(at + step + SHIFTS.length) % SHIFTS.length]! };
+  render();
+}
+
 function relieve(): void {
   if (phase !== 'calling' || youBat()) return;
   const staff = fieldingStaff(game);
@@ -1298,6 +1334,7 @@ function showFoul(runnerSpeed: number): boolean {
     launchAngle: swing.launchAngle,
     direction: swing.direction,
     speed: runnerSpeed,
+    fielders: fieldersFor(shiftNow()),
     safe: false,
     chaserNum: place(swing, game.home.park).fielderNum,
     // The fence this one went toward, so the drawn ball and the sentence
@@ -1312,7 +1349,12 @@ function finishAtBat(): void {
   // Where it landed decides whether it is a hit at all, what it is worth, AND
   // what the scorer says. The contest needs the glove of whoever it was hit at.
   const align = fieldingAlignment(game);
-  const placed = withPlacement(atBat.result!, { reachAt: reachOf(align), park: game.home.park });
+  const shift = shiftNow();
+  const placed = withPlacement(atBat.result!, {
+    reachAt: reachOf(align),
+    park: game.home.park,
+    shift,
+  });
   const result = placed.result;
   const batter = currentBatter(game);
 
@@ -1333,7 +1375,7 @@ function finishAtBat(): void {
   // before the play and nothing else, and leverage needs the inning, the outs
   // and both scores as they stood when this man walked up.
   const spotHeWalkedInto = situationOf(game, wasBatting);
-  const { game: next, log } = recordPlay(game, result, fielding);
+  const { game: next, log } = recordPlay(game, result, fielding, shift);
   game = next;
 
   // WHAT THE BROADCAST MAKES OF IT. Built from the state BEFORE the play —
@@ -1370,6 +1412,10 @@ function finishAtBat(): void {
           launchAngle: result.hit.launchAngle,
           direction: result.hit.direction,
           speed: batter.speed,
+          // ⚠️ THE SAME ALIGNMENT withPlacement() JUST USED, not a fresh lookup.
+          // The shift that decided whether this was a hit is the one that has
+          // to be under it — see the note on Replay.fielders.
+          fielders: fieldersFor(shift),
           safe: result.hit.isHit || !!fielding?.error,
           // The same fence place() just used — see newReplay's note on wallFt.
           wallFt: wallAt(result.hit.direction, game.home.park),
@@ -1795,6 +1841,7 @@ function press(key: string): void {
     return;
   }
   if (key === 'b') { relieve(); return; }
+  if (key === 'v') { cycleShift(); return; }
   // Move the selection inside the pen. Two keys nothing else uses, next to
   // each other, and only meaningful while you are the one on the mound.
   if (key === ',') { cyclePen(-1); return; }
@@ -3027,6 +3074,31 @@ function renderControls(): void {
   const penPanel =
     `<div class="pen"><div class="dim penhead">BULLPEN</div>${penRows}${penBtn}</div>`;
 
+  // ---- THE DEFENCE. The other decision you make from the mound, and the one
+  // you make every hitter rather than once a night.
+  //
+  // ⚠️ IT NAMES THE MAN AND WHY. A shift with no hitter on it is a setting; a
+  // shift that says "Brennan pulls" is a read. pullScore() is the same number
+  // the computer shifts on, so the panel is showing you its actual reasoning.
+  const up = currentBatter(game);
+  const pull = Math.round(pullScore(up) * 100);
+  const called = game.shift ?? 'straight';
+  const shiftBtns = SHIFTS.map(
+    (sh) =>
+      `<button data-shift="${sh}"${ready} class="${sh === called ? 'on' : ''}">` +
+      `${SHIFT_WORDS[sh]}</button>`,
+  ).join('');
+  const advice =
+    pull >= SHIFT_ON * 100
+      ? `<b>${up.name}</b> pulls — ${up.bats === 'L' ? 'shift right' : 'shift left'}`
+      : `<b>${up.name}</b> sprays it — play him honest`;
+  const defPanel =
+    `<div class="pen"><div class="dim penhead">DEFENCE <kbd>V</kbd></div>` +
+    `<div class="keys">${shiftBtns}</div>` +
+    `<div class="dim" style="font-size:10px;margin-top:6px">${SHIFT_BLURB[called]}</div>` +
+    `<div class="dim" style="font-size:10px;margin-top:2px">${advice} <span class="dim">(pull ${pull})</span></div>` +
+    `</div>`;
+
   elControls.innerHTML =
     `<div style="margin-bottom:6px" class="dim">pitch</div><div class="keys">${pitches}</div>` +
     `<div style="margin:8px 0 6px" class="dim">spot</div><div class="zone">${spots}</div>` +
@@ -3041,6 +3113,7 @@ function renderControls(): void {
           : '…') +
     '</button>' +
     chartPanel() +
+    defPanel +
     penPanel;
 
   elControls.querySelectorAll<HTMLButtonElement>('[data-pitch]').forEach((btn) => {
@@ -3052,6 +3125,12 @@ function renderControls(): void {
   elControls.querySelectorAll<HTMLElement>('[data-arm]').forEach((row) => {
     row.onclick = () => {
       penPick = Number(row.dataset['arm']);
+      render();
+    };
+  });
+  elControls.querySelectorAll<HTMLButtonElement>('[data-shift]').forEach((btn) => {
+    btn.onclick = () => {
+      game = { ...game, shift: btn.dataset['shift'] as Shift };
       render();
     };
   });

@@ -979,11 +979,46 @@ as the league's. `balance.ts` above has no such problem.
 
 ### What is deliberately not in it yet
 
-A productive ground out and defensive shifts. **Pinch hitting and the box score
-were on this list and are not any more** — the bench is real (`pinchHit()` in
-`game.ts`, `manageBench()` in `sim.ts`, and the computer goes to its bench
-between hitters the same way it goes to its pen) and the final screen reads a
-full box score straight off the `GameState`.
+**Pinch hitting, the box score, the productive ground out and the shift were
+all on this list and none of them are any more** — the ground out landed 2026-08-25
+(`groundOut()` in `inning.ts`: forced men always go, everyone else rolls the
+two send rates), the bench is real (`pinchHit()` in `game.ts`, `manageBench()`
+in `sim.ts`, and the computer goes to its bench between hitters the same way it
+goes to its pen), and the final screen reads a full box score straight off the
+`GameState`.
+
+### The defence moves — and it is a lean, not a stack
+
+`describePlay()` had been promising this for weeks: the scorer's sentence exists
+so the player learns "that pulling everything into the shift is why they keep
+making outs", and until 2026-09-08 there was no shift to pull into. `FIELDERS`
+in `web/plot.ts` was one fixed table and all thirty clubs played every hitter
+straight up.
+
+Four alignments — **STRAIGHT UP, SHIFT LEFT, SHIFT RIGHT, INFIELD IN**. The
+computer calls its own off the man in the box (`pickShift()`); you call yours
+from the DEFENCE panel next to the bullpen, or with <kbd>V</kbd>, and the panel
+names the hitter and says why. **The nine dots move in the overhead replay**, so
+a shift is something you watch happen rather than a number in a file.
+
+Almost none of it is new code. The geometry already read the fielder table three
+times — who chases it, how much room the hitter found, and where the dots are
+drawn — so a shift is a different table threaded to those three callers and
+nowhere else. `shift.ts` decides no outs.
+
+⚠️ **The tables are measured, and the first two versions were backwards.** A
+shift is supposed to cost the hitter; the stacked version — three infielders on
+one side of second, the picture the word suggests — measured at **4.65 runs per
+team against a 4.41 baseline**, because the side it vacated was worth more than
+the side it covered. Infield-only got it to 4.53. What shipped is a *lean* of at
+most ~15° a man, and it measures **4.45, neutral within noise**. The rule those
+runs produced, written on the file: the hole you open must be smaller than the
+hole you close. Re-run `npm run sim` after touching any number in `MOVES`.
+
+*Still unmeasured: whether it punishes pull hitters **specifically**. Neutral in
+aggregate is consistent both with "it works and the opposite-field hitters take
+the runs back" and with "it does nothing to anybody" — splitting batted-ball
+outcomes by `pullScore` would settle it, and no script does that yet.*
 
 Still nothing in the door for a **second year**: no draft, no free agency, no
 ageing, no development. `career.ts` is the shelf you put a finished season on,

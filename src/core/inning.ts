@@ -472,6 +472,16 @@ export const GROUND_SEND_UP = 0.35;
 function groundOut(
   bases: Bases,
   rolls?: readonly [number, number, number],
+  /**
+   * THE INFIELD IS IN. The four of them are playing shallow enough to throw
+   * home, so the man on third does not go on a ball he would otherwise gamble
+   * on — that is the entire point of the alignment, and the price is paid in
+   * the holes it opens, which placement.ts charges separately.
+   *
+   * ⚠️ IT DOES NOT STOP A FORCED RUNNER. With the bases loaded he has nowhere
+   * to go back to and the play is at the plate anyway.
+   */
+  infieldIn = false,
 ): { bases: Bases; runs: number } {
   const next: [Runner | null, Runner | null, Runner | null] = [null, null, null];
   let runs = 0;
@@ -488,9 +498,11 @@ function groundOut(
     const clear = to >= 4 || to < ceiling;
     // Nobody rolled a die: forced runners still have to go, and nobody else
     // does. That is the old frozen behaviour for every caller passing CLEAN.
+    const held = infieldIn && to >= 4;
     const sends =
       forced ||
-      (!!rolls &&
+      (!held &&
+        !!rolls &&
         rolls[from]! < odds(who.speed, to >= 4 ? GROUND_SEND_HOME : GROUND_SEND_UP));
 
     if (!clear || !sends) {
@@ -535,7 +547,11 @@ function groundOut(
  *
  * All three read the same `speed` stat that stealing already read, which is
  * the point — legs now matter on a ball you hit, not only on a ball you steal.
- * The productive ground out is still absent and is the obvious next one.
+ *
+ * ✅ The productive ground out — "still absent and the obvious next one" here
+ * for nine days — landed 2026-08-25. See groundOut() above: forced men always
+ * go, everyone else rolls GROUND_SEND_HOME / GROUND_SEND_UP. It is a fourth
+ * +runs lever and it belongs in the list to be judged with the other three.
  *
  * If scoring comes out too high, cut in this order: EXTRA_BASE_SPEED up first
  * (it is the broadest of the three), then SAC_FLY_MIN_EV up. Do not touch
@@ -546,10 +562,11 @@ export function recordAtBat(
   result: AtBatResult,
   batter: Runner = ANON,
   fielding: FieldingResult = CLEAN,
+  defense: { infieldIn?: boolean } = {},
 ): MatchState {
   if (state.over) throw new Error('match already over');
 
-  const play = applyAtBat(state, result, batter, fielding);
+  const play = applyAtBat(state, result, batter, fielding, defense);
   const outs = play.outs;
   const bases = play.bases;
   const runs = state.runs + play.runs;
@@ -607,6 +624,11 @@ export function applyAtBat(
   result: AtBatResult,
   batter: Runner = ANON,
   fielding: FieldingResult = CLEAN,
+  /**
+   * WHAT THE DEFENCE CALLED, for the one alignment that changes a rule rather
+   * than only the geometry. Omitted plays it straight — see groundOut().
+   */
+  defense: { infieldIn?: boolean } = {},
 ): PlayResult {
   let { outs, bases } = state;
   let runs = 0;
@@ -664,7 +686,7 @@ export function applyAtBat(
             // chances — see groundOut(). Gated on outs < 2 because the batter
             // being thrown out at first for the third out scores nobody,
             // however far down the line the runner from third got.
-            const g = groundOut(bases, fielding.advanceRolls);
+            const g = groundOut(bases, fielding.advanceRolls, defense.infieldIn);
             bases = g.bases;
             runs += g.runs;
           }

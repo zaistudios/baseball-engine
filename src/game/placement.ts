@@ -34,7 +34,8 @@
 import type { HitResult } from '../core/hit.ts';
 import { isHit, isOut, type Outcome } from '../core/hitTables.ts';
 import type { AtBatResult } from '../core/atBat.ts';
-import { plotBatted, nearestFielder, FIELDERS } from '../web/plot.ts';
+import { plotBatted, nearestFielder, FIELDERS, type Fielder } from '../web/plot.ts';
+import { fieldersFor, type Shift } from './shift.ts';
 import { wallAt, type Park } from './teams.ts';
 
 /** Where on the field it finished, in words. */
@@ -161,8 +162,13 @@ const feetXY = (distFt: number, dirDeg: number) => {
 };
 
 /** Straight-line feet between two polar points. */
-function gapTo(distFt: number, dirDeg: number, num: number): number {
-  const f = FIELDERS.find((x) => x.num === num);
+function gapTo(
+  distFt: number,
+  dirDeg: number,
+  num: number,
+  fielders: readonly Fielder[] = FIELDERS,
+): number {
+  const f = fielders.find((x) => x.num === num);
   if (!f) return 0;
   const a = feetXY(distFt, dirDeg);
   const b = feetXY(f.distFt, f.dirDeg);
@@ -243,7 +249,17 @@ const foulCatcher = (dirDeg: number): number => {
  * would be under it. `inTheGap` is false by construction, which also keeps
  * stretch() from ever looking at one.
  */
-export function place(hit: HitResult, park?: Park): Placement {
+export function place(
+  hit: HitResult,
+  park?: Park,
+  /**
+   * WHERE THE DEFENCE IS STANDING. Omitted is standard depth, which is what
+   * every caller wanted before shifts existed. game/shift.ts builds the moved
+   * tables; a shifted man changes both who chases the ball and how much room
+   * the hitter found, and contest() turns the second one into an out.
+   */
+  fielders: readonly Fielder[] = FIELDERS,
+): Placement {
   /**
    * ⚠️ THE PARK IS RESOLVED TO ONE NUMBER HERE, and this is the only place it
    * happens. plot.ts is the roguelike's leaf and must not import game code, so
@@ -266,8 +282,8 @@ export function place(hit: HitResult, park?: Park): Placement {
     };
   }
 
-  const f = nearestFielder(plot.distFt, dirDeg);
-  const gapFt = gapTo(plot.distFt, dirDeg, f.num);
+  const f = nearestFielder(plot.distFt, dirDeg, fielders);
+  const gapFt = gapTo(plot.distFt, dirDeg, f.num, fielders);
 
   return {
     distFt: plot.distFt,
@@ -456,6 +472,11 @@ export function withPlacement(
      * club's park; see atPark() in teams.ts.
      */
     park?: Park;
+    /**
+     * WHAT THE DEFENCE CALLED. Omitted plays everyone straight up, which is
+     * every caller written before 2026-09-08. See game/shift.ts.
+     */
+    shift?: Shift;
   } = {},
 ): {
   result: AtBatResult;
@@ -468,7 +489,7 @@ export function withPlacement(
     return { result, placement: null, text, verdict: null };
   }
 
-  const p = place(result.hit, opts.park);
+  const p = place(result.hit, opts.park, fieldersFor(opts.shift ?? 'straight'));
   // A foul is not a play and has nobody standing where it landed — place()
   // zeroes its gap by construction, which would read as "robbed" every time.
   const live = p.zone !== 'foul-ground';

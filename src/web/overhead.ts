@@ -87,6 +87,16 @@ const FOUL_DEG = 45;
 
 export interface Replay {
   startedAt: number;
+  /**
+   * WHERE THE NINE WERE STANDING when this ball was hit.
+   *
+   * ⚠️ IT IS ON THE REPLAY RATHER THAN READ FROM THE MODULE, for the same
+   * reason `wallFt` is: the picture has to agree with the play-by-play. The
+   * shift that decided whether this was a hit is the shift that has to be drawn
+   * under it, and a replay that looked up the current alignment would draw the
+   * NEXT hitter's defence over the last hitter's result.
+   */
+  fielders: readonly Fielder[];
   plot: Plot;
   direction: number;
   outcome: Outcome;
@@ -162,6 +172,8 @@ export function newReplay(o: {
   error?: boolean;
   moves?: RunnerMove[];
   held?: number[];
+  /** Where the defence was standing. Omitted is standard depth. */
+  fielders?: readonly Fielder[];
   thrownOut?: { at: number; speed: number };
   chaserNum?: number;
   /**
@@ -181,6 +193,7 @@ export function newReplay(o: {
 }): Replay {
   return {
     startedAt: o.now,
+    fielders: o.fielders ?? FIELDERS,
     // Direction matters to the plot for fouls only, and it must be the same
     // call placement.ts makes or the ball is drawn somewhere the play-by-play
     // did not put it.
@@ -264,7 +277,7 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
   // which; `chaserNum` carries that answer over rather than working it out a
   // second way and disagreeing.
   const chaser =
-    (r.chaserNum !== undefined ? FIELDERS.find((f) => f.num === r.chaserNum) : undefined) ??
+    (r.chaserNum !== undefined ? r.fielders.find((f) => f.num === r.chaserNum) : undefined) ??
     nearestFielder(r.plot.distFt, r.direction);
   const fieldedAt = REPLAY_CUT_MS + r.plot.hangMs;
   return {
@@ -605,7 +618,7 @@ export function drawOverhead(
     return 1 - (1 - Math.max(0, Math.min(1, (tc - REACTION_MS) / span))) ** 2;
   };
 
-  for (const f of FIELDERS) {
+  for (const f of r.fielders) {
     const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
     const role = roleFor(f, chaser, r.doublePlay);
     let to = post;

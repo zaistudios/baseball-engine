@@ -39,6 +39,7 @@ import {
   type Staff,
 } from './bullpen.ts';
 import { assignPositions, type Alignment } from './defense.ts';
+import type { Shift } from './shift.ts';
 import { EMPTY_BOOK, recordAtBat, recordDecision, recordFieldingOut, type StatBook } from './stats.ts';
 
 export type Half = 'top' | 'bottom';
@@ -98,6 +99,18 @@ export interface GameState {
    * decides who the two names are.
    */
   record?: { win: string; lose: string };
+  /**
+   * THE SHIFT THE HUMAN HAS CALLED, for the half-innings he is in the field.
+   *
+   * ⚠️ ONE FIELD RATHER THAN ONE PER SIDE, because only one side of a Basedball
+   * game is ever a person: when the computer is in the field it picks its own
+   * alignment per hitter (pickShift() in shift.ts) and never reads this. It is
+   * a setting the player holds between at-bats, not per-batter state, which is
+   * why it lives on the game rather than being recomputed.
+   *
+   * Absent is straight up, so every existing game, test and sim is unmoved.
+   */
+  shift?: Shift;
 }
 
 const newTeamState = (t: Team, pick?: StarterPick): TeamState => {
@@ -381,6 +394,12 @@ export function recordPlay(
   g: GameState,
   result: AtBatResult,
   fielding: FieldingResult = CLEAN,
+  /**
+   * The alignment the DEFENCE was in. Only the infield-in case reaches the
+   * rules — it holds the man on third — and the rest is geometry that
+   * withPlacement() already applied before this was called.
+   */
+  shift: Shift = 'straight',
 ): { game: GameState; log: PlayLog } {
   if (g.over) throw new Error('game already over');
 
@@ -388,7 +407,9 @@ export function recordPlay(
   const batter = currentBatter(g);
   const before = g.bases;
 
-  const play = applyAtBat({ outs: g.outs, bases: g.bases }, result, asRunner(batter), fielding);
+  const play = applyAtBat({ outs: g.outs, bases: g.bases }, result, asRunner(batter), fielding, {
+    infieldIn: shift === 'in',
+  });
   const thrownOut = play.thrownOut ?? null;
 
   const team = stateOf(g, side);
