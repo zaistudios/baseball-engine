@@ -5,6 +5,9 @@ import {
   CLEAN,
   DOUBLE_PLAY_RATE,
   ERROR_RATE,
+  CLEAN_THROW,
+  THROW_EFFECT,
+  isClosePlay,
 } from '../fielding.ts';
 import { makeRng } from '../rng.ts';
 import { recordAtBat, newMatch, EMPTY_BASES, type Bases, type Runner } from '../inning.ts';
@@ -132,5 +135,87 @@ describe('recordAtBat applying the defence', () => {
     const roll = () =>
       rollFielding('ground_out', { speed: 1, forceAtFirst: true, outs: 0 }, makeRng(12345));
     expect(roll()).toEqual(roll());
+  });
+});
+
+/**
+ * THE THROW — the third graded press in the game. See THROW_EFFECT.
+ *
+ * The two things worth guarding are the two that would break silently: the
+ * league not moving when nobody presses, and the press being able to reach
+ * something it must not.
+ */
+describe('the graded throw', () => {
+  /** Every roll in the middle, so only the thresholds decide anything. */
+  const mid = () => scripted([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+  const opts = { speed: 1, forceAtFirst: true, outs: 0 };
+
+  /**
+   * ⚠️ THE INVARIANT THE WHOLE FEATURE RESTS ON, and the one delivery.ts states
+   * for `good` on the mound. Every play in the headless sim resolves without a
+   * press, so a competent throw has to land on exactly the league's own rates —
+   * otherwise your copy of a defence is a different defence from the one
+   * scripts/balance.ts measured.
+   */
+  it('makes a good throw exactly the league, on both numbers', () => {
+    expect(THROW_EFFECT.good).toEqual({ dp: 1, error: 1 });
+    expect(CLEAN_THROW).toBe(THROW_EFFECT.good);
+  });
+
+  it('resolves a play with no press exactly as it did before the press existed', () => {
+    const without = rollFielding('ground_out', opts, mid());
+    const good = rollFielding('ground_out', { ...opts, throwEffect: CLEAN_THROW }, mid());
+    expect(good).toEqual(without);
+  });
+
+  it('turns more of them on a perfect throw and fewer on a wild one', () => {
+    // A roll sitting just above the league double-play chance: the perfect
+    // throw has to reach it and the wild one must not.
+    const dp = doublePlayChance(1);
+    const rolls = (r: number) => scripted([0.99, r]);
+    expect(
+      rollFielding('ground_out', { ...opts, throwEffect: THROW_EFFECT.perfect }, rolls(dp * 1.2))
+        .doublePlay,
+    ).toBe(true);
+    expect(
+      rollFielding('ground_out', { ...opts, throwEffect: THROW_EFFECT.good }, rolls(dp * 1.2))
+        .doublePlay,
+    ).toBe(false);
+    expect(
+      rollFielding('ground_out', { ...opts, throwEffect: THROW_EFFECT.wild }, rolls(dp * 0.9))
+        .doublePlay,
+    ).toBe(false);
+  });
+
+  it('boots a wild throw that a good one would have handled', () => {
+    // The error is the FIRST roll — see the order note in rollOuts().
+    const justOverTheLeague = scripted([ERROR_RATE * 1.5]);
+    expect(
+      rollFielding('ground_out', { ...opts, throwEffect: THROW_EFFECT.wild }, justOverTheLeague)
+        .error,
+    ).toBe(true);
+    expect(
+      rollFielding(
+        'ground_out',
+        { ...opts, throwEffect: THROW_EFFECT.good },
+        scripted([ERROR_RATE * 1.5]),
+      ).error,
+    ).toBe(false);
+  });
+
+  /**
+   * ⚠️ THE PACING BOUND. A press on every ball fielded is five or six
+   * interruptions a game and the mode's premise is that a season fits in an
+   * afternoon. It is exactly the double-play ball and nothing else.
+   */
+  it('only stops the game for the double-play ball', () => {
+    expect(isClosePlay('ground_out', { forceAtFirst: true, outs: 0 })).toBe(true);
+    expect(isClosePlay('ground_out', { forceAtFirst: true, outs: 1 })).toBe(true);
+    // Nothing to turn: two down, nobody forced, or a ball in the air.
+    expect(isClosePlay('ground_out', { forceAtFirst: true, outs: 2 })).toBe(false);
+    expect(isClosePlay('ground_out', { forceAtFirst: false, outs: 0 })).toBe(false);
+    for (const o of ['line_out', 'popup', 'single', 'home_run', 'foul_out'] as const) {
+      expect(isClosePlay(o, { forceAtFirst: true, outs: 0 }), o).toBe(false);
+    }
   });
 });

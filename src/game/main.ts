@@ -229,7 +229,15 @@ import {
   type StatBook,
 } from './stats.ts';
 import { forcedRunners, heldRunners, runnerMoves, scorersFrom } from '../core/inning.ts';
-import type { ForceBag } from '../core/fielding.ts';
+import {
+  CLEAN_THROW,
+  THROW_AT_MS,
+  THROW_EFFECT,
+  THROW_SWEEP_MS,
+  isClosePlay,
+  type ForceBag,
+  type ThrowEffect,
+} from '../core/fielding.ts';
 import { travelMs, canCheck, batSpeedLabel, CHECK_PULL_MS } from '../web/swing.ts';
 import {
   makeCam,
@@ -280,7 +288,7 @@ const book: Read = newRead();
  * later moment that gets graded — the barrel reaching the plate on one side,
  * the ball leaving the hand on the other. See core/delivery.ts.
  */
-type Phase = 'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'over';
+type Phase = 'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'throw' | 'over';
 
 let phase: Phase = 'idle';
 let atBat: AtBatState = newAtBat();
@@ -1339,6 +1347,33 @@ function cyclePen(by: number): void {
  * which is emphatic about why reading zone rate as precision would hand the
  * worst command in the league to your best arm.
  */
+/**
+ * THE THROW — the third graded press in the game, and the only one you make
+ * with a glove on. See THROW_EFFECT in core/fielding.ts for what it buys.
+ *
+ * ⚠️ IT IS THE SAME INSTRUMENT AS THE OTHER TWO, deliberately. gradeRelease()
+ * does the grading and RELEASE_WINDOWS_MS supplies the widths, so a throw is
+ * measured the way a pitch and a swing are and there is not a third set of
+ * numbers to keep in step. What differs is the geometry it is measured against
+ * (a much quicker sweep) and the table it pays out into.
+ */
+let throwAt = 0;
+let thrownAt: number | null = null;
+let throwGrade: ReleaseGrade | null = null;
+
+/**
+ * The window widths for a throw, at this difficulty.
+ *
+ * ⚠️ COMMAND IS DELIBERATELY NOT IN IT. That is the PITCHER's precision, and
+ * the man making this throw is an infielder — reading the arm's signature here
+ * would mean going to a knuckleballer made your shortstop worse with the glove.
+ * The difficulty assist is in it, by the same rule every window follows: it
+ * applies to you and never to the computer, and structurally so, because watch
+ * mode never reaches this press at all.
+ */
+const throwWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
+  releaseWindowMs(kind, 1, assist(), 1);
+
 const releaseWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
   releaseWindowMs(
     kind,
@@ -1707,6 +1742,53 @@ function showFoul(runnerSpeed: number): boolean {
   return true;
 }
 
+/**
+ * THE PLAY, STOPPED HALFWAY, waiting on your throw.
+ *
+ * ⚠️ THE BALL IS IN THE FIELDER'S HAND AND THE DICE ARE NOT THROWN YET. That is
+ * the whole reason the play has to be held in a variable rather than resolved
+ * in one go: THROW_EFFECT multiplies the error and double-play rolls, so the
+ * press has to land BEFORE rollFielding() sees them. Everything in here was
+ * settled by the swing and cannot change — where the ball went, who is under
+ * it, which way the defence was leaning — and none of it is re-derived when the
+ * play resumes, because re-deriving it is how the two halves of one play start
+ * disagreeing.
+ */
+let pendingPlay: {
+  align: ReturnType<typeof fieldingAlignment>;
+  shift: Shift;
+  placed: ReturnType<typeof withPlacement>;
+  batter: Player;
+} | null = null;
+
+/**
+ * LET IT GO. One press, graded off the same clock it is drawn against.
+ *
+ * ⚠️ IT RESOLVES THE PLAY ON THE SPOT rather than setting a flag for the frame
+ * loop, because the ball is already in a fielder's hand and every millisecond
+ * after the press is the game standing still. The FORCED throw at the end of
+ * the sweep comes through here too — see the frame loop — so a player who never
+ * presses gets a wild throw rather than a frozen game, exactly the way the arm
+ * empties at the end of a delivery.
+ */
+function makeThrow(grade: ReleaseGrade): void {
+  if (phase !== 'throw' || !pendingPlay) return;
+  throwGrade = grade;
+  thrownAt = performance.now();
+  const play = pendingPlay;
+  // A bad throw is worth saying out loud. A good one speaks for itself in the
+  // double play that follows it.
+  if (grade === 'wild') say('The throw gets away.', 'out');
+  completePlay(play, THROW_EFFECT[grade]);
+}
+
+/** The press, graded against where the marker actually is. */
+function releaseThrow(): void {
+  if (phase !== 'throw' || thrownAt !== null) return;
+  const offset = performance.now() - throwAt - THROW_AT_MS;
+  makeThrow(gradeRelease(offset, 1, assist(), 1));
+}
+
 /** The count says the at-bat is done. Fold it into the game. */
 function finishAtBat(): void {
   // Where it landed decides whether it is a hit at all, what it is worth, AND
@@ -1721,6 +1803,48 @@ function finishAtBat(): void {
   const result = placed.result;
   const batter = currentBatter(game);
 
+  // ⚠️ THE ONE PLACE THE GAME STOPS FOR YOUR HANDS ON DEFENCE. Only the
+  // double-play ball, only while you are the one on the mound, and never in
+  // watch mode — see isClosePlay() and throwAssist(). Everything else falls
+  // straight through and resolves exactly as it always did.
+  if (
+    result.kind === 'in_play' &&
+    !auto &&
+    !youBat() &&
+    isClosePlay(result.hit.outcome, {
+      forceAtFirst: game.bases[0] !== null,
+      outs: game.outs,
+    })
+  ) {
+    pendingPlay = { align, shift, placed, batter };
+    throwAt = performance.now();
+    thrownAt = null;
+    throwGrade = null;
+    phase = 'throw';
+    render();
+    return;
+  }
+
+  completePlay({ align, shift, placed, batter }, CLEAN_THROW);
+}
+
+/**
+ * The dice, the rules, the picture and the words — everything that happens
+ * once the throw is either made or was never asked for.
+ *
+ * Split out of finishAtBat() when the throw press landed. `thrown` is
+ * CLEAN_THROW on every path that does not press, which is the computer's half,
+ * watch mode, every routine play and the whole headless sim — so all of those
+ * resolve on exactly the league's own rates. See THROW_EFFECT.
+ */
+function completePlay(
+  play: NonNullable<typeof pendingPlay>,
+  thrown: ThrowEffect,
+): void {
+  const { align, shift, placed, batter } = play;
+  const result = placed.result;
+  pendingPlay = null;
+
   // Positional defence: WHO the ball was hit at decides whether it is booted.
   const fielding =
     result.kind === 'in_play'
@@ -1734,6 +1858,7 @@ function finishAtBat(): void {
             // Which bag the force goes to. See LEAD_FORCE in core/fielding.ts.
             forcedRunners: forcedRunners(game.bases),
             infieldIn: shift === 'in',
+            throwEffect: thrown,
           },
           rng,
         )
@@ -2207,6 +2332,15 @@ function press(key: string): void {
     return;
   }
 
+  // ⚠️ THE THROW COMES FIRST, ABOVE EVERYTHING. The ball is in a fielder's hand
+  // and the game is standing still; no other control is live and none of them
+  // should be able to eat the one press that matters. Same reason the release
+  // sits above the 'calling' gate below.
+  if (phase === 'throw') {
+    if (key === ' ' || key === 'enter') releaseThrow();
+    return;
+  }
+
   // Batting: space starts the pitch, then space is the swing.
   if (youBat()) {
     if (key === ' ') {
@@ -2526,6 +2660,33 @@ if (import.meta.env.DEV) {
     hasReplay: !!replay,
     phase,
   });
+  /**
+   * THE THROW BAR, on demand — the one piece of UI in this game that only
+   * appears on a double-play ball while you are on the mound, which is once or
+   * twice a game and never when you are looking for it.
+   *
+   * ⚠️ IT GOES THROUGH THE REAL PATH. It builds a genuine pendingPlay from the
+   * live game and hands it to the same phase the ball does, so pressing SPACE
+   * runs completePlay() for real — the replay, the scorer's line and the base
+   * state all follow. A hook that only drew the bar would prove the one thing
+   * that was never in doubt.
+   */
+  (window as unknown as Record<string, unknown>)['__throw'] = () => {
+    const align = fieldingAlignment(game);
+    const shift = shiftNow();
+    const placed = withPlacement(
+      { kind: 'in_play', hit: { outcome: 'ground_out', isHit: false, isOut: true,
+        exitVelocity: 88, launchAngle: 4, direction: -20 } as never },
+      { reachAt: reachOf(align), park: game.home.park, shift },
+    );
+    pendingPlay = { align, shift, placed, batter: currentBatter(game) };
+    throwAt = performance.now();
+    thrownAt = null;
+    throwGrade = null;
+    phase = 'throw';
+    return { sweepMs: THROW_SWEEP_MS, targetAt: THROW_AT_MS };
+  };
+
   (window as unknown as Record<string, unknown>)['__play'] = (
     outcome: Outcome = 'double',
     exitVelocity = 95,
@@ -2639,7 +2800,13 @@ function drawField(now: number): void {
   // the bar would hide what you are throwing at from the pitch you are throwing.
   if (phase === 'calling' || phase === 'winding') drawCall();
   // Your half only: there is no delivery to draw while you are the hitter.
-  if (!youBat() && !game.over) drawDelivery(now);
+  // ⚠️ THE THROW TAKES THE BAR OVER, in the same rectangle and for the same
+  // reason the swing does on the other half: both halves of this game are one
+  // press timed against one window, and putting every instrument in one place
+  // is the cheapest way to say so. The two are never up together — the
+  // delivery bar belongs to a pitch and this belongs to a ball already hit.
+  if (phase === 'throw') drawThrowBar(now);
+  else if (!youBat() && !game.over) drawDelivery(now);
   // The hitter's half of the same instrument, and it stands where the mound's
   // bar stands on the other half — the bottom of the frame, under the plate.
   if (youBat() && !game.over) drawSwingBar();
@@ -2885,6 +3052,61 @@ const BAR = { x: 24, y: 296, w: 252, h: 14 } as const;
  * that disagrees with the verdict, which is the one thing the swing model's
  * fault-5 note refuses to allow.
  */
+/**
+ * THE THROW BAR — the bang-bang play, as one press.
+ *
+ * ⚠️ IT IS THE DELIVERY BAR'S GEOMETRY WITH A DIFFERENT CLOCK, and drawn from
+ * the same window function that grades it, which is the rule every instrument
+ * in this game follows: a meter drawn from its own constants is a meter that
+ * lies the first time somebody retunes the thing behind it.
+ *
+ * ⚠️ NO EASING. Delivery.ease gives each PITCH its own arm action because six
+ * of them have to be told apart; there is one throw, and a marker that did
+ * anything other than run straight would be character for its own sake on a
+ * bar that is only up for seven hundred milliseconds.
+ */
+function drawThrowBar(now: number): void {
+  const t = Math.max(0, Math.min(THROW_SWEEP_MS, now - throwAt));
+  const x = (ms: number): number =>
+    BAR.x + (Math.max(0, Math.min(THROW_SWEEP_MS, ms)) / THROW_SWEEP_MS) * BAR.w;
+
+  const band = (halfWidthMs: number, fill: string): void => {
+    const a = x(THROW_AT_MS - halfWidthMs);
+    const b = x(THROW_AT_MS + halfWidthMs);
+    ctx.fillStyle = fill;
+    ctx.fillRect(a, BAR.y, b - a, BAR.h);
+  };
+
+  ctx.fillStyle = '#0a0f0c';
+  ctx.fillRect(BAR.x, BAR.y, BAR.w, BAR.h);
+  band(throwWindow('good'), '#243320');
+  band(throwWindow('perfect'), '#3d5733');
+
+  ctx.strokeStyle = '#2f3a2a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(BAR.x + 0.5, BAR.y + 0.5, BAR.w - 1, BAR.h - 1);
+
+  const target = x(THROW_AT_MS);
+  ctx.strokeStyle = '#cfd6c4';
+  ctx.beginPath();
+  ctx.moveTo(target, BAR.y - 3);
+  ctx.lineTo(target, BAR.y + BAR.h + 3);
+  ctx.stroke();
+
+  // The marker, frozen where it was when you let go so the verdict is readable
+  // against the mark that earned it. Same as the delivery.
+  const at = thrownAt === null ? t : thrownAt - throwAt;
+  ctx.fillStyle = throwGrade ? RELEASE_COLOR[throwGrade] : '#e8e8d8';
+  ctx.fillRect(x(at) - 1, BAR.y - 4, 2, BAR.h + 8);
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillText('THROW IT — SPACE', BAR.x, BAR.y + BAR.h + 15);
+  ctx.fillStyle = '#7a8a6a';
+  ctx.fillText('two on the line', BAR.x, BAR.y + BAR.h + 27);
+}
+
 const barX = (ms: number, tempo: Delivery): number =>
   BAR.x + Math.pow(Math.max(0, Math.min(tempo.sweepMs, ms)) / tempo.sweepMs, tempo.ease) * BAR.w;
 
@@ -4032,6 +4254,12 @@ function step(): void {
   if (phase === 'winding' && now >= deliveryAt + deliveryOf(deliveryPitch).sweepMs) {
     releaseAs('wild');
   }
+
+  // ⚠️ AND THE SAME FOR THE THROW. A play that waits forever on a press is a
+  // frozen game, and this one stops the game mid-ball — see makeThrow(). The
+  // sweep outlasts the widest late press that still grades, so nothing a player
+  // actually meant is being swallowed here.
+  if (phase === 'throw' && now >= throwAt + THROW_SWEEP_MS) makeThrow('wild');
 
   if (phase === 'windup') {
     // THE COMPUTER’S BAT, whichever of the two of you it is hitting for: watch

@@ -27,7 +27,7 @@
 
 import type { Player } from '../core/roster.ts';
 import type { HitResult } from '../core/hit.ts';
-import { rollFielding, type FieldingResult } from '../core/fielding.ts';
+import { rollFielding, type FieldingResult, type ThrowEffect } from '../core/fielding.ts';
 import type { Rng } from '../core/rng.ts';
 import { plotBatted, nearestFielder } from '../web/plot.ts';
 
@@ -185,6 +185,8 @@ export function fieldBall(
     forcedRunners?: number;
     /** They are playing for the out at the plate. See LEAD_FORCE_INFIELD_IN. */
     infieldIn?: boolean;
+    /** What the player's throw was worth, if he made one. See THROW_EFFECT. */
+    throwEffect?: ThrowEffect;
   },
   rng: Rng,
 ): DefensivePlay {
@@ -202,6 +204,7 @@ export function fieldBall(
       // core/fielding.ts deliberately cannot see. Both halves hand it over.
       forcedRunners: opts.forcedRunners,
       infieldIn: opts.infieldIn,
+      throwEffect: opts.throwEffect,
       errorMult: POSITION_DIFFICULTY[by] / glove,
       // The gloves that turn it, and whether this was a ball to turn it on.
       dpMult: relayQuality(alignment) * DP_BY_POSITION[by],

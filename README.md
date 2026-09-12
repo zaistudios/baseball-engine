@@ -1244,6 +1244,102 @@ hit-or-out before the ball is ever plotted, and geometry only gets a vote
 afterwards in `contest()`. Everything above makes the picture agree with that
 verdict. None of it makes the verdict come from the picture.
 
+### The fielding, and the third press — 2026-09-12, later the same day
+
+Zane, after playing the morning's build: *"Theres no force outs the fielding
+really needs to be fixed. Close plays can have a QTE?"*
+
+**Force outs existed and were invisible, which is the same thing.** Measured
+before believing it: **0.52 per team per game**, so across nine innings from one
+seat you would see roughly none. The cause was a gate. The force roll hung off
+`canTurnTwo`, and turning two needs an out to spare — so with **two down**, the
+most recognisable version of the play in the sport, the bang-bang throw to
+second that ends an inning, could not happen at all. A third of every chance.
+Different questions want different gates. **1.11 per team per game** after.
+
+`scripts/balance.ts` counts force outs from here on, for exactly the reason it
+counts errors: this rule has a knob and no way to see it was the whole bug.
+
+**Then the throw went to the wrong bag anyway.** Every force was taken at
+SECOND whatever the bases looked like — men on first and second, a grounder to
+third, and the ball went across the diamond to the trailing runner instead of to
+the bag he was standing on. Bases loaded and the play was *still* at second, so
+the force at the plate simply did not exist.
+
+`force: boolean` is `forceAt: 2 | 3 | 4` now, rolled against the base state the
+core is deliberately blind to (`forcedRunners()` hands it over), and the throw,
+the runner, the umpire's call, the scorer's line and the caption all read that
+one number. **INFIELD IN finally means what the alignment is for:** 85% they
+take him at the plate, against 50% otherwise. That is the payoff the call has
+never had — it has cost the defence the holes `placement.ts` charges for since
+it shipped and bought nothing but the man on third staying put.
+
+⚠️ **The first cut of the lead force was wrong, and measurement is the only
+reason it did not ship that way.** It was gated on `outs < 2`, reasoning that
+with two down you take the surest out. Backwards: with men on first and second
+the lead bag *is* the surest out, because he is standing on it. And since the
+double play only rolls under two outs, forces skew two-out — so the gate
+suppressed the majority of them. **5%** of forces went anywhere but second, one
+every sixteen games, which is the same invisibility that started this section.
+Ungated: **14%**. It is also free, because a force for the third out scores
+nobody whichever bag it is taken at.
+
+### The throw — the third graded press
+
+The game already had this verb twice: the swing is one graded press against a
+window (`timing.ts`), the release is one graded press against a window
+(`delivery.ts`). The throw is the third instance of a thing the game already is,
+not a new mechanic bolted on, and it reuses `gradeRelease()` and
+`RELEASE_WINDOWS_MS` rather than inventing a third set of numbers.
+
+**⚠️ IT MULTIPLIES THE ROLLS AND CANNOT OVERRULE A VERDICT.** This is the
+constraint the whole design hangs on. A ball the table already called
+`ground_out` is an out however the press lands. What is genuinely still open
+when the ball reaches a fielder is whether it is **booted** and whether it turns
+**two** — which is what a throw is actually about — so those are the two numbers
+`THROW_EFFECT` scales. Letting a press flip the out itself would put the
+player's hands inside the outcome seam, which is the one rule `plot.ts` states
+in its header and the reason the replay is a replay.
+
+    PERFECT   dp ×1.3   error ×0.5
+    GOOD      dp ×1     error ×1      ← the league, exactly
+    RUSHED    dp ×0.85  error ×1.4
+    DRAGGED   dp ×0.85  error ×1.4
+    WILD      dp ×0.45  error ×3
+
+`good` being exactly 1 on both is load-bearing for the same reason
+`RELEASE_CONTROL.good` is: every play in the headless sim resolves without a
+press, so a competent throw has to land precisely on the league's own rates or
+your copy of a defence is a different defence from the one the README measured.
+Verified rather than asserted — `scripts/balance.ts` reads **4.36 runs per team
+either side of this change**, to the hundredth.
+
+**⚠️ THE WHOLE DESIGN IS IN HOW NARROW `isClosePlay()` IS.** A press on every
+ball you field is five or six interruptions a game, and the mode's premise is
+that a season fits in an afternoon — the same bound `FOUL_HOLD_MS` has been the
+standing warning about. A press on a lazy fly is *worse* than nothing, because
+it teaches the player that the bar means the next thing was routine. So it is
+exactly the double-play ball: a ground ball, a man forced at first, an out to
+spare, and only while you are the one on the mound. Once or twice a game, which
+is rare enough that the bar appearing is itself information.
+
+The sweep is 720ms against the fastest pitch's 960 — a pivot is the opposite of
+a wind-up, and it has to be over before it is felt as an interruption. It takes
+the delivery bar's own rectangle, because both halves of this game are one press
+timed against one window and putting every instrument in one place is the
+cheapest way to say so. No press by the end of the sweep is a wild throw, the
+same way the arm empties at the end of a delivery: a play that waits forever on
+a press is a frozen game.
+
+**Driven in the browser, not trusted.** `window.__throw()` in the dev block
+builds a real `pendingPlay` from the live game and hands it to the same phase a
+batted ball does, so a press runs `completePlay()` for real. Confirmed on
+screen: the bar and its bands draw, a press on the target grades and resolves
+the play, and no press at all prints "The throw gets away." and resolves it
+anyway. That hook exists because the bar appears once or twice a game and never
+when you are looking for it — and because twice today a green suite said a
+feature worked when the screen said otherwise.
+
 ### The defence moves — and it is a lean, not a stack
 
 `describePlay()` had been promising this for weeks: the scorer's sentence exists

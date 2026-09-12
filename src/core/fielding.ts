@@ -21,6 +21,7 @@
 
 import type { Rng } from './rng.ts';
 import type { Outcome } from './hitTables.ts';
+import type { ReleaseGrade } from './delivery.ts';
 
 /**
  * Chance a ground ball with a force at first turns two, at speed 1.0.
@@ -122,6 +123,91 @@ export const LEAD_FORCE = 0.5;
  * the throw goes home.
  */
 export const LEAD_FORCE_INFIELD_IN = 0.85;
+
+// ------------------------------------------------------------- the throw
+
+/**
+ * WHAT A GRADED THROW IS WORTH — the third press in the game, and the one the
+ * player makes with a glove on.
+ *
+ * ⚠️ IT MULTIPLIES THE ROLLS, IT DOES NOT OVERRULE A VERDICT. This is the same
+ * contract RELEASE_CONTROL keeps on the mound: the release does not decide
+ * where the pitch goes, it multiplies `control` and lets pitchToSpot() decide.
+ * A ball already called `ground_out` by the table is still an out however this
+ * press lands — what is genuinely still open when the ball reaches a fielder is
+ * whether it is BOOTED and whether it turns TWO, and those are the two things a
+ * throw is actually about. Letting the press flip the out itself would put the
+ * player's hands inside the outcome seam, which is the one rule plot.ts states
+ * in its header and the reason the whole replay is a replay.
+ *
+ * ⚠️ `good` IS EXACTLY 1 ON BOTH NUMBERS, and it is load-bearing for the same
+ * reason delivery.ts says it is. Every play in the headless sim is resolved
+ * without a press, so a competent throw has to land precisely on the league's
+ * own rates — otherwise your copy of a defence is a different defence from the
+ * one scripts/balance.ts measured, and every number in the README describes a
+ * game nobody plays.
+ *
+ * The spread is deliberately asymmetric, same shape as the release. PERFECT
+ * buys a third more double plays, which is a real reward on the one play it
+ * fires on. WILD triples the error chance, because "press something, anything"
+ * has to be worse than not pressing at all or it is not a decision.
+ */
+export interface ThrowEffect {
+  /** Multiplies the double-play chance. */
+  dp: number;
+  /** Multiplies the error chance. Above 1 is a throw that got away. */
+  error: number;
+}
+
+export const THROW_EFFECT: Record<ReleaseGrade, ThrowEffect> = {
+  perfect: { dp: 1.3, error: 0.5 },
+  good: { dp: 1, error: 1 },
+  early: { dp: 0.85, error: 1.4 },
+  late: { dp: 0.85, error: 1.4 },
+  wild: { dp: 0.45, error: 3 },
+};
+
+/** No press was made — the league's own rates, exactly. */
+export const CLEAN_THROW: ThrowEffect = THROW_EFFECT.good;
+
+/**
+ * HOW LONG THE THROW TAKES, and where in it the ball should leave the hand.
+ *
+ * ⚠️ QUICKER THAN ANY DELIVERY IN THE GAME, on purpose. The fastest pitch is a
+ * 960ms sweep because a wind-up is a thing you settle into; a double-play pivot
+ * is the opposite of that, and a bar that gave you as long to think about it
+ * would be describing a different act. It is also the pacing bound: this fires
+ * on the order of once or twice a game and has to be over before it is felt as
+ * an interruption.
+ *
+ * ponytail: no second bar for the relay, no separate pivot press, no throw
+ * meter that charges. One press, one number, into the two multipliers
+ * rollFielding() already took.
+ */
+export const THROW_SWEEP_MS = 720;
+export const THROW_AT_MS = 470;
+
+/**
+ * IS THIS A PLAY WORTH STOPPING THE GAME FOR?
+ *
+ * ⚠️ THE WHOLE DESIGN IS IN HOW NARROW THIS IS. A press on every ball you
+ * field is five or six interruptions a game, and the mode's premise is that a
+ * season fits in an afternoon — the same bound FOUL_HOLD_MS in overhead.ts has
+ * been the standing warning about. A press on a lazy fly is worse than nothing,
+ * because it teaches the player that the bar means whatever happens next was
+ * routine.
+ *
+ * So it is exactly the DOUBLE-PLAY BALL: a ground ball, a man forced at first,
+ * and an out to spare. That is the play where both things the throw can change
+ * are genuinely open at once — turn two, or boot it and have nobody out — and
+ * it is the one Zane named when he said the fielding needed fixing. It works
+ * out around one or two a game on the half you are on the mound for, which is
+ * rare enough that the bar appearing is itself information.
+ */
+export const isClosePlay = (
+  outcome: Outcome,
+  opts: { forceAtFirst: boolean; outs: number },
+): boolean => outcome === 'ground_out' && opts.forceAtFirst && opts.outs < 2;
 
 /** Only these can be booted. A popup is caught or it is not, and a strikeout has no fielder. */
 const BOOTABLE: ReadonlySet<Outcome> = new Set<Outcome>(['ground_out', 'line_out']);
@@ -237,6 +323,12 @@ export function rollFielding(
     /** Same idea for the relay. A better middle infield turns more of them. */
     dpMult?: number;
     /**
+     * WHAT THE PLAYER'S THROW WAS WORTH, when there was one. Omitted is
+     * CLEAN_THROW — exactly the league — which is what the headless sim, watch
+     * mode and the roguelike all get. See THROW_EFFECT.
+     */
+    throwEffect?: ThrowEffect;
+    /**
      * HOW MANY RUNNERS ARE FORCED — the unbroken run of occupied bases starting
      * at first. 1 is a man on first alone, 3 is the bases loaded. It decides
      * which bag the LEAD force is at and nothing else; the caller knows the
@@ -286,12 +378,17 @@ function rollOuts(
     dpMult?: number;
     forcedRunners?: number;
     infieldIn?: boolean;
+    throwEffect?: ThrowEffect;
   },
   rng: Rng,
 ): FieldingResult {
   if (!BOOTABLE.has(outcome)) return CLEAN;
 
-  const errorChance = Math.max(0, Math.min(0.5, ERROR_RATE * (opts.errorMult ?? 1)));
+  const thrown = opts.throwEffect ?? CLEAN_THROW;
+  const errorChance = Math.max(
+    0,
+    Math.min(0.5, ERROR_RATE * (opts.errorMult ?? 1) * thrown.error),
+  );
   if (rng.next() < errorChance) return { error: true, doublePlay: false };
 
   // ⚠️ THE FORCE AND THE DOUBLE PLAY NEED DIFFERENT GATES, and hanging both off
@@ -306,7 +403,10 @@ function rollOuts(
   if (!forceable) return CLEAN;
 
   if (opts.outs < 2) {
-    const dp = Math.max(0, Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1)));
+    const dp = Math.max(
+      0,
+      Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1) * thrown.dp),
+    );
     if (rng.next() < dp) return { error: false, doublePlay: true };
   }
 
