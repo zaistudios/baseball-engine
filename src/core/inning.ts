@@ -14,7 +14,7 @@
 
 import { isHit, isOut, type Outcome } from './hitTables.ts';
 import type { AtBatResult } from './atBat.ts';
-import { CLEAN, gunDown, type FieldingResult } from './fielding.ts';
+import { CLEAN, gunDown, type FieldingResult, type ForceBag } from './fielding.ts';
 
 /**
  * [first, second, third]. A slot holds the RUNNER standing on it, or null.
@@ -32,6 +32,23 @@ export const EMPTY_BASES: Bases = [null, null, null];
 export const ANON: Runner = { name: 'runner', speed: 1 };
 
 export const occupied = (b: Bases): boolean[] => b.map((r) => r !== null);
+
+/**
+ * HOW MANY RUNNERS ARE FORCED — the unbroken run of occupied bases from first.
+ *
+ * 0 with nobody on first, 3 with the bases loaded. A man on second with first
+ * open is NOT forced and does not count, which is the whole reason this is a
+ * run rather than a tally: he can stand there all day.
+ *
+ * Exported because core/fielding.ts has to know which bag the lead force is at
+ * and is deliberately blind to the bases — so both callers hand it this number
+ * rather than each counting the bags their own way. See LEAD_FORCE.
+ */
+export const forcedRunners = (b: Bases): number => {
+  let n = 0;
+  while (n < 3 && b[n]) n++;
+  return n;
+};
 
 /** A runner who changed bags between two states. -1 means he came from home. */
 export interface RunnerMove {
@@ -541,14 +558,24 @@ function groundOut(
 function fieldersChoice(
   bases: Bases,
   batter: Runner,
+  /** 2, 3 or 4 — the bag the throw went to. See LEAD_FORCE in fielding.ts. */
+  at: ForceBag,
   rolls?: readonly [number, number, number],
   infieldIn = false,
 ): { bases: Bases; runs: number } {
   const g = groundOut(bases, rolls, infieldIn);
-  // g.bases[1] is the man forced up from first. He is out at the bag instead.
   // g.bases[0] is always null — nobody advances INTO first on a ground ball —
-  // so the batter drops straight in.
-  return { bases: [batter, null, g.bases[2]], runs: g.runs };
+  // so the batter drops straight in behind everybody.
+  const next: [Runner | null, Runner | null, Runner | null] = [batter, g.bases[1], g.bases[2]];
+
+  // ⚠️ THE MAN WHO IS OUT IS THE ONE groundOut() JUST PUT ON `at`, because a
+  // force is exactly "he was made to run there and the ball beat him". Taking
+  // him off the bag afterwards is the whole of the rule, and it means the three
+  // bags need no separate cases: second is g.bases[1], third is g.bases[2], and
+  // the plate is a run that groundOut() counted and does not get to keep.
+  if (at === 4) return { bases: next, runs: Math.max(0, g.runs - 1) };
+  next[at - 1] = null;
+  return { bases: next, runs: g.runs };
 }
 
 /**
@@ -725,8 +752,8 @@ export function applyAtBat(
             // `runs` says; the bases are about to be wiped by the half rolling
             // over, so they are set for the picture's sake and nothing else.
             const g =
-              fielding.force && bases[0] !== null
-                ? fieldersChoice(bases, batter, fielding.advanceRolls, defense.infieldIn)
+              fielding.forceAt && bases[0] !== null
+                ? fieldersChoice(bases, batter, fielding.forceAt, fielding.advanceRolls, defense.infieldIn)
                 : outs < 2
                   ? groundOut(bases, fielding.advanceRolls, defense.infieldIn)
                   : null;

@@ -48,6 +48,8 @@ import {
 import { statsOf, parkFoulAngle, HOME, AWAY } from './teams.ts';
 import { fatigue, shouldRelieve } from './bullpen.ts';
 import { fieldBall, reachOf } from './defense.ts';
+import type { ForceBag } from '../core/fielding.ts';
+import { forcedRunners } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement } from './placement.ts';
 import { pickShift } from './shift.ts';
@@ -88,11 +90,14 @@ export interface AtBatLog {
   /** He squared up at least once. Counted for the same reason errors are. */
   bunt?: boolean;
   /**
-   * The lead man was taken at the bag and the batter reached — the fielder's
-   * choice. Counted for the same reason errors are, and it is the one that
-   * needed it most: it was shipped at 0.52 a game and read as never happening.
+   * THE BAG a forced man was taken at — 2, 3 or 4 — or absent for no force.
+   *
+   * Counted for the same reason errors are, and it is the one that needed it
+   * most: it shipped at 0.52 a game and read as never happening. The BAG rather
+   * than a flag, because "a force happened" and "the throw ever goes home" are
+   * different questions and only the second says the lead force works.
    */
-  force?: boolean;
+  forceAt?: ForceBag;
 }
 
 /**
@@ -233,7 +238,13 @@ export function playAiAtBat(
       ? fieldBall(
           result.hit,
           align,
-          { batterSpeed: batter.speed, forceAtFirst: g.bases[0] !== null, outs: g.outs },
+          {
+            batterSpeed: batter.speed,
+            forceAtFirst: g.bases[0] !== null,
+            outs: g.outs,
+            forcedRunners: forcedRunners(g.bases),
+            infieldIn: shift === 'in',
+          },
           rng,
         )
       : undefined;
@@ -255,7 +266,10 @@ export function playAiAtBat(
       // ⚠️ COUNTED FOR THE SAME REASON `error` IS: it is a rule that changes
       // the base state, it has a tuning knob (FORCE_AT_SECOND), and a balance
       // run that cannot see it cannot say whether the knob is set right.
-      force: !!fielding?.force && result.kind === 'in_play' && result.hit.outcome === 'ground_out',
+      forceAt:
+        result.kind === 'in_play' && result.hit.outcome === 'ground_out'
+          ? fielding?.forceAt
+          : undefined,
       bunt: bunted,
     },
   };
@@ -368,6 +382,8 @@ export interface SimResult {
    * actually happening as often as that number says.
    */
   forceOuts: number;
+  /** Of those, the ones taken at THIRD or the PLATE rather than at second. */
+  leadForces: number;
   /**
    * How the plate appearances ended, both sides.
    *
@@ -419,6 +435,7 @@ export function simulateGame(
   let bunts = 0;
   let foulOuts = 0;
   let forceOuts = 0;
+  let leadForces = 0;
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -447,7 +464,10 @@ export function simulateGame(
     if (out.atBat.error) errors++;
     if (out.atBat.bunt) bunts++;
     if (out.atBat.outcome === 'foul_out') foulOuts++;
-    if (out.atBat.force) forceOuts++;
+    if (out.atBat.forceAt) {
+      forceOuts++;
+      if (out.atBat.forceAt > 2) leadForces++;
+    }
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -458,7 +478,7 @@ export function simulateGame(
     }
   }
 
-  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts };
+  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces };
 }
 
 /** A one-line box score, for the CLI and for eyeballing a sim run. */

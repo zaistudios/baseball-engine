@@ -16,6 +16,7 @@
 
 import type { RunnerMove } from '../core/inning.ts';
 import type { Outcome } from '../core/hitTables.ts';
+import type { ForceBag } from '../core/fielding.ts';
 import {
   WALL_FT,
   BASE_FT,
@@ -106,8 +107,12 @@ export interface Replay {
   safe: boolean;
   /** 6-4-3. The relay stops at second and the forced man is erased there. */
   doublePlay: boolean;
-  /** 4-6. The same throw, and nothing after it: the batter reaches first. */
-  force: boolean;
+  /**
+   * THE BAG A FORCE WAS TAKEN AT — 2, 3 or 4, or undefined for no force.
+   * Same numbering runnerPoint() counts in, so the throw, the runner and the
+   * call all read it straight.
+   */
+  forceAt?: ForceBag;
   /** Booted: the chaser gets there and it gets past him anyway. */
   error: boolean;
   /**
@@ -171,7 +176,7 @@ export function newReplay(o: {
   speed: number;
   safe: boolean;
   doublePlay?: boolean;
-  force?: boolean;
+  forceAt?: ForceBag;
   error?: boolean;
   moves?: RunnerMove[];
   held?: number[];
@@ -206,7 +211,7 @@ export function newReplay(o: {
     speed: o.speed,
     safe: o.safe,
     doublePlay: !!o.doublePlay,
-    force: !!o.force,
+    ...(o.forceAt === undefined ? {} : { forceAt: o.forceAt }),
     error: !!o.error,
     moves: o.moves ?? [],
     held: o.held ?? [],
@@ -297,7 +302,7 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
       play: !isFoul(r) && (hasPlayAtFirst(r.plot, chaser) || r.doublePlay),
       fieldedAt,
       doublePlay: r.doublePlay,
-      force: r.force,
+      force: r.forceAt !== undefined,
     }),
   };
 }
@@ -848,7 +853,16 @@ function drawRace(
 ): void {
   const t = now - r.startedAt;
   const first = bagAt(cam, 0);
-  const second = bagAt(cam, 1);
+  /**
+   * WHERE THE FORCE IS BEING TAKEN. A double play always goes through second;
+   * a plain force goes to whichever bag the defence chose, which is second,
+   * third or the plate — see LEAD_FORCE in core/fielding.ts.
+   *
+   * ⚠️ ONE VARIABLE FOR THE THROW, THE RUNNER AND THE CALL. Three separate
+   * `second`s is how the ball ends up at one bag and the OUT at another.
+   */
+  const forceAt: ForceBag = r.doublePlay ? 2 : (r.forceAt ?? 2);
+  const forceBag = bagAt(cam, forceAt - 1);
   const race = raceFor(r);
   const { fieldedAt, runMs, throwMs, relayMs } = race;
   if (opts.sfx) cuePlaySounds(r, t, race, opts.sfx);
@@ -923,13 +937,13 @@ function drawRace(
   // the base state, so he is in neither list above — he has to be drawn from
   // the fact of the play itself. He stops dead at second when the throw beats
   // him, which IS the out.
-  if ((r.doublePlay || r.force) && relayMs !== null) {
-    const k = Math.min(1, t / relayMs);
-    drawRunnerDot(
-      ctx,
-      { x: first.x + (second.x - first.x) * k, y: first.y + (second.y - first.y) * k },
-      t > relayMs,
-    );
+  if ((r.doublePlay || r.forceAt !== undefined) && relayMs !== null) {
+    // ⚠️ THE LEG HE WAS ACTUALLY RUNNING, not first-to-second every time. A man
+    // forced at third came from second and a man forced at the plate came from
+    // third; drawing all three of them breaking out of first put a runner on a
+    // basepath he was never on. runnerPoint() counts bags the same way
+    // `forceAt` does, so the two ends need no translating.
+    drawRunnerDot(ctx, runnerPoint(cam, forceAt - 1, forceAt, t / relayMs), t > relayMs);
   }
 
   // The ball's route: to second first on a double play, then on to first.
@@ -958,14 +972,14 @@ function drawRace(
 
   if (throwMs !== null) {
     if (relayMs !== null) {
-      throwLeg(landing, second, fieldedAt, relayMs);
-      throwLeg(second, first, relayMs, throwMs);
+      throwLeg(landing, forceBag, fieldedAt, relayMs);
+      throwLeg(forceBag, first, relayMs, throwMs);
     } else {
       throwLeg(landing, first, fieldedAt, throwMs);
     }
-  } else if (r.force && relayMs !== null) {
+  } else if (r.forceAt !== undefined && relayMs !== null) {
     // One leg, and it ends at the bag. Nothing is thrown to first behind it.
-    throwLeg(landing, second, fieldedAt, relayMs);
+    throwLeg(landing, forceBag, fieldedAt, relayMs);
   }
 
   // The batter, running it out as far as the scoreboard says he got.
@@ -1012,7 +1026,9 @@ function drawRace(
   // whole play is about. The ball flew to second, the runner stopped dead on
   // it, and no umpire said anything. It is drawn on a double play from the same
   // line, where `throwMs` happens to be set, which is why it read as working.
-  if (relayMs !== null && t > relayMs) call('OUT', second, false, -24);
+  // ⚠️ SAME BAG THE BALL WENT TO. The dx flips for third and the plate so the
+  // word does not sit on top of the diamond it is calling.
+  if (relayMs !== null && t > relayMs) call('OUT', forceBag, false, forceAt >= 3 ? -24 : 22);
 
   // No throw means no play at FIRST, and no play means no call. An umpire does
   // not signal safe at first on a ball off the wall — and doing it anyway put a

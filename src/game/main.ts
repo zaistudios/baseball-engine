@@ -228,7 +228,8 @@ import {
   type BatLine,
   type StatBook,
 } from './stats.ts';
-import { heldRunners, runnerMoves, scorersFrom } from '../core/inning.ts';
+import { forcedRunners, heldRunners, runnerMoves, scorersFrom } from '../core/inning.ts';
+import type { ForceBag } from '../core/fielding.ts';
 import { travelMs, canCheck, batSpeedLabel, CHECK_PULL_MS } from '../web/swing.ts';
 import {
   makeCam,
@@ -1726,7 +1727,14 @@ function finishAtBat(): void {
       ? fieldBall(
           result.hit,
           align,
-          { batterSpeed: batter.speed, forceAtFirst: game.bases[0] !== null, outs: game.outs },
+          {
+            batterSpeed: batter.speed,
+            forceAtFirst: game.bases[0] !== null,
+            outs: game.outs,
+            // Which bag the force goes to. See LEAD_FORCE in core/fielding.ts.
+            forcedRunners: forcedRunners(game.bases),
+            infieldIn: shift === 'in',
+          },
           rng,
         )
       : undefined;
@@ -1752,7 +1760,7 @@ function finishAtBat(): void {
           runs: log.runs,
           error: !!fielding?.error,
           doublePlay: !!fielding?.doublePlay,
-          force: isForce(result, fielding),
+          forceAt: forceBag(result, fielding),
           exitVelocity: result.hit.exitVelocity,
           before: spotHeWalkedInto,
           gameOver: game.over,
@@ -1793,13 +1801,14 @@ function finishAtBat(): void {
           fielders: fieldersFor(shift),
           // ⚠️ THE BATTER IS SAFE ON A FORCE PLAY, and the replay has to know or
           // it draws a throw beating him to a bag nothing was thrown to.
-          safe: result.hit.isHit || !!fielding?.error || isForce(result, fielding),
+          safe:
+            result.hit.isHit || !!fielding?.error || forceBag(result, fielding) !== undefined,
           // The same fence place() just used — see newReplay's note on wallFt.
           wallFt: wallAt(result.hit.direction, game.home.park),
           // The beat this play earned. A routine grounder adds nothing.
           holdMs: scene?.hold ?? 0,
           doublePlay: !!fielding?.doublePlay,
-          force: isForce(result, fielding),
+          forceAt: forceBag(result, fielding),
           error: !!fielding?.error,
           // Only a foul out sets this, and only because nobody stands in foul
           // ground for nearestFielder() to find. See raceFor().
@@ -2028,19 +2037,21 @@ function finalize(): void {
  * screen has to ask the same pair of questions or the picture and the book part
  * company on a line drive.
  */
-const isForce = (
+const forceBag = (
   result: AtBatState['result'],
-  fielding?: { doublePlay: boolean; force?: boolean; error: boolean },
-): boolean =>
-  !!fielding?.force &&
+  fielding?: { doublePlay: boolean; forceAt?: ForceBag; error: boolean },
+): ForceBag | undefined =>
+  fielding?.forceAt !== undefined &&
   !fielding.error &&
   !fielding.doublePlay &&
   result?.kind === 'in_play' &&
-  result.hit.outcome === 'ground_out';
+  result.hit.outcome === 'ground_out'
+    ? fielding.forceAt
+    : undefined;
 
 function describe(
   result: AtBatState['result'],
-  fielding?: { error: boolean; doublePlay: boolean; force?: boolean },
+  fielding?: { error: boolean; doublePlay: boolean; forceAt?: ForceBag },
   placed?: string,
   fielderNum?: number,
 ): string {
@@ -2063,8 +2074,11 @@ function describe(
       // ⚠️ "GROUNDED OUT TO SHORT" IS THE WRONG SENTENCE FOR A FORCE PLAY in
       // two ways: he did not ground out — he is standing on first — and the man
       // who is out never left the bag he started on. See FORCE_AT_SECOND.
-      if (fielding?.force && outcome === 'ground_out') {
-        return mark('reached on a fielder’s choice, the force at second', outcome);
+      if (fielding?.forceAt && outcome === 'ground_out') {
+        return mark(
+          `reached on a fielder’s choice, the force at ${BAG_WORD[fielding.forceAt] ?? 'the bag'}`,
+          outcome,
+        );
       }
       return mark(placed ?? outcome.replace('_', ' '), outcome);
     }
@@ -2547,7 +2561,7 @@ if (import.meta.env.DEV) {
       runs: outcome === 'home_run' ? 1 : 0,
       // The hook has to be able to show a force play, or the one caption that
       // needs frame-level tuning is the one it cannot put on the screen.
-      force: !!extra.force,
+      forceAt: extra.forceAt,
       error: false,
       doublePlay: false,
       exitVelocity,

@@ -17,6 +17,7 @@ import {
 } from '../inning.ts';
 import type { AtBatResult } from '../atBat.ts';
 import type { Outcome } from '../hitTables.ts';
+import type { ForceBag } from '../fielding.ts';
 import type { HitResult } from '../hit.ts';
 
 /**
@@ -509,15 +510,16 @@ describe('running the bases on a ball in play', () => {
    * every run total this suite checks. It is the commonest play in baseball and
    * it was in the game backwards.
    */
-  const force = (a: number, b: number, c: number) =>
-    ({ error: false, doublePlay: false, force: true, advanceRolls: [a, b, c] }) as const;
+  /** A force taken at `at` — 2, 3 or 4 for second, third and the plate. */
+  const force = (at: ForceBag, a: number, b: number, c: number) =>
+    ({ error: false, doublePlay: false, forceAt: at, advanceRolls: [a, b, c] }) as const;
 
   it('takes the lead runner at second and leaves the batter standing on first', () => {
     const p = applyAtBat(
       { outs: 0, bases: [man('a'), null, null] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.outs).toBe(1);
     expect(p.bases[0]?.name).toBe('batter');
@@ -532,7 +534,7 @@ describe('running the bases on a ball in play', () => {
       { outs: 0, bases: [man('a'), man('b'), null] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.outs).toBe(1);
     expect(occupied(p.bases)).toEqual([true, false, true]);
@@ -545,7 +547,7 @@ describe('running the bases on a ball in play', () => {
       { outs: 0, bases: [man('a'), null, man('c')] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.runs).toBe(1);
     expect(p.bases[0]?.name).toBe('batter');
@@ -564,7 +566,7 @@ describe('running the bases on a ball in play', () => {
       { outs: 2, bases: [man('a'), null, null] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.outs).toBe(3);
     // No run crosses on a force for the third out, however far anyone got.
@@ -576,10 +578,57 @@ describe('running the bases on a ball in play', () => {
       { outs: 2, bases: [man('a'), null, man('c')] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.outs).toBe(3);
     expect(p.runs).toBe(0);
+  });
+
+    /**
+   * ⚠️ THE LEAD FORCE. Every force in the game used to be taken at SECOND
+   * whatever the bases looked like — men on first and second and the throw went
+   * across the diamond to the trailing runner; bases loaded and the play was
+   * still at second, so the force at the plate could not happen. See LEAD_FORCE.
+   */
+  it('takes the man forced at THIRD, and leaves the one behind him on second', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), null] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(3, 0, 0, 0),
+    );
+    expect(p.outs).toBe(1);
+    // 'b' was forced to third and is out there. 'a' reached second, batter first.
+    expect(occupied(p.bases)).toEqual([true, true, false]);
+    expect(p.bases[0]?.name).toBe('batter');
+    expect(p.bases[1]?.name).toBe('a');
+    expect(p.runs).toBe(0);
+  });
+
+  it('takes him at THE PLATE, and the run does not score', () => {
+    const loaded: Bases = [man('a'), man('b'), man('c')];
+    // The same play, with and without the throw home. The only difference
+    // between them is the run, which is the entire point of going home.
+    const home = applyAtBat(
+      { outs: 0, bases: loaded },
+      inPlay('ground_out'),
+      man('batter'),
+      force(4, 0, 0, 0),
+    );
+    expect(home.runs).toBe(0);
+    expect(home.outs).toBe(1);
+    // Still loaded: batter first, 'a' second, 'b' third. 'c' is the out.
+    expect(occupied(home.bases)).toEqual([true, true, true]);
+    expect(home.bases[0]?.name).toBe('batter');
+    expect(home.bases[2]?.name).toBe('b');
+
+    const second = applyAtBat(
+      { outs: 0, bases: loaded },
+      inPlay('ground_out'),
+      man('batter'),
+      force(2, 0, 0, 0),
+    );
+    expect(second.runs).toBe(1);
   });
 
     it('ignores the force when there was nobody on first to force', () => {
@@ -589,7 +638,7 @@ describe('running the bases on a ball in play', () => {
       { outs: 0, bases: [null, man('b'), null] },
       inPlay('ground_out'),
       man('batter'),
-      force(0, 0, 0),
+      force(2, 0, 0, 0),
     );
     expect(p.outs).toBe(1);
     expect(occupied(p.bases)).toEqual([false, false, true]);

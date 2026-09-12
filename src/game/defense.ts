@@ -177,7 +177,15 @@ export interface DefensivePlay extends FieldingResult {
 export function fieldBall(
   hit: HitResult,
   alignment: Alignment,
-  opts: { batterSpeed: number; forceAtFirst: boolean; outs: number },
+  opts: {
+    batterSpeed: number;
+    forceAtFirst: boolean;
+    outs: number;
+    /** The unbroken run of occupied bases from first. See LEAD_FORCE. */
+    forcedRunners?: number;
+    /** They are playing for the out at the plate. See LEAD_FORCE_INFIELD_IN. */
+    infieldIn?: boolean;
+  },
   rng: Rng,
 ): DefensivePlay {
   const by = fielderFor(hit);
@@ -190,6 +198,10 @@ export function fieldBall(
       speed: opts.batterSpeed,
       forceAtFirst: opts.forceAtFirst,
       outs: opts.outs,
+      // Which bag the force is at is a question about the BASE STATE, which
+      // core/fielding.ts deliberately cannot see. Both halves hand it over.
+      forcedRunners: opts.forcedRunners,
+      infieldIn: opts.infieldIn,
       errorMult: POSITION_DIFFICULTY[by] / glove,
       // The gloves that turn it, and whether this was a ball to turn it on.
       dpMult: relayQuality(alignment) * DP_BY_POSITION[by],

@@ -69,6 +69,60 @@ export const ERROR_RATE = 0.05;
  */
 export const FORCE_AT_SECOND = 0.6;
 
+/**
+ * WHICH BAG A FORCE IS TAKEN AT — 2, 3 or 4 for second, third and the plate.
+ *
+ * Same numbering advance() and runnerPoint() use, so the rule, the scorer and
+ * the picture all count bases the same way and nothing has to translate.
+ */
+export type ForceBag = 2 | 3 | 4;
+
+/**
+ * CHANCE THE DEFENCE GOES FOR THE LEAD FORCE instead of the easy one at second.
+ *
+ * ⚠️ EVERY FORCE IN THE GAME WAS TAKEN AT SECOND, whatever the bases looked
+ * like. Men on first and second, a ground ball to third, and the throw went
+ * across the diamond to the trailing runner instead of to the bag six feet
+ * away. Bases loaded and the play was still at second — so the single most
+ * dramatic routine play in baseball, the force at the plate with the infield
+ * in, could not happen. Zane: "the fielding really needs to be fixed."
+ *
+ * ⚠️ IT IS ONLY EVER THE *LEAD* FORCE OR SECOND, never a bag in between, and
+ * that is a rule rather than a simplification. With the bases loaded a throw to
+ * third retires the trailing man and lets the run score, which is bad baseball
+ * nobody would play — the choice a real infielder makes is "the front end or
+ * the sure one", and those are the two this models.
+ *
+ * ⚠️ IT IS *NOT* GATED ON THE OUTS, AND GATING IT THERE MADE IT INVISIBLE. The
+ * first cut reasoned that with two down any force ends the inning, so the
+ * fielder takes the surest out and the lead bag is not worth the risk. That is
+ * backwards: with men on first and second and a ball hit to third, the lead bag
+ * is the surest out on the field — he is standing on it. And because the double
+ * play only rolls under two outs, forces skew heavily toward two-out
+ * situations, so the gate was suppressing the majority of them. Measured: 5% of
+ * force outs went anywhere but second, which is one every sixteen games and
+ * reads as never. It is also free — a force for the third out scores nobody
+ * whichever bag it is taken at, so the run environment cannot see this.
+ *
+ * ponytail: a flat rate rather than one that reads WHERE the ball was fielded.
+ * A grounder to third really should go to third more often than one to the
+ * right side does, and defense.ts already knows who fielded it. That is a
+ * correlation; this is a frequency, and a frequency is what a person watching
+ * can actually judge. Add the positional version when the flat one reads wrong.
+ */
+export const LEAD_FORCE = 0.5;
+
+/**
+ * ...and with the INFIELD IN they are standing there to make exactly this play.
+ *
+ * ⚠️ THIS IS THE PAYOFF FOR THE CALL. Drawing the infield in has cost the
+ * defence the holes placement.ts charges for since it shipped, and bought one
+ * thing: the man on third does not gamble on a grounder. Now it also means what
+ * the alignment is actually FOR — they are conceding nothing at the plate and
+ * the throw goes home.
+ */
+export const LEAD_FORCE_INFIELD_IN = 0.85;
+
 /** Only these can be booted. A popup is caught or it is not, and a strikeout has no fielder. */
 const BOOTABLE: ReadonlySet<Outcome> = new Set<Outcome>(['ground_out', 'line_out']);
 
@@ -78,12 +132,15 @@ export interface FieldingResult {
   /** The batter and the forced runner are both out. */
   doublePlay: boolean;
   /**
-   * THE FIELDER'S CHOICE: the man forced at second is out and the BATTER IS
+   * THE FIELDER'S CHOICE: a forced man is out AT THIS BAG and the BATTER IS
    * SAFE at first. One out, like the play at first it replaces, and a bag worse
-   * for the side that hit it. Only ever set on a ground ball with a force and
-   * fewer than two down — see FORCE_AT_SECOND.
+   * for the side that hit it.
+   *
+   * 2, 3 or 4 for second, third and the plate — see LEAD_FORCE for which. Only
+   * ever set on a ground ball with a man on first; absent means the ordinary
+   * play, with the batter retired at first.
    */
-  force?: boolean;
+  forceAt?: ForceBag;
   /**
    * THE THROW TO THE EXTRA BASE, pre-rolled — see gunDown() and the note on
    * ARM_STRENGTH below.
@@ -180,6 +237,22 @@ export function rollFielding(
     /** Same idea for the relay. A better middle infield turns more of them. */
     dpMult?: number;
     /**
+     * HOW MANY RUNNERS ARE FORCED — the unbroken run of occupied bases starting
+     * at first. 1 is a man on first alone, 3 is the bases loaded. It decides
+     * which bag the LEAD force is at and nothing else; the caller knows the
+     * base state and this module deliberately does not.
+     *
+     * Defaults to 1, which is the behaviour every caller had before the lead
+     * force existed: the throw always went to second.
+     */
+    forcedRunners?: number;
+    /**
+     * THE INFIELD IS IN. They are playing for the out at the plate, so the lead
+     * force is much likelier — see LEAD_FORCE_INFIELD_IN.
+     */
+    infieldIn?: boolean;
+
+    /**
      * The arm out there, as a multiplier around 1.0. Scales THROW_RATE, so a
      * cannon in right actually costs a runner the base he used to get free.
      * Defaults to 1 — the roguelike has no fielders and is unchanged.
@@ -205,7 +278,15 @@ export function rollFielding(
 /** The original two rolls, untouched: is it booted, and is it two? */
 function rollOuts(
   outcome: Outcome,
-  opts: { speed: number; forceAtFirst: boolean; outs: number; errorMult?: number; dpMult?: number },
+  opts: {
+    speed: number;
+    forceAtFirst: boolean;
+    outs: number;
+    errorMult?: number;
+    dpMult?: number;
+    forcedRunners?: number;
+    infieldIn?: boolean;
+  },
   rng: Rng,
 ): FieldingResult {
   if (!BOOTABLE.has(outcome)) return CLEAN;
@@ -229,7 +310,15 @@ function rollOuts(
     if (rng.next() < dp) return { error: false, doublePlay: true };
   }
 
-  // He did not turn two, and the throw still mostly goes to the bag rather
-  // than to first. See FORCE_AT_SECOND.
-  return { error: false, doublePlay: false, force: rng.next() < FORCE_AT_SECOND };
+  // He did not turn two, and the throw still mostly goes to a bag rather than
+  // to first. See FORCE_AT_SECOND.
+  if (rng.next() >= FORCE_AT_SECOND) return { error: false, doublePlay: false };
+
+  // WHICH bag. The lead force is one past the last man who has to run — two
+  // forced runners means third, three means the plate. See LEAD_FORCE.
+  const lead = Math.min(4, 1 + Math.max(1, opts.forcedRunners ?? 1)) as ForceBag;
+  const goesForLead =
+    lead > 2 && rng.next() < (opts.infieldIn ? LEAD_FORCE_INFIELD_IN : LEAD_FORCE);
+
+  return { error: false, doublePlay: false, forceAt: goesForLead ? lead : 2 };
 }

@@ -30,6 +30,7 @@
  */
 
 import type { Outcome } from '../core/hitTables.ts';
+import type { ForceBag } from '../core/fielding.ts';
 import type { Bases } from '../core/inning.ts';
 import { occupied } from '../core/inning.ts';
 import type { GameState, Side } from './game.ts';
@@ -189,8 +190,11 @@ export interface SceneFacts {
    * read GROUND OUT over a picture of a runner standing safely on first, which
    * is the screen contradicting the book on the one play this was all fixed
    * for. See FORCE_AT_SECOND in core/fielding.ts.
+   *
+   * The BAG rather than a flag, because "force at the plate" and "force at
+   * second" are not the same event to watch — one of them just saved a run.
    */
-  force?: boolean;
+  forceAt?: ForceBag;
   /** How hard it was hit, for the one adjective that is worth an adjective. */
   exitVelocity: number;
   /** The situation he walked into — leverage is a fact about BEFORE. */
@@ -329,8 +333,21 @@ export function sceneFor(f: SceneFacts): Scene {
   // baseball — it happens several times a game — so a tier above zero here
   // would cost more clock than every big play on the list put together. The
   // caption is free; see the header.
-  if (f.force) {
-    return made('FORCE AT SECOND', who(p) ? `${who(p)} TO THE BAG` : 'HE BEATS IT OUT AT FIRST', 'routine', big);
+  if (f.forceAt) {
+    // ⚠️ THE PLATE IS NOT A ROUTINE OUT. A force at second is the commonest
+    // play in baseball and has to stay free; a throw home with the bases loaded
+    // is a run that did not score, and it is the one the room stands up for.
+    const plate = f.forceAt === 4;
+    return made(
+      `FORCE AT ${FORCE_WORD[f.forceAt]}`,
+      plate
+        ? 'AND THE RUN DOES NOT SCORE'
+        : who(p)
+          ? `${who(p)} TO THE BAG`
+          : 'HE BEATS IT OUT AT FIRST',
+      plate ? 'solid' : 'routine',
+      big,
+    );
   }
 
   /**
@@ -433,6 +450,9 @@ export function sceneForTake(f: {
     big,
   );
 }
+
+/** The bag, for a caption. Upper case because every caption is. */
+const FORCE_WORD: Record<ForceBag, string> = { 2: 'SECOND', 3: 'THIRD', 4: 'THE PLATE' };
 
 const ROUTINE: Partial<Record<Outcome, string>> = {
   ground_out: 'GROUND OUT',
