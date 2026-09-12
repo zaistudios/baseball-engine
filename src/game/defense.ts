@@ -27,7 +27,15 @@
 
 import type { Player } from '../core/roster.ts';
 import type { HitResult } from '../core/hit.ts';
-import { rollFielding, type FieldingResult, type ThrowEffect } from '../core/fielding.ts';
+import {
+  rollFielding,
+  stretchChance,
+  STRETCH_THROW,
+  type FieldingResult,
+  type ThrowEffect,
+} from '../core/fielding.ts';
+import { isHit } from '../core/hitTables.ts';
+import type { Placement } from './placement.ts';
 import type { Rng } from '../core/rng.ts';
 import { plotBatted, nearestFielder } from '../web/plot.ts';
 
@@ -187,10 +195,29 @@ export function fieldBall(
     infieldIn?: boolean;
     /** What the player's throw was worth, if he made one. See THROW_EFFECT. */
     throwEffect?: ThrowEffect;
+    /**
+     * WHERE THE BALL ACTUALLY FINISHED, from placement.ts, and the caller has
+     * it already.
+     *
+     * ⚠️ IT SETTLES AN ARGUMENT THE CODEBASE WAS HAVING WITH ITSELF. fielderFor()
+     * below re-derives who fielded the ball from a bare plotBatted() — no park,
+     * no SHIFT — while withPlacement() derives it against the alignment the
+     * defence is actually standing in. Measured over 22,000 balls in play they
+     * agree 100% of the time straight up and **84.5%** under a shift, so on one
+     * shifted ball in six the play-by-play named one man and the error was
+     * rolled against a different man's glove. Handing the answer over is both
+     * the fix and the thing stretchChance() needs.
+     */
+    placement?: Placement | null;
   },
   rng: Rng,
 ): DefensivePlay {
-  const by = fielderFor(hit);
+  // ⚠️ THE PLACEMENT'S ANSWER WINS when the caller has one — see the note on
+  // the option. fielderFor() is the fallback for a caller with no placement,
+  // which is the CLI and every test written before this.
+  const by = opts.placement
+    ? (POSITION_BY_NUMBER[opts.placement.fielderNum] ?? 'P')
+    : fielderFor(hit);
   const fielder = alignment[by];
   const glove = fielder ? gloveOf(fielder) : 1;
 
@@ -222,7 +249,31 @@ export function fieldBall(
     rng,
   );
 
-  return { ...result, by, fielder };
+  // ⚠️ ROLLED LAST, AFTER everything rollFielding() drew, for the reason that
+  // file states out loud: a die taken earlier shifts every draw behind it and
+  // quietly re-rolls a seeded season.
+  //
+  // Only a HIT can be stretched — there is no extra bag past an out — and only
+  // one that got a long way from anybody. stretchChance() returns 0 otherwise
+  // and inning.ts never looks at the roll.
+  // ⚠️ THE DIE IS ONLY THROWN WHEN IT CAN DECIDE SOMETHING, and throwing it
+  // unconditionally was a real cost rather than tidiness. Every draw shifts the
+  // whole stream behind it, so burning one on all 40-odd balls in play a game
+  // re-randomised every season in the project — and left a measurable-looking
+  // wobble in the balance numbers that had nothing to do with the feature being
+  // measured. This fires on the tenth or so of balls that actually land in
+  // space, and leaves the rest of the stream exactly where it was.
+  const odds =
+    isHit(hit.outcome) && opts.placement
+      ? stretchChance(opts.batterSpeed, opts.placement.gapFt)
+      : 0;
+  const stretch =
+    odds > 0
+      ? // The same arm, at the batter's own rate — see STRETCH_THROW.
+        { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove }
+      : undefined;
+
+  return { ...result, ...(stretch ? { stretch } : {}), by, fielder };
 }
 
 /**

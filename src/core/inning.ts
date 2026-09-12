@@ -186,7 +186,16 @@ export function newMatch(innings = 3, opponentByInning: readonly number[] = []):
   };
 }
 
-const BASES_GAINED: Record<Outcome, number> = {
+/**
+ * How many bags the HIT is worth. 0 for anything that is not one.
+ *
+ * ⚠️ NOT THE SAME QUESTION AS overhead.ts's basesFor(), which asks how far the
+ * BATTER RUNS and answers 1 on an out because he still has to run it out. They
+ * agree on every hit and disagree on every out, so neither can be written in
+ * terms of the other; exported because the headless sim needs the hit half and
+ * cannot import the web layer (sprites.ts uses import.meta.glob).
+ */
+export const BASES_GAINED: Record<Outcome, number> = {
   single: 1,
   double: 2,
   triple: 3,
@@ -275,10 +284,15 @@ function advance(
   extraBases = false,
   arm?: { odds: number; roll: number },
   rolls?: readonly [number, number, number],
-): { bases: Bases; runs: number; thrownOut: ThrownOut | null } {
+  /** The batter's own gamble on one more bag. See stretchChance(). */
+  stretch?: { odds: number; roll: number; armOdds: number },
+): { bases: Bases; runs: number; thrownOut: ThrownOut | null; batterTo: number } {
   const next: [Runner | null, Runner | null, Runner | null] = [null, null, null];
   let runs = 0;
   let thrownOut: ThrownOut | null = null;
+  // How far the man at the plate actually got. The replay cannot read it off
+  // the outcome any more — a single he stretched leaves him on second.
+  let batterTo = n;
 
   // Third, second, first, then the batter. `from` is -1 for the man at the
   // plate, matching runnerMoves()' convention for a runner who came from home.
@@ -301,9 +315,19 @@ function advance(
     // Legs, and a gap in front of him. Scoring never collides, so a runner
     // rounding third for the plate is never blocked.
     const wants = to + 1;
+    // ⚠️ THE BATTER IS IN THIS NOW, and `from >= 0` used to keep him out. His
+    // gamble is rolled somewhere else from the runners' — he is starting from
+    // the box rather than off a lead, and what decides it is how far the ball
+    // he just hit got from anybody. See stretchChance().
+    const goes =
+      from < 0
+        ? !!stretch && stretch.roll < stretch.odds
+        : rolls
+          ? rolls[from]! < sendChance(who.speed, wants)
+          : who.speed >= EXTRA_BASE_SPEED;
+
     if (
       canStretch &&
-      from >= 0 &&
       // ⚠️ HE IS NOT ALREADY SCORING. Without this a man on third when the
       // batter doubles has `to` of 5 and asks for SIX — the clause below lets
       // him, because `wants >= 4` was written to say the road home is never
@@ -315,15 +339,20 @@ function advance(
       // sixth base in it. Found by playing the game, not by a test.
       to < 4 &&
       (wants >= 4 || wants < ceiling) &&
-      // No die means nobody rolled one — the CLI and every caller that passes
-      // CLEAN — so fall back to the flat threshold this used to be.
-      (rolls ? rolls[from]! < sendChance(who.speed, wants) : who.speed >= EXTRA_BASE_SPEED)
+      goes
     ) {
       // ⚠️ NOW THERE IS A THROW. He used to take this base for free; the arm
       // out there gets one chance at him, and only one per play — there is one
       // ball and it can only be thrown to one base. See gunDown().
-      if (arm && !thrownOut && gunDown(arm.odds, arm.roll, who.speed)) {
-        thrownOut = { runner: who, at: wants };
+      // ⚠️ THE BATTER IS THROWN AT ON HIS OWN TERMS. He is the one man on the
+      // field who saw where the ball went before he decided to run, so the arm
+      // gets a worse chance at him than at a runner breaking off a lead. Same
+      // die — there is one ball and one throw — different odds. See
+      // STRETCH_THROW.
+      const armOdds = from < 0 && stretch ? stretch.armOdds : arm?.odds;
+      if (arm && armOdds !== undefined && !thrownOut && gunDown(armOdds, arm.roll, who.speed)) {
+        thrownOut = { runner: who, at: wants, batter: from < 0 };
+        if (from < 0) batterTo = wants;
         // He is off the bases and NOT counted in `next`. Everybody behind him
         // still moves: the throw went to the lead base, which is exactly why
         // the man behind takes the extra one on it. `ceiling` is deliberately
@@ -333,6 +362,7 @@ function advance(
       to = wants;
     }
 
+    if (from < 0) batterTo = to;
     if (to >= 4) runs++;
     else {
       next[to - 1] = who;
@@ -340,7 +370,7 @@ function advance(
     }
   }
 
-  return { bases: next, runs, thrownOut };
+  return { bases: next, runs, thrownOut, batterTo };
 }
 
 /**
@@ -352,6 +382,16 @@ function advance(
 export interface ThrownOut {
   runner: Runner;
   at: number;
+  /**
+   * TRUE WHEN IT IS THE MAN WHO HIT THE BALL, stretching his own hit.
+   *
+   * ⚠️ THE PICTURE NEEDS IT AND THE SENTENCE NEEDS IT. Every other man on this
+   * list started the play standing on a bag, so the replay can work out where
+   * he ran from by subtracting; the batter started in the box and is already
+   * being drawn by the race to first, so without this he is drawn twice — once
+   * sprinting a leg he never ran, and once by the race that owns him.
+   */
+  batter: boolean;
 }
 
 /**
@@ -654,6 +694,17 @@ export interface PlayState {
 export interface PlayResult extends PlayState {
   runs: number;
   /**
+   * HOW MANY BAGS THE BATTER ENDED ON — 1 for a single he did not stretch, 2
+   * for one he did, 4 for a home run, 0 when he never reached.
+   *
+   * ⚠️ THE REPLAY USED TO DERIVE THIS FROM THE OUTCOME, and it cannot any
+   * more: a stretched single is still scored a single and leaves him standing
+   * on second. A picture that ran him to first under a scoreboard that had him
+   * on second is the two halves of one play disagreeing, which is the failure
+   * this whole file's notes keep circling.
+   */
+  batterTo: number;
+  /**
    * The man gunned down going for one too many, or null. Carried out of here
    * because the scorer needs his NAME and his BAG — "thrown out" with neither
    * is a line nobody can read, and this is the only out on the play that did
@@ -690,6 +741,9 @@ export function applyAtBat(
   let { outs, bases } = state;
   let runs = 0;
   let thrownOut: ThrownOut | null = null;
+  // How many bags the man at the plate ended on. The replay cannot read it off
+  // the outcome once he is allowed to stretch — see advance().
+  let batterTo = 0;
 
   switch (result.kind) {
     case 'strikeout':
@@ -776,9 +830,11 @@ export function applyAtBat(
           true,
           fielding.extraBase,
           fielding.advanceRolls,
+          fielding.stretch,
         );
         bases = a.bases;
         runs += a.runs;
+        batterTo = a.batterTo;
         // Gunned down going for one too many. It is an out like any other, and
         // it is the only out in the file that happens to a man who was not at
         // the plate.
@@ -802,5 +858,5 @@ export function applyAtBat(
     }
   }
 
-  return { outs, bases, runs, thrownOut };
+  return { outs, bases, runs, thrownOut, batterTo };
 }

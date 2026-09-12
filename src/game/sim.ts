@@ -49,7 +49,9 @@ import { statsOf, parkFoulAngle, HOME, AWAY } from './teams.ts';
 import { fatigue, shouldRelieve } from './bullpen.ts';
 import { fieldBall, reachOf } from './defense.ts';
 import type { ForceBag } from '../core/fielding.ts';
-import { forcedRunners } from '../core/inning.ts';
+
+import { isHit } from '../core/hitTables.ts';
+import { BASES_GAINED, forcedRunners } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement } from './placement.ts';
 import { pickShift } from './shift.ts';
@@ -98,6 +100,12 @@ export interface AtBatLog {
    * different questions and only the second says the lead force works.
    */
   forceAt?: ForceBag;
+  /**
+   * The batter went for one more bag than the hit was worth, and whether he got
+   * it. Counted for the same reason the force is: a new rule with a knob, and
+   * the only thing that says whether the gamble is worth taking.
+   */
+  stretched?: 'safe' | 'out';
 }
 
 /**
@@ -230,7 +238,8 @@ export function playAiAtBat(
     runnerOnThird: g.bases[2] !== null,
     late: g.inning >= 7,
   });
-  const result = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift }).result;
+  const placed = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift });
+  const result = placed.result;
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =
@@ -244,6 +253,7 @@ export function playAiAtBat(
             outs: g.outs,
             forcedRunners: forcedRunners(g.bases),
             infieldIn: shift === 'in',
+            placement: placed.placement,
           },
           rng,
         )
@@ -269,6 +279,13 @@ export function playAiAtBat(
       forceAt:
         result.kind === 'in_play' && result.hit.outcome === 'ground_out'
           ? fielding?.forceAt
+          : undefined,
+      stretched: played.log.thrownOut?.batter
+        ? 'out'
+        : result.kind === 'in_play' &&
+            isHit(result.hit.outcome) &&
+            played.log.batterTo > BASES_GAINED[result.hit.outcome]
+          ? 'safe'
           : undefined,
       bunt: bunted,
     },
@@ -384,6 +401,10 @@ export interface SimResult {
   forceOuts: number;
   /** Of those, the ones taken at THIRD or the PLATE rather than at second. */
   leadForces: number;
+  /** Batters who went for one more bag than the hit was worth, and made it. */
+  stretchSafe: number;
+  /** ...and the ones the arm got. See STRETCH_THROW. */
+  stretchOut: number;
   /**
    * How the plate appearances ended, both sides.
    *
@@ -436,6 +457,8 @@ export function simulateGame(
   let foulOuts = 0;
   let forceOuts = 0;
   let leadForces = 0;
+  let stretchSafe = 0;
+  let stretchOut = 0;
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -464,6 +487,8 @@ export function simulateGame(
     if (out.atBat.error) errors++;
     if (out.atBat.bunt) bunts++;
     if (out.atBat.outcome === 'foul_out') foulOuts++;
+    if (out.atBat.stretched === 'safe') stretchSafe++;
+    if (out.atBat.stretched === 'out') stretchOut++;
     if (out.atBat.forceAt) {
       forceOuts++;
       if (out.atBat.forceAt > 2) leadForces++;
@@ -478,7 +503,7 @@ export function simulateGame(
     }
   }
 
-  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces };
+  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces, stretchSafe, stretchOut };
 }
 
 /** A one-line box score, for the CLI and for eyeballing a sim run. */

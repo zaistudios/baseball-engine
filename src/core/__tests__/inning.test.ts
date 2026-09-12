@@ -771,3 +771,100 @@ describe('nobody is thrown out at a base that does not exist', () => {
     }
   });
 });
+
+/**
+ * THE BATTER STRETCHING HIS OWN HIT — see STRETCH_GAP_FT in fielding.ts.
+ *
+ * advance() excluded him by hand (`from >= 0`) and its own note gave the
+ * reason: "a man stretching a single into a double is a play with a throw and a
+ * call at the far end, and the overhead replay stops him at first". The replay
+ * does not stop him at first any more.
+ */
+describe('the batter stretches', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  const goes = { odds: 1, roll: 0, armOdds: 0 };
+  const holds = { odds: 0, roll: 0.99, armOdds: 0 };
+  const gunned = { odds: 1, roll: 0, armOdds: 1 };
+
+  it('turns a single into a double when he goes and they do not get him', () => {
+    const p = applyAtBat({ outs: 0, bases: EMPTY_BASES }, inPlay('single'), man('batter'), {
+      error: false,
+      doublePlay: false,
+      stretch: goes,
+      extraBase: { odds: 0, roll: 0.99 },
+    });
+    expect(occupied(p.bases)).toEqual([false, true, false]);
+    expect(p.batterTo).toBe(2);
+    expect(p.thrownOut).toBeFalsy();
+    expect(p.outs).toBe(0);
+  });
+
+  it('leaves him on first when he holds', () => {
+    const p = applyAtBat({ outs: 0, bases: EMPTY_BASES }, inPlay('single'), man('batter'), {
+      error: false,
+      doublePlay: false,
+      stretch: holds,
+    });
+    expect(occupied(p.bases)).toEqual([true, false, false]);
+    expect(p.batterTo).toBe(1);
+  });
+
+  it('costs him an out when the arm gets him, and marks it as the batter', () => {
+    const p = applyAtBat({ outs: 0, bases: EMPTY_BASES }, inPlay('single'), man('batter'), {
+      error: false,
+      doublePlay: false,
+      stretch: gunned,
+      extraBase: { odds: 1, roll: 0 },
+    });
+    expect(p.outs).toBe(1);
+    expect(p.thrownOut?.batter).toBe(true);
+    expect(p.thrownOut?.at).toBe(2);
+    expect(occupied(p.bases)).toEqual([false, false, false]);
+  });
+
+  /**
+   * ⚠️ ONE BALL, ONE THROW. If a runner ahead of him already drew it, nobody
+   * is throwing at the batter — and advance() enforces that with the same
+   * `!thrownOut` guard the runners share.
+   */
+  it('cannot be thrown out behind a runner who already drew the throw', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a', 1.4), null, null] },
+      inPlay('single'),
+      man('batter'),
+      {
+        error: false,
+        doublePlay: false,
+        extraBase: { odds: 1, roll: 0 },
+        advanceRolls: [0, 0, 0],
+        stretch: gunned,
+      },
+    );
+    // The man from first is the one they got, going for third.
+    expect(p.thrownOut?.batter).toBe(false);
+    expect(p.outs).toBe(1);
+  });
+
+  it('never stretches a triple — there is no fifth bag', () => {
+    const p = applyAtBat({ outs: 0, bases: EMPTY_BASES }, inPlay('triple'), man('batter'), {
+      error: false,
+      doublePlay: false,
+      stretch: goes,
+    });
+    expect(p.batterTo).toBe(3);
+    expect(p.runs).toBe(0);
+    expect(occupied(p.bases)).toEqual([false, false, true]);
+  });
+
+  it('will not run into the back of the man in front of him', () => {
+    // A slow runner from first stops on second; the batter wants it too.
+    const p = applyAtBat(
+      { outs: 0, bases: [man('slow', 0.6), null, null] },
+      inPlay('single'),
+      man('batter'),
+      { error: false, doublePlay: false, advanceRolls: [0.99, 0.99, 0.99], stretch: goes },
+    );
+    expect(occupied(p.bases)).toEqual([true, true, false]);
+    expect(p.batterTo).toBe(1);
+  });
+});

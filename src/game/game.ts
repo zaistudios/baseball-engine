@@ -388,6 +388,12 @@ export interface PlayLog {
    * appearing from nowhere is a line that reads like a bug.
    */
   thrownOut?: ThrownOut | null;
+  /**
+   * How many bags the batter ended on. 1 for a single, 2 for one he stretched.
+   * The replay runs him this far rather than reading it off the outcome — see
+   * PlayResult.batterTo.
+   */
+  batterTo: number;
 }
 
 export function recordPlay(
@@ -460,15 +466,15 @@ export function recordPlay(
   // for exactly that reason.
   if (play.runs > 0 && isWalkOff(next)) {
     next = closeHalf(next, { ...next, over: true, winner: 'home', ending: 'walk_off' });
-    return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut) };
+    return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.batterTo) };
   }
 
   if (play.outs < 3) {
-    return { game: next, log: log(play.runs, before, next.bases, batter, side, false, thrownOut) };
+    return { game: next, log: log(play.runs, before, next.bases, batter, side, false, thrownOut, play.batterTo) };
   }
 
   next = rollHalf(next);
-  return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut) };
+  return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.batterTo) };
 }
 
 const log = (
@@ -479,7 +485,8 @@ const log = (
   side: Side,
   halfEnded: boolean,
   thrownOut: ThrownOut | null = null,
-): PlayLog => ({ runs, before, after, batter, side, halfEnded, scored: runs, thrownOut });
+  batterTo = 0,
+): PlayLog => ({ runs, before, after, batter, side, halfEnded, scored: runs, thrownOut, batterTo });
 
 /**
  * The home team is batting in the last of it and just went ahead.

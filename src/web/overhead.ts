@@ -29,6 +29,8 @@ import {
   runToFirstMs,
   playCues,
   roleFor,
+  relayFor,
+  RELAY_OUT,
   FIELDERS,
   REACTION_MS,
   SHADE,
@@ -138,7 +140,18 @@ export interface Replay {
    * The play-by-play has printed this line since the arm existed and the field
    * never showed it: the throw beat a man nobody could see running.
    */
-  thrownOut?: { at: number; speed: number };
+  thrownOut?: { at: number; speed: number; batter?: boolean };
+  /**
+   * HOW MANY BAGS THE BATTER ENDED ON — 1 unless he stretched. Omitted falls
+   * back to basesFor(outcome), which is what every caller that cannot stretch
+   * gets and exactly the old behaviour.
+   *
+   * ⚠️ IT CANNOT BE READ OFF THE OUTCOME ANY MORE. A stretched single is still
+   * scored a single and leaves him on second; a replay that ran him to first
+   * under a scoreboard showing him on second is the picture contradicting the
+   * book.
+   */
+  batterTo?: number;
   /**
    * Who goes after it, when the geometry cannot say. Only fouls set this —
    * see raceFor(). Undefined means "ask nearestFielder", which is right for
@@ -156,6 +169,23 @@ export interface Replay {
    * picture of a ball, not a reader of the game state. It is handed a length.
    */
   holdMs?: number;
+  /**
+   * A STOLEN BASE, drawn instead of a batted ball.
+   *
+   * ⚠️ THE MOST RECOGNISABLE TAG PLAY IN THE SPORT HAD NO PICTURE AT ALL. A
+   * steal resolved in a die and a line of text: the base HUD simply showed the
+   * runner one bag further along, or gone. Everything needed to draw it was
+   * already here — bags, runners, a throw, a call — and the only thing missing
+   * was a reason to put them on the screen without a ball in play.
+   *
+   * ⚠️ IT IS NOT A FORCE AND THE CALL SAYS SO. Nobody made this man run, so the
+   * catcher has to put the ball on him; `tag` is what separates it from every
+   * other OUT this file draws, all of which are somebody stepping on a bag.
+   *
+   * from and to are bag numbers in runnerPoint()'s counting — 1 first, 2
+   * second, 3 third — so the runner, the throw and the call read one set.
+   */
+  steal?: { from: number; to: number; safe: boolean; speed: number };
   /**
    * Which of the replay's sounds have already played.
    *
@@ -182,7 +212,9 @@ export function newReplay(o: {
   held?: number[];
   /** Where the defence was standing. Omitted is standard depth. */
   fielders?: readonly Fielder[];
-  thrownOut?: { at: number; speed: number };
+  thrownOut?: { at: number; speed: number; batter?: boolean };
+  batterTo?: number;
+  steal?: { from: number; to: number; safe: boolean; speed: number };
   chaserNum?: number;
   /**
    * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
@@ -216,6 +248,8 @@ export function newReplay(o: {
     moves: o.moves ?? [],
     held: o.held ?? [],
     ...(o.thrownOut === undefined ? {} : { thrownOut: o.thrownOut }),
+    ...(o.batterTo === undefined ? {} : { batterTo: o.batterTo }),
+    ...(o.steal === undefined ? {} : { steal: o.steal }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
@@ -307,6 +341,39 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
   };
 }
 
+/**
+ * IS THERE A CUT-OFF MAN ON THIS PLAY?
+ *
+ * ⚠️ ONLY WHEN THERE IS A THROW TO A BAG AND AN OUTFIELDER HAS THE BALL. Those
+ * are exactly the plays that used to draw nothing between the man who picked it
+ * up and the runner who was called out three hundred feet away — a die decided
+ * it, the play-by-play printed it, and the field showed a man stopping for no
+ * visible reason. A relay drawn on every base hit would be clutter; this is the
+ * one case where its absence was a hole.
+ */
+const needsRelay = (r: Replay, chaser: Fielder): boolean =>
+  chaser.num >= 7 && r.thrownOut !== undefined;
+
+/**
+ * Where the cut-off man stands. Derived rather than stored so the fielder who
+ * runs there and the ball that passes through him cannot end up in two places.
+ */
+function relaySpot(
+  cam: Cam,
+  r: Replay,
+  chaser: Fielder,
+  landing: { x: number; y: number },
+): { x: number; y: number } {
+  const num = relayFor(chaser);
+  const f = r.fielders.find((x) => x.num === num);
+  if (!f) return landing;
+  const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
+  return {
+    x: post.x + (landing.x - post.x) * RELAY_OUT,
+    y: post.y + (landing.y - post.y) * RELAY_OUT,
+  };
+}
+
 /** Fouls of both kinds — the one that continues the at-bat and the one that ends it. */
 export const isFoul = (r: Replay): boolean =>
   r.outcome === 'foul' || r.outcome === 'foul_out';
@@ -319,7 +386,20 @@ export const isFoul = (r: Replay): boolean =>
  * in half a second and he is still 1.4 seconds from the bag. Worst case is a
  * 0.6 hitter at 1900 + 460 = 2360ms.
  */
+/**
+ * HOW LONG A STOLEN BASE IS ON SCREEN.
+ *
+ * ⚠️ SHORTER THAN A BALL IN PLAY AND LONGER THAN A FOUL. It is a real play with
+ * a call at the end of it, so it earns more than the 220ms a foul gets; it also
+ * happens between pitches with the next hitter waiting, so it cannot have the
+ * two full seconds a batted ball takes. The throw lands at THROW_MS and the
+ * call sits under it for the rest.
+ */
+export const STEAL_MS = 1500;
+export const STEAL_THROW_MS = 900;
+
 export const replayLength = (r: Replay): number => {
+  if (r.steal) return REPLAY_CUT_MS + STEAL_MS;
   // A foul that did not end the at-bat has no race to wait on and no call to
   // hold — see FOUL_HOLD_MS. The caught one falls through to the normal beat,
   // because it is an out and an out is worth a moment.
@@ -616,6 +696,7 @@ export function drawOverhead(
   const race = raceFor(r);
   const { chaser } = race;
   const landing = overheadPoint(r.plot.distFt, r.direction, cam.home, cam.pxPerFt);
+  const relaying = needsRelay(r, chaser);
   // Fielder clocks run from CONTACT, not from the cut — `t` above is the
   // ball's flight time and they are 220ms apart.
   const tc = now - r.startedAt;
@@ -630,7 +711,7 @@ export function drawOverhead(
 
   for (const f of r.fielders) {
     const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
-    const role = roleFor(f, chaser, r.doublePlay);
+    const role = roleFor(f, chaser, r.doublePlay, relaying);
     let to = post;
     let k2 = 0;
 
@@ -645,6 +726,11 @@ export function drawOverhead(
     } else if (role === 'cover-second') {
       to = besideBag(cam, second);
       k2 = leg(race.relayMs ?? race.fieldedAt);
+    } else if (role === 'relay') {
+      // Out toward the ball and not onto it — see relaySpot(). He has to be
+      // standing there BEFORE the outfielder lets go, so his clock is the catch.
+      to = relaySpot(cam, r, chaser, landing);
+      k2 = leg(race.fieldedAt);
     } else {
       to = landing;
       k2 = SHADE * leg(race.fieldedAt);
@@ -672,6 +758,15 @@ export function drawOverhead(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(f.num), p.x, p.y + 0.5);
+  }
+
+  // ⚠️ A STEAL HAS NO BATTED BALL, so everything below — the flight, the trail,
+  // the hop, the race to first — is about a ball that was never hit. It gets
+  // its own short block and returns.
+  if (r.steal) {
+    drawSteal(ctx, cam, now, r, r.steal, opts);
+    ctx.restore();
+    return;
   }
 
   // The ball, and the ground it has covered.
@@ -821,6 +916,88 @@ function drawRunnerDot(
 }
 
 /**
+ * THE STOLEN BASE — the runner, the catcher's throw, and a tag at the end.
+ *
+ * ⚠️ THE THROW COMES FROM HOME, not from wherever a batted ball finished, and
+ * that is the whole shape of the play: the catcher is the fielder, the bag is
+ * the target, and the runner left before either of them moved. Everything here
+ * is drawn with the same helpers a ball in play uses, so a steal and a force
+ * look like the same sport.
+ */
+function drawSteal(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  now: number,
+  r: Replay,
+  steal: NonNullable<Replay['steal']>,
+  opts: OverheadOpts,
+): void {
+  const t = now - r.startedAt - REPLAY_CUT_MS;
+  const bag = bagAt(cam, steal.to - 1);
+
+  // The nine at their posts, with the man taking the throw coming to the bag.
+  // The shortstop covers second on a steal and the third baseman covers third —
+  // which is where they already are, and the only positioning a dot can say.
+  const cover = steal.to === 3 ? 5 : 6;
+  for (const f of r.fielders) {
+    const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
+    const takes = f.num === cover;
+    const to = takes ? besideBag(cam, bag) : post;
+    const k = takes ? Math.min(1, Math.max(0, t / STEAL_THROW_MS)) : 0;
+    const p = { x: post.x + (to.x - post.x) * k, y: post.y + (to.y - post.y) * k };
+    if (!drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: String(f.num) }, { alpha: takes ? 1 : 0.55 })) {
+      ctx.fillStyle = takes ? '#e8e8d4' : 'rgba(200,204,208,0.55)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // The runner. He is off at the pitch, so his clock starts at zero, and he
+  // stops dim on the bag he did not get.
+  const runMs = runToFirstMs(steal.speed) * RUNNING_START;
+  const k = Math.min(1, t / runMs);
+  drawRunnerDot(ctx, runnerPoint(cam, steal.from, steal.to, k), !steal.safe && t > runMs);
+
+  // The catcher's throw, from the plate to the bag.
+  if (t > 120) {
+    const k2 = Math.min(1, (t - 120) / (STEAL_THROW_MS - 120));
+    ctx.strokeStyle = 'rgba(244,244,232,0.22)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cam.home.x, cam.home.y);
+    ctx.lineTo(bag.x, bag.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#f4f4e8';
+    ctx.beginPath();
+    ctx.arc(cam.home.x + (bag.x - cam.home.x) * k2, cam.home.y + (bag.y - cam.home.y) * k2, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The call, once both the man and the ball have got there.
+  if (t > Math.max(runMs, STEAL_THROW_MS)) {
+    ctx.font = 'bold 15px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = steal.safe ? '#6fbf73' : '#ff8c66';
+    ctx.fillText(steal.safe ? 'SAFE' : 'OUT', bag.x + (steal.to === 3 ? -24 : 22), bag.y - 16);
+  }
+  // ⚠️ THROUGH cue(), NOT A BARE CALL. The draw runs every frame, so a sound
+  // fired straight from here plays sixty times a second for the rest of the
+  // play — and the keyed set is also what makes it survive the clock stopping
+  // behind a menu. See cuePlaySounds().
+  if (opts.sfx) {
+    const sfx = opts.sfx;
+    cue(r, 'mitt', STEAL_THROW_MS, t, () => sfx('mitt'));
+    cue(r, 'call', Math.max(runMs, STEAL_THROW_MS), t, () =>
+      sfx(steal.safe ? 'onBase' : 'out'),
+    );
+  }
+}
+
+/**
  * A man on base is already moving when the ball is hit, so a bag costs him
  * less than the ninety feet out of the box costs the hitter.
  */
@@ -895,13 +1072,42 @@ function drawRace(
    * core/inning.ts, which is the only thing that can produce this.
    */
   const gunned =
-    r.thrownOut === undefined
+    // ⚠️ NOT THE BATTER. He is already being drawn by the race below, so a
+    // second dot here sprints a leg he never ran while the real one runs the
+    // one he did. See ThrownOut.batter.
+    r.thrownOut === undefined || r.thrownOut.batter
       ? null
       : {
           at: r.thrownOut.at,
           from: r.thrownOut.at - 1 - basesFor(r.outcome),
           ms: trip(r.thrownOut.speed, 1 + basesFor(r.outcome)),
         };
+
+  /**
+   * THE MAN THE THROW IS GOING AFTER, and when it gets there. It is either a
+   * runner gunned down going for one too many or the batter caught stretching
+   * his own hit, and both are drawn from the same two numbers.
+   */
+  // ⚠️ HOW FAR THE BATTER RUNS, HOISTED ABOVE THE THROWS. Both the ball and the
+  // man have to be worked out from one pair of numbers, or a throw lands at a
+  // bag the runner is still two hundred milliseconds from reaching.
+  const bases = r.batterTo ?? basesFor(r.outcome);
+  const stretchedOut = r.thrownOut?.batter === true;
+  const tripMs = bases === 1 ? runMs : Math.min(runMs * bases, onScreen);
+
+  /**
+   * THE MAN THE THROW IS GOING AFTER, and when it has to get there. It is
+   * either a runner gunned down going for one too many or the batter caught
+   * stretching his own hit, and both are drawn from the same two numbers.
+   */
+  const gunnedThrow = stretchedOut
+    ? { at: bases, ms: tripMs }
+    : gunned
+      ? { at: gunned.at, ms: gunned.ms }
+      : null;
+
+  // Whether an outfielder has to cut it off on the way. See relaySpot().
+  const relaying = needsRelay(r, race.chaser);
 
   // A caught fly is out on the catch. He pulls up rather than running it out,
   // which is both what happens and what stops a pointless dot finishing a race
@@ -982,6 +1188,26 @@ function drawRace(
     throwLeg(landing, forceBag, fieldedAt, relayMs);
   }
 
+  // ⚠️ THE THROW THAT GOT A RUNNER USED TO BE DRAWN NOWHERE AT ALL. gunDown()
+  // has decided this since the arm shipped and the field never showed it: a man
+  // stopped dead at a bag and a line of text said why. Now the ball goes there,
+  // through the cut-off man when an outfielder has it — see relaySpot().
+  //
+  // It is timed off the runner rather than off a clock of its own, because the
+  // one thing it must never do is arrive after the man it beat.
+  if (gunnedThrow) {
+    const bag = bagAt(cam, gunnedThrow.at - 1);
+    const land = gunnedThrow.ms;
+    if (relaying) {
+      const cut = relaySpot(cam, r, race.chaser, landing);
+      const cutAt = fieldedAt + (land - fieldedAt) * 0.45;
+      throwLeg(landing, cut, fieldedAt, cutAt);
+      throwLeg(cut, bag, cutAt, land);
+    } else {
+      throwLeg(landing, bag, fieldedAt, land);
+    }
+  }
+
   // The batter, running it out as far as the scoreboard says he got.
   //
   // ⚠️ THE PACE IS THE TRIP, NOT THE LEG. `runMs` is the race to FIRST and it
@@ -991,10 +1217,10 @@ function drawRace(
   // in 3.8 seconds, and he would be cut off rounding third. So the trip is
   // capped to land him on the bag just before the camera cuts back, which on a
   // long ball reads as the trot it should be.
-  const bases = basesFor(r.outcome);
-  const tripMs = bases === 1 ? runMs : Math.min(runMs * bases, onScreen);
+  // ⚠️ HOW FAR HE ACTUALLY GOT, not how far the hit was worth. A stretched
+  // single leaves him on second and a stretch he lost leaves him dead at it.
   const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
-  drawRunnerDot(ctx, runnerPoint(cam, 0, bases, tripK));
+  drawRunnerDot(ctx, runnerPoint(cam, 0, bases, tripK), stretchedOut && t > tripMs);
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.
@@ -1011,6 +1237,12 @@ function drawRace(
   // why it needs saying somewhere other than the play-by-play.
   if (gunned && t > gunned.ms) {
     call('OUT', bagAt(cam, gunned.at - 1), false, gunned.at === 3 ? -24 : 22);
+  }
+
+  // The batter cut down stretching his own hit. Called at the bag he was
+  // reaching for, which is the one the race just ran him to.
+  if (stretchedOut && t > tripMs) {
+    call('OUT', bagAt(cam, bases - 1), false, bases >= 3 ? -24 : 22);
   }
 
   if (caught) {

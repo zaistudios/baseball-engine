@@ -1244,6 +1244,86 @@ hit-or-out before the ball is ever plotted, and geometry only gets a vote
 afterwards in `contest()`. Everything above makes the picture agree with that
 verdict. None of it makes the verdict come from the picture.
 
+### Tags, relays, and the batter finally runs — 2026-09-12, third pass
+
+Zane: *"now we need tags, relays, and batters stretching hits implemented,
+fluid."* Three holes, and each one turned out to be a place where the engine
+already knew something the screen never showed.
+
+**1. The batter never stretched anything.** `advance()` excluded him by hand —
+`from >= 0` — and its own note gave the reason: *"a man stretching a single into
+a double is a play with a throw and a call at the far end, and the overhead
+replay stops him at first."* The replay does not stop him at first any more, so
+the reason was spent. Every runner on base could gamble for ninety feet; the one
+man who actually hit the ball and could see where it went could not.
+
+`STRETCH_GAP_FT` (78ft, the top fifth of the single population) decides whether
+it is even worth thinking about, and `stretchChance()` scales by his legs from
+there. He is thrown at like anyone else, and `batterTo` now travels out through
+`PlayResult` → `PlayLog` → the replay, because **a stretched single is still
+scored a single and leaves him standing on second** — the outcome cannot say how
+far he ran any more.
+
+⚠️ **The economics were backwards on the first cut, and only measuring caught
+it.** Sharing the runners' `THROW_RATE` of 0.28 made stretching cost **0.08 runs
+per team per game** — a straight loss that the model chose on 45% of qualifying
+balls, which is not a gamble, it is a mistake the game makes on your behalf
+several times a night. `STRETCH_THROW` is 0.18, and the reason is not
+generosity: a man on first breaking for third is running on a read he made
+before the ball landed, while the batter watched it come off his own bat. He
+picks his spots, so the spots he picks are the ones he makes. **0.51 stretches
+per team per game, 83% of them safe.**
+
+⚠️ **AND A DIE THROWN WHEN IT CANNOT DECIDE ANYTHING IS NOT FREE.** The first
+version rolled the stretch on every ball in play. Every draw shifts the whole
+stream behind it, so that re-randomised every seeded season in the project and
+put a 0.13-run wobble in the balance numbers that had nothing to do with the
+feature being measured — I nearly tuned a constant to chase it. It fires only on
+the tenth or so of balls that land in space now, and runs sit at **4.34**.
+
+**2. Nobody was ever tagged, and one throw was drawn nowhere at all.** Every out
+in the game was a force or a catch. But nobody on the `thrownOut` line is forced
+— every man there *chose* to run — so the fielder has to put the ball on him.
+That is now what the play-by-play says, and it is the word that separates it from
+every other OUT on the field, all of which are somebody stepping on a bag.
+
+**The steal got a picture.** It is the most recognisable tag play in the sport
+and it resolved in a die, a flash and a line of text — the base HUD simply showed
+the man one bag along, or gone. `drawSteal()` puts the runner, the catcher's
+throw from the plate, the man covering the bag and the call on the screen, using
+the same helpers a ball in play uses so a steal and a force look like the same
+sport. Both halves call one `showSteal()`, for the reason `showFoul()` is shared:
+yours and theirs are the same event.
+
+**3. The outfield threw the ball three hundred feet on the fly**, which is the
+one thing no outfielder does. A runner gunned down going first-to-third was
+decided by `gunDown()`, printed by the play-by-play, and shown as a man stopping
+dead at a bag for no visible reason — **the throw was not drawn at any point**.
+
+`relayFor()` sends the shortstop out on anything to left or centre and the second
+baseman on anything to right, `RELAY_OUT` stands him a third of the way to the
+ball, and the throw goes in two legs through him. The `relay` role slots into
+`roleFor()` *after* cover-second and *before* cover-first — a middle infielder
+cannot do two jobs, and getting that order wrong would either empty second base
+on a double play or never fire at all.
+
+⚠️ **One fix that was not asked for and is worth naming.** Threading the
+`Placement` into `fieldBall()` settled an argument the codebase was having with
+itself: `fielderFor()` re-derived who fielded the ball from a bare
+`plotBatted()` with no park and **no shift**, while `withPlacement()` derived it
+against the alignment the defence was actually standing in. Measured over 22,000
+balls in play they agree 100% straight up and **84.5% under a shift** — so on one
+shifted ball in six, the play-by-play named one man and the error was rolled
+against a different man's glove. One answer now, and it is the same one the
+stretch reads its gap from.
+
+**Watched on screen, not trusted.** `window.__steal(to, safe)` joins `__throw()`
+and `__scene()`. Confirmed: OUT at second with the runner dimmed under the ball,
+SAFE at third with the third baseman covering, the batter rounding first on a
+stretched single, and — the one that had never been drawn in the project's life —
+a ball going right fielder → cut-off man → second base, with the tag at the end
+of it.
+
 ### The fielding, and the third press — 2026-09-12, later the same day
 
 Zane, after playing the morning's build: *"Theres no force outs the fielding

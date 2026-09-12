@@ -531,7 +531,33 @@ export const REACTION_MS = 110;
  * is the single thing that made the replay read as fake — nobody covers, and
  * the throw arrives at an empty bag. Everyone has a job on every pitch.
  */
-export type Role = 'chase' | 'cover-first' | 'cover-second' | 'shade';
+export type Role = 'chase' | 'cover-first' | 'cover-second' | 'relay' | 'shade';
+
+/**
+ * THE CUT-OFF MAN — the infielder who runs out to take the relay.
+ *
+ * ⚠️ THE OUTFIELD USED TO THROW THE BALL THREE HUNDRED FEET ON THE FLY, which
+ * is the one thing no outfielder does. A runner going first-to-third was gunned
+ * down by a die with nothing drawn between the man who picked the ball up and
+ * the bag — no throw, no cut-off, no ball travelling. So the arm rating that
+ * decided it was invisible twice over: you could not see the throw and you
+ * could not see who made it.
+ *
+ * The rule is the real one and it is short enough to state: the SHORTSTOP goes
+ * out for anything to left and centre, the SECOND BASEMAN for anything to
+ * right. That is where they line up and it is the only positioning a dot at
+ * this scale can express.
+ */
+export const relayFor = (chaser: Fielder): number => (chaser.num === 9 ? 4 : 6);
+
+/**
+ * Where the cut-off man stands: out toward the ball, but not on it.
+ *
+ * A third of the way from his post to where the ball finished puts him in the
+ * outfield grass on a deep ball and barely off the dirt on a shallow one,
+ * which is what a cut-off man actually does.
+ */
+export const RELAY_OUT = 0.34;
 
 /**
  * Who takes the throw at a bag. `bag` is 0 for first, 1 for second, the same
@@ -551,9 +577,21 @@ export function coverFor(bag: 0 | 1, chaser: Fielder): number {
   return chaser.num === 5 || chaser.num === 6 ? 4 : 6;
 }
 
-export function roleFor(f: Fielder, chaser: Fielder, needsSecond: boolean): Role {
+export function roleFor(
+  f: Fielder,
+  chaser: Fielder,
+  needsSecond: boolean,
+  /** True when the ball is in the outfield and somebody has to cut it off. */
+  needsRelay = false,
+): Role {
   if (f.num === chaser.num) return 'chase';
   if (needsSecond && f.num === coverFor(1, chaser)) return 'cover-second';
+  // ⚠️ AFTER cover-second AND BEFORE cover-first. A middle infielder cannot do
+  // two jobs, and on a relay the bag he was covering is somebody else's problem
+  // — which is what the shade does. Putting this first would empty second base
+  // on a double play, and putting it last would never fire at all, because the
+  // cut-off man is one of the two men coverFor() hands the bags to.
+  if (needsRelay && f.num === relayFor(chaser)) return 'relay';
   if (f.num === coverFor(0, chaser)) return 'cover-first';
   return 'shade';
 }

@@ -949,6 +949,37 @@ function swing(): void {
  * pitch is in the air needs the two to be interleaved on one clock, and the
  * whole running game is one decision — see running.ts.
  */
+/**
+ * CUT TO THE FIELD ON A STOLEN BASE.
+ *
+ * ⚠️ THE ONE PLAY IN THE GAME THAT RESOLVED WITH NOTHING TO WATCH. A steal was
+ * a die, a flash and a line of text; the base HUD simply showed the man one bag
+ * further along or gone. It is a throw and a tag — the most recognisable tag
+ * play there is — and every piece needed to draw it was already in overhead.ts.
+ *
+ * ⚠️ BOTH HALVES CALL THIS. Yours and theirs are the same event, and drawing
+ * only one of them is the two halves of the game disagreeing about what a steal
+ * looks like — the mistake the foul replay made before showFoul() was shared.
+ *
+ * The bag numbering is runnerPoint()'s: 1 first, 2 second, 3 third. sendRunner
+ * counts its own to from zero, so it is one less.
+ */
+function showSteal(to: number, safe: boolean, speed: number): void {
+  showScene(null);
+  replay = newReplay({
+    now: performance.now(),
+    // Nothing was hit. The outcome is only here because a Replay has one, and
+    // drawOverhead() returns before it can read the plot — see drawSteal().
+    outcome: 'ground_out',
+    exitVelocity: 0,
+    launchAngle: 0,
+    direction: 0,
+    speed,
+    safe,
+    steal: { from: to, to: to + 1, safe, speed },
+  });
+}
+
 function steal(): void {
   if (phase !== 'idle' || !youBat() || game.over) return;
   const op = stealOpportunity(game);
@@ -967,8 +998,9 @@ function steal(): void {
       : `${out.runner.name} caught stealing ${bag}. (${odds}%)`,
     out.safe ? 'big' : 'out',
   );
-  flash = out.safe ? 'SAFE!' : 'CAUGHT STEALING';
-  flashUntil = pauseFor(1100);
+  showSteal(out.to, out.safe, out.runner.speed);
+  flash = '';
+  flashUntil = performance.now() + replayLength(replay!) / speed();
 
   // Caught stealing can be the third out, which ends the half — and may end
   // the game. Route through the same finish path the at-bat uses.
@@ -1057,8 +1089,9 @@ function runnersGoOnThePitch(): void {
         caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
         caught ? 'out' : 'big',
       );
-      flash = caught ? 'CAUGHT STEALING' : `${op.runner.name.toUpperCase()} STEALS`;
-      flashUntil = pauseFor(1500);
+      showSteal(op.to, !caught, op.runner.speed);
+      flash = '';
+      flashUntil = performance.now() + replayLength(replay!) / speed();
     }
   }
 
@@ -1859,6 +1892,9 @@ function completePlay(
             forcedRunners: forcedRunners(game.bases),
             infieldIn: shift === 'in',
             throwEffect: thrown,
+            // One answer to "who is under it" and one gap for the stretch —
+            // see the note on the option in defense.ts.
+            placement: placed.placement,
           },
           rng,
         )
@@ -1948,8 +1984,16 @@ function completePlay(
             ...scorersFrom(log.before, log.after, log.runs),
           ],
           held: heldRunners(log.before, log.after),
+          // How far he actually ran, which a stretched single no longer says.
+          batterTo: log.batterTo,
           ...(log.thrownOut
-            ? { thrownOut: { at: log.thrownOut.at, speed: log.thrownOut.runner.speed } }
+            ? {
+                thrownOut: {
+                  at: log.thrownOut.at,
+                  speed: log.thrownOut.runner.speed,
+                  batter: log.thrownOut.batter,
+                },
+              }
             : {}),
         })
       : null;
@@ -1964,13 +2008,19 @@ function completePlay(
   // and folding it into "single to right" produces a sentence where an out
   // appears from nowhere.
   if (log.thrownOut) {
-    const { runner, at } = log.thrownOut;
+    const { runner, at, batter: wasBatter } = log.thrownOut;
     const num = placed.placement?.fielderNum;
-    say(
-      `   ${runner.name} thrown out at ${BAG_WORD[at] ?? 'the bag'}` +
-        (num === undefined ? '' : `, ${throwNotation(num, at)}`),
-      'out',
-    );
+    // ⚠️ TAGGED, NOT THROWN OUT. Nobody on this line is FORCED — every man
+    // here chose to run — so the fielder has to put the ball on him, and
+    // "thrown out" is the word for the other kind of play. The batter
+    // stretching his own hit gets his own sentence for the same reason the
+    // gunned-down runner does: without it an out appears from nowhere in a line
+    // about a base hit.
+    const bag = BAG_WORD[at] ?? 'the bag';
+    const how = wasBatter
+      ? `${runner.name} goes for ${bag} and is tagged out`
+      : `${runner.name} tagged out at ${bag}`;
+    say(`   ${how}` + (num === undefined ? '' : `, ${throwNotation(num, at)}`), 'out');
   }
   if (log.runs > 0) {
     const who = wasBatting === YOU ? 'YOU SCORE' : 'THEY SCORE';
@@ -2671,6 +2721,12 @@ if (import.meta.env.DEV) {
    * state all follow. A hook that only drew the bar would prove the one thing
    * that was never in doubt.
    */
+  /** A stolen base, drawn. `to` is 1 for second and 2 for third. */
+  (window as unknown as Record<string, unknown>)['__steal'] = (to = 1, safe = false) => {
+    showSteal(to, safe, 1.1);
+    return { lengthMs: replayLength(replay!) };
+  };
+
   (window as unknown as Record<string, unknown>)['__throw'] = () => {
     const align = fieldingAlignment(game);
     const shift = shiftNow();

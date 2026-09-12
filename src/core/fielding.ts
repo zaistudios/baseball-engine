@@ -124,6 +124,72 @@ export const LEAD_FORCE = 0.5;
  */
 export const LEAD_FORCE_INFIELD_IN = 0.85;
 
+// ---------------------------------------------------------- the stretch
+
+/**
+ * HOW FAR FROM THE NEAREST MAN A HIT HAS TO LAND before the batter thinks about
+ * one more bag.
+ *
+ * ⚠️ THE BATTER HAS NEVER STRETCHED ANYTHING, and inning.ts said so in its own
+ * note: "the batter never takes an extra base himself... because a man
+ * stretching a single into a double is a play with a throw and a call at the
+ * far end, and the overhead replay stops him at first." The replay does not
+ * stop him at first any more, so the reason is spent. Every runner on base
+ * could gamble for an extra ninety feet; the one man who actually hit the ball
+ * could not, which is the wrong way round — he is the one who can see where it
+ * went.
+ *
+ * Set against the single population measured in placement.ts: p50 of a single's
+ * gap is 51ft and p90 is 83, so 78 is roughly the top fifth — a ball that
+ * genuinely got into space rather than one that merely fell in. Below it he is
+ * not thinking about it, and no roll happens at all.
+ */
+export const STRETCH_GAP_FT = 78;
+
+/**
+ * ...and how often he goes, once it IS in space, at speed 1.0.
+ *
+ * ⚠️ IT IS A GAMBLE WITH A PRICE, not a bonus base. The same arm that guns down
+ * a runner going first-to-third gets its one throw at him — see gunDown() — so
+ * a slow man stretching into a good outfield is making a bad bet, and the rate
+ * has to be low enough that it stays HIS decision rather than a tax on every
+ * ball in the gap. Multiplied by his legs, so it is the fast third of the
+ * roster doing most of it, which is who does it in real ball.
+ */
+export const STRETCH_RATE = 0.45;
+
+/**
+ * ODDS THEY GET HIM, against THROW_RATE's 0.28 for a runner already on base.
+ *
+ * ⚠️ MEASURED, AND THE FIRST CUT HAD THE ECONOMICS BACKWARDS. Sharing the
+ * runner's 0.28 arm cost **0.08 runs per team per game** — so stretching was a
+ * straight loss, and the model had the batter choosing it on 45% of the balls
+ * that qualified. That is not a gamble, it is a mistake the game makes on your
+ * behalf several times a night.
+ *
+ * The reason it is lower is not generosity. A man on first breaking for third
+ * is running on a read he made before the ball landed; the BATTER watched the
+ * thing come off his own bat and is the one person on the field who already
+ * knows it got into the gap. He picks his spots, so the spots he picks are the
+ * ones he makes. 0.18 puts the realized out rate near a fifth, which is where
+ * a play worth attempting sits — enough to hurt, not enough to make going a
+ * mistake.
+ *
+ * Tune this before STRETCH_RATE. This one moves whether the gamble is worth
+ * taking; that one only moves how often it comes up.
+ */
+export const STRETCH_THROW = 0.18;
+
+/**
+ * Odds the batter goes for one more than the hit was worth. 0 when the ball did
+ * not get far enough from anybody to be worth thinking about.
+ *
+ * Exported for the same reason sendChance() and isSacrificeFly() are: a UI that
+ * wants to explain the gamble needs the predicate, not a second copy of it.
+ */
+export const stretchChance = (speed: number, gapFt: number): number =>
+  gapFt < STRETCH_GAP_FT ? 0 : Math.max(0, Math.min(0.95, STRETCH_RATE * speed));
+
 // ------------------------------------------------------------- the throw
 
 /**
@@ -251,6 +317,22 @@ export interface FieldingResult {
    * falls back to the old flat speed threshold.
    */
   advanceRolls?: readonly [number, number, number];
+  /**
+   * THE BATTER'S OWN GAMBLE, pre-rolled — see stretchChance(). Same shape and
+   * the same reason as `extraBase`: only advance() knows whether the bag in
+   * front of him is free, and advance() is pure.
+   *
+   * Absent means nobody rolled one, which is every caller written before the
+   * batter could stretch — and they all keep exactly their old behaviour,
+   * because he simply stops where the hit put him.
+   */
+  stretch?: {
+    /** Chance he goes. */
+    odds: number;
+    roll: number;
+    /** Chance they get him if he does — see STRETCH_THROW. */
+    armOdds: number;
+  };
 }
 
 export const CLEAN: FieldingResult = { error: false, doublePlay: false };
