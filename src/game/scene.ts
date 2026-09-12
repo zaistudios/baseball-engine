@@ -183,6 +183,14 @@ export interface SceneFacts {
   /** The defence booted it. */
   error: boolean;
   doublePlay: boolean;
+  /**
+   * THE FORCE AT SECOND — the lead man is out at the bag and the batter
+   * reached. Its own fact because it is its own PLAY: without it the caption
+   * read GROUND OUT over a picture of a runner standing safely on first, which
+   * is the screen contradicting the book on the one play this was all fixed
+   * for. See FORCE_AT_SECOND in core/fielding.ts.
+   */
+  force?: boolean;
   /** How hard it was hit, for the one adjective that is worth an adjective. */
   exitVelocity: number;
   /** The situation he walked into — leverage is a fact about BEFORE. */
@@ -317,6 +325,13 @@ export function sceneFor(f: SceneFacts): Scene {
   // ---- how it was fielded
   if (f.error) return made('ERROR', 'HE IS ABOARD ON THE MISPLAY', 'solid', big);
   if (f.doublePlay) return made('TWO', 'TURNED, AND THE INNING IS OVER', 'solid', big);
+  // ⚠️ ROUTINE, AND IT HAS TO STAY ROUTINE. This is the commonest out in
+  // baseball — it happens several times a game — so a tier above zero here
+  // would cost more clock than every big play on the list put together. The
+  // caption is free; see the header.
+  if (f.force) {
+    return made('FORCE AT SECOND', who(p) ? `${who(p)} TO THE BAG` : 'HE BEATS IT OUT AT FIRST', 'routine', big);
+  }
 
   /**
    * ⚠️ AN OUT IN A BIG SPOT IS A SCENE TOO, and leaving it silent was the first

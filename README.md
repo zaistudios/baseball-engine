@@ -1208,6 +1208,22 @@ aligned with `scale`: a whipping marker draws a narrow band and a dying one
 draws a wide one, so the curveball — which is hard because you have to wait it
 out, not because it is hard to see — has the most legible band on the bar.
 
+**8. Two more the screen itself caught, after all of the above was
+written.** Driving the new force play in the browser rather than trusting the
+tests: the throw flew to second, the runner stopped dead on the bag, and **no
+umpire said anything** — the call at second sat below an early return that fires
+when there is no throw to FIRST, which on a force play is always. It read as
+working only because a double play happens to set that field. And the caption
+over it said `GROUND OUT`, because `sceneFor()` had never been told the force
+exists. Both fixed; it now reads FORCE AT SECOND / SHORT TO THE BAG with the OUT
+called at the bag.
+
+Worth writing down because it is the second time this repo has learned it: a
+green suite says the rules are right and nothing at all about what is on the
+screen. `window.__scene()` next to `window.__play()` is the read-out that told
+the difference between a caption that was never built and one that was built and
+not drawn.
+
 **7. "He sat on it" is gone.** *"He sat on it is stupid thing to have."* One
 line deleted. The hot bat and the squared-up streak he says he likes are
 untouched.

@@ -1004,10 +1004,19 @@ function drawRace(
     if (t > fieldedAt) call('OUT', landing, false, 0);
     return;
   }
-  // No throw means no play, and no play means no call. An umpire does not
-  // signal safe at first on a ball off the wall — and doing it anyway put a
+
+  // ⚠️ THE CALL AT SECOND COMES BEFORE THE `throwMs === null` RETURN BELOW, and
+  // putting it after was a real bug the screen caught. On a FORCE PLAY the only
+  // throw there is ends at the bag — there is nothing thrown to first, so
+  // `throwMs` is null by design — and the early return skipped the one call the
+  // whole play is about. The ball flew to second, the runner stopped dead on
+  // it, and no umpire said anything. It is drawn on a double play from the same
+  // line, where `throwMs` happens to be set, which is why it read as working.
+  if (relayMs !== null && t > relayMs) call('OUT', second, false, -24);
+
+  // No throw means no play at FIRST, and no play means no call. An umpire does
+  // not signal safe at first on a ball off the wall — and doing it anyway put a
   // green SAFE next to the bag under a banner reading HOME RUN.
   if (throwMs === null) return;
-  if (relayMs !== null && t > relayMs) call('OUT', second, false, -24);
   if (t > Math.min(runMs, throwMs)) call(r.safe ? 'SAFE' : 'OUT', first, r.safe);
 }

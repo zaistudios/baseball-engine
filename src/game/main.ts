@@ -1752,6 +1752,7 @@ function finishAtBat(): void {
           runs: log.runs,
           error: !!fielding?.error,
           doublePlay: !!fielding?.doublePlay,
+          force: isForce(result, fielding),
           exitVelocity: result.hit.exitVelocity,
           before: spotHeWalkedInto,
           gameOver: game.over,
@@ -2500,6 +2501,17 @@ const replayNow = (now: number): number =>
  * how animations end up untuned. Two lines, not a debug menu.
  */
 if (import.meta.env.DEV) {
+  // ⚠️ READ-ONLY, AND IT EARNED ITS LINE. A caption that fails to appear looks
+  // identical to one that was never built, and the whole reason sceneForTake()
+  // exists is that nobody noticed the second case for months. This says which.
+  (window as unknown as Record<string, unknown>)['__scene'] = () => ({
+    title: scene?.title ?? null,
+    tier: scene?.tier ?? null,
+    age: performance.now() - sceneAt,
+    sceneMs,
+    hasReplay: !!replay,
+    phase,
+  });
   (window as unknown as Record<string, unknown>)['__play'] = (
     outcome: Outcome = 'double',
     exitVelocity = 95,
@@ -2533,6 +2545,9 @@ if (import.meta.env.DEV) {
       ),
       verdict: null,
       runs: outcome === 'home_run' ? 1 : 0,
+      // The hook has to be able to show a force play, or the one caption that
+      // needs frame-level tuning is the one it cannot put on the screen.
+      force: !!extra.force,
       error: false,
       doublePlay: false,
       exitVelocity,
