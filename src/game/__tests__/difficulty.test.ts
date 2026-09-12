@@ -7,19 +7,25 @@
  * thing that looks right in a screenshot and is wrong over a season.
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { grade, medianOffset, MAX_CALIBRATION_MS, TIMING_WINDOWS_MS } from '../../core/timing.ts';
 import { resolveSwing, type SwingInput } from '../../core/hit.ts';
 import { makeRng } from '../../core/rng.ts';
 import {
   LEVELS,
   MIN_SAMPLES,
+  PITCH_SPEEDS,
+  SLOWEST_PITCH,
   WINDOW,
   calibrationLabel,
+  defaults,
   levelOf,
+  loadSettings,
   newCalibration,
   observe,
+  pitchSpeedOf,
   SANE_SAMPLE_MS,
+  saveSettings,
 } from '../difficulty.ts';
 
 describe('the three levels', () => {
@@ -177,5 +183,147 @@ describe('the windows themselves are untouched', () => {
     // balanced game and this says so.
     expect(TIMING_WINDOWS_MS).toEqual({ perfect: 12, good: 35, contact: 80 });
     expect(medianOffset([])).toBe(0);
+  });
+});
+
+/**
+ * THE PRACTICE SPEED, and the one thing it must not quietly be.
+ *
+ * Slowing the ball down buys a hitter READING time. It must not buy him a
+ * wider window — that is what the assist is for, they are separate knobs, and
+ * a "slow" setting that also forgave a bad swing would make every balance
+ * number in this project's notes a number about a different game.
+ */
+describe('the pitch speed', () => {
+  it('starts at the game that was balanced, and only ever goes slower', () => {
+    expect(PITCH_SPEEDS[0]!.value).toBe(1);
+    expect(defaults().pitchSpeed).toBe(1);
+    for (const s of PITCH_SPEEDS) {
+      expect(s.value).toBeGreaterThanOrEqual(SLOWEST_PITCH);
+      expect(s.value).toBeLessThanOrEqual(1);
+    }
+    // Strictly descending, so the P key walks one direction and the label
+    // never says SLOW for something faster than EASED.
+    const values = PITCH_SPEEDS.map((s) => s.value);
+    expect([...values].sort((a, b) => b - a)).toEqual(values);
+  });
+
+  it('carries nothing that could reach grade()', () => {
+    // ⚠️ THE CLAIM, ENFORCED STRUCTURALLY RATHER THAN BY CARE. A Level carries
+    // `assist` and that multiplier lands in grade(); a PitchSpeed carries a
+    // number that lands in ball FLIGHT and must never land anywhere else. The
+    // failure this guards is somebody "fixing" a too-hard cage by giving
+    // PitchSpeed an assist of its own — at which point SLOW would quietly be a
+    // difficulty and every balance number in this project's notes would be a
+    // number about a different game.
+    for (const s of PITCH_SPEEDS) {
+      expect(Object.keys(s).sort()).toEqual(['blurb', 'name', 'value']);
+    }
+    expect(LEVELS.some((l) => 'assist' in l)).toBe(true);
+    expect(TIMING_WINDOWS_MS).toEqual({ perfect: 12, good: 35, contact: 80 });
+  });
+
+  it('answers to a value that is not on the menu with the one that is', () => {
+    expect(pitchSpeedOf(1).name).toBe('FULL');
+    expect(pitchSpeedOf(0.62)).toBe(PITCH_SPEEDS[0]);
+  });
+});
+
+describe('holding the calibration still', () => {
+  it('says so out loud, and only once there is something to hold', () => {
+    let c = newCalibration();
+    // ⚠️ PAUSED, NOT SILENT. Holding before the twelfth swing stops the tally
+    // where it stands, and an unlabelled frozen counter is a progress bar that
+    // quietly gave up — a player waits for a number that will never move.
+    expect(calibrationLabel(c, false)).toBe(`calibrating 0/${MIN_SAMPLES}`);
+    expect(calibrationLabel(c, true)).toBe(`calibrating 0/${MIN_SAMPLES} · paused`);
+
+    for (let i = 0; i < MIN_SAMPLES; i++) c = observe(c, 40);
+    expect(calibrationLabel(c, false)).toBe('calibrated +40ms');
+    expect(calibrationLabel(c, true)).toBe('calibrated +40ms · held');
+
+    let quiet = newCalibration();
+    for (let i = 0; i < MIN_SAMPLES; i++) quiet = observe(quiet, 1);
+    expect(calibrationLabel(quiet, true)).toBe('calibrated · no lag · held');
+  });
+
+  it('is off by default, so a first-time player gets the fix without finding it', () => {
+    expect(defaults().holdCalibration).toBe(false);
+  });
+});
+
+/**
+ * OFF DISK. loadSettings() is the only thing standing between a hand-edited
+ * file and an unplayable game, and it grew three fields it did not have.
+ */
+describe('what survives a round trip', () => {
+  function fakeStorage() {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+      get length() {
+        return map.size;
+      },
+      key: (i: number) => [...map.keys()][i] ?? null,
+      clear: () => map.clear(),
+    };
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', fakeStorage());
+  });
+
+  it('hands back exactly what was filed', () => {
+    let c = newCalibration();
+    for (let i = 0; i < MIN_SAMPLES; i++) c = observe(c, 25);
+    const written = {
+      level: 'allstar',
+      calibration: c,
+      pitchSpeed: 0.7,
+      holdCalibration: true,
+    };
+    saveSettings(written);
+    const read = loadSettings();
+    expect(read.level).toBe('allstar');
+    expect(read.pitchSpeed).toBe(0.7);
+    expect(read.holdCalibration).toBe(true);
+    expect(read.calibration.shift).toBe(25);
+  });
+
+  it('gives a file written before any of this existed the defaults', () => {
+    // ⚠️ THE UPGRADE PATH, and it is the one anybody with a saved game is on.
+    // An old blob has a level and a calibration and nothing else; the three new
+    // fields have to arrive at their defaults rather than as undefined, or the
+    // ball arrives at `flight / NaN` and never gets to the plate.
+    localStorage.setItem('asb-timing', JSON.stringify({ level: 'rookie' }));
+    const read = loadSettings();
+    expect(read.level).toBe('rookie');
+    expect(read.pitchSpeed).toBe(1);
+    expect(read.holdCalibration).toBe(false);
+  });
+
+  it('refuses a speed that would stop the ball arriving at all', () => {
+    // Every one of these is a real shape a hand-edited or corrupted file takes,
+    // and each of them divides the flight into something unplayable.
+    for (const bad of [0, -1, NaN, Infinity, 'slow', null, undefined]) {
+      localStorage.setItem('asb-timing', JSON.stringify({ pitchSpeed: bad }));
+      expect(loadSettings().pitchSpeed).toBe(1);
+    }
+    // Out of range in the playable direction is clamped, not discarded — 0.62
+    // is a perfectly good game and there is no reason to throw it away.
+    localStorage.setItem('asb-timing', JSON.stringify({ pitchSpeed: 0.62 }));
+    expect(loadSettings().pitchSpeed).toBe(0.62);
+    localStorage.setItem('asb-timing', JSON.stringify({ pitchSpeed: 0.01 }));
+    expect(loadSettings().pitchSpeed).toBe(SLOWEST_PITCH);
+    // Nothing may make the ball arrive FASTER than the balanced game.
+    localStorage.setItem('asb-timing', JSON.stringify({ pitchSpeed: 4 }));
+    expect(loadSettings().pitchSpeed).toBe(1);
+  });
+
+  it('reads a garbage file as a fresh one', () => {
+    localStorage.setItem('asb-timing', 'not json {');
+    expect(loadSettings()).toEqual(defaults());
   });
 });

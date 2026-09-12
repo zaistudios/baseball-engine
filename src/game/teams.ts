@@ -2239,7 +2239,7 @@ const FLA_BENCH: readonly Player[] = [
 ];
 
 const KCF_BENCH: readonly Player[] = [
-  { id: 'kcfB1', name: 'Hump Yard Delacroix', build: 'human', trait: 'slugger', power: 1.46, contact: 0.87, vision: 0.75, clutch: 1.34, bunt: 0.31, speed: 0.7, bats: 'R',
+  { id: 'kcfB1', name: 'Hump Yard Yarbrough', build: 'human', trait: 'slugger', power: 1.46, contact: 0.87, vision: 0.75, clutch: 1.34, bunt: 0.31, speed: 0.7, bats: 'R',
     bio: 'Gives it one shove at the top and lets gravity sort out the rest.' },
   { id: 'kcfB2', name: 'Caboose Mikulski', build: 'human', trait: 'grit', power: 0.75, contact: 1.04, vision: 1.09, clutch: 1.2, bunt: 1.18, speed: 1.35, bats: 'R',
     bio: 'Last man on and the only one who can see what is coming up behind.' },
@@ -2320,7 +2320,7 @@ const PHI_BENCH: readonly Player[] = [
 ];
 
 const PHX_BENCH: readonly Player[] = [
-  { id: 'phxB1', name: 'Dry Heat Villaseñor', build: 'human', trait: 'slugger', power: 1.48, contact: 0.85, vision: 0.73, clutch: 1.31, bunt: 0.29, speed: 0.73, bats: 'R',
+  { id: 'phxB1', name: 'Dry Heat Todacheene', build: 'human', trait: 'slugger', power: 1.48, contact: 0.85, vision: 0.73, clutch: 1.31, bunt: 0.29, speed: 0.73, bats: 'R',
     bio: 'It is not so bad, he says, right up until it takes everything you had.' },
   { id: 'phxB2', name: 'Saguaro Ibarra', build: 'human', trait: 'precision', power: 0.72, contact: 1.06, vision: 1.07, clutch: 1.19, bunt: 1.14, speed: 1.4, bats: 'R',
     bio: 'Stands very still for a very long time and then takes an enormous stride.' },
@@ -2378,7 +2378,7 @@ const TOR_BENCH: readonly Player[] = [
     bio: 'Lands at six, sleeps until four, and hits one out at nine.' },
   { id: 'torB2', name: 'Layover Sivakumar', build: 'human', trait: 'grit', power: 0.75, contact: 1.06, vision: 1.1, clutch: 1.2, bunt: 1.18, speed: 1.36, bats: 'R',
     bio: 'Has been through more airports than parks and prefers it that way.' },
-  { id: 'torB3', name: 'Customs Line Beauchamp', build: 'human', trait: 'precision', power: 1.0, contact: 1.23, vision: 1.16, clutch: 1.24, bunt: 1.02, speed: 1.0, bats: 'L',
+  { id: 'torB3', name: 'Customs Line Charbonneau', build: 'human', trait: 'precision', power: 1.0, contact: 1.23, vision: 1.16, clutch: 1.24, bunt: 1.02, speed: 1.0, bats: 'L',
     bio: 'Nothing gets past him and everybody resents how long it takes.' },
 ];
 

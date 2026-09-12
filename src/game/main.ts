@@ -24,7 +24,7 @@ import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/a
 import type { Player } from '../core/roster.ts';
 import { ALL_LOCATIONS, locationOffset } from '../core/hit.ts';
 import type { SwingInput, PitchLocation } from '../core/hit.ts';
-import { ballArrivalMs, computeOffsetMs, grade } from '../core/timing.ts';
+import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
 import {
   ARM_MS,
   deliveryOf,
@@ -202,10 +202,14 @@ import type { StarterPick } from './game.ts';
 import { aiShouldSend, sendRunner, stealOpportunity, chanceFor } from './running.ts';
 import {
   LEVELS,
+  MIN_SAMPLES,
+  PITCH_SPEEDS,
+  SANE_SAMPLE_MS,
   calibrationLabel,
   levelOf,
   loadSettings,
   observe as observeTiming,
+  pitchSpeedOf,
   saveSettings,
 } from './difficulty.ts';
 import {
@@ -278,6 +282,28 @@ type Phase = 'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'over';
 let phase: Phase = 'idle';
 let atBat: AtBatState = newAtBat();
 let previous: PitchType[] = [];
+
+/**
+ * The season ran past the game still loaded in `game`. Set by nextGame() when
+ * the year ends without you on the card, cleared by kickOff().
+ *
+ * ⚠️ WITHOUT IT THE WHOLE GAME SCREEN LIES. `game` is whatever you played last
+ * — or, if you started a franchise and simmed straight to the bracket, the
+ * empty one this module is born holding. Either way the season-over branch of
+ * nextGame() does not call kickOff(), so the marquee, the line score, the
+ * situation strip and the pitch-and-spot grid all went on describing that game
+ * underneath the champion's name. A club that missed the bracket got
+ * `GAME 4 OF 14` over a game-four box score; a club that simmed from day one
+ * got a live PITCH panel and `T1 0-0` under `CHI TAKE THE TITLE`.
+ */
+let lastGameIsStale = false;
+
+/**
+ * Is the screen showing a finished thing rather than a live one? True for a
+ * game that ended, and for a season that ended without this game ever being
+ * the last one played. The final-screen branch of every panel asks this.
+ */
+const showingFinal = (): boolean => game.over || lastGameIsStale;
 
 /** Live pitch, only meaningful in 'windup'. */
 let pitch: ThrownPitch | null = null;
@@ -400,6 +426,58 @@ let lastMoment = '';
 /** How long the high-leverage card stays up. Long enough to read once. */
 const MOMENT_MS = 1700;
 let lastGrade = '';
+
+/**
+ * YOUR LAST SWING, IN THE NUMBERS THAT GRADED IT.
+ *
+ * ⚠️ THE GAME KNEW THIS THE WHOLE TIME AND TOLD THE WRONG PERSON. Every swing
+ * already computes a signed millisecond offset; resolvePitch() graded it, threw
+ * the number away and left one word — LATE — on the screen. The number itself
+ * went to ai.ts, got averaged over the at-bats, and came back out at the bottom
+ * of the page as `timing BEHIND IT (+42ms)` in the scouting panel: the measure
+ * of how the HITTER is timing this arm, handed to the man on the mound. The
+ * hitter, trying to learn a ±35ms window, had one adjective.
+ *
+ * So: what was measured, and the exact band edges it was measured against.
+ *
+ * ⚠️ THE SCALE AND THE EYES ARE SNAPSHOTTED, NOT RECOMPUTED. The multiplier
+ * grade() saw is the batter's contact times the pitcher's STUFF times the
+ * difficulty assist — and stuff belongs to the pitch that was thrown, so it is
+ * gone by the time anything draws. A bar that reached for a fresh number would
+ * draw one at-bat's windows under another at-bat's verdict. See bandsFor().
+ *
+ * Null whenever the last thing that happened was not a swing — a take, a
+ * check, a bunt — so the word beside it and the bar under it are never
+ * describing different pitches. Cleared when a new hitter walks up.
+ */
+interface SwingRead {
+  /**
+   * Signed ms. Negative early, positive late — core/timing.ts's convention.
+   *
+   * ⚠️ NULL WHEN THE NUMBER IS NOT A MEASUREMENT OF A SWING, and that is not a
+   * hypothetical: it showed up on the first at-bat this read-out was ever drawn
+   * on, as `+10732ms`. A background tab stops getting animation frames, the
+   * ball's arrival goes by while the loop is asleep, and the press that wakes
+   * it is stamped ten seconds late. difficulty.ts has kept those out of the
+   * CALIBRATION since it was written — see SANE_SAMPLE_MS — and putting the
+   * same number on the screen handed the player the exact garbage the engine
+   * had been carefully throwing away.
+   *
+   * The grade and the outcome are still true on that pitch: the at-bat really
+   * did resolve, and it really was a swing and a miss. Only the clock is
+   * lying, so only the clock is withheld.
+   */
+  offsetMs: number | null;
+  /** Contact multiplier as grade() saw it. */
+  scale: number;
+  /** Vision multiplier as grade() saw it. */
+  eyes: number;
+  /** The verdict, already upper-cased. */
+  grade: string;
+  /** What the swing came to, when that is a different fact: FOUL, and so on. */
+  outcome: string;
+}
+let swingRead: SwingRead | null = null;
 
 /**
  * WHAT THE COMPUTER’S HITTER DECIDED, held while your pitch is in the air.
@@ -539,6 +617,32 @@ const pauseFor = (ms: number): number => performance.now() + ms / speed();
  * buys you is a shorter afternoon.
  */
 const flightScale = (): number => (auto || !youBat() ? speed() : 1);
+
+/**
+ * THE PRACTICE SPEED, and it is the exact opposite end of the same lever.
+ *
+ * speed() compresses the parts nobody is playing. This STRETCHES the one part
+ * somebody is — the flight of a pitch a human is trying to read — and it is
+ * the only setting in the game that does. See PITCH_SPEEDS in difficulty.ts
+ * for why that is a cage and not a cheat: the ±12/±35/±80ms windows are real
+ * milliseconds and do not move, so the swing is precisely as precise an act as
+ * it ever was. You just get longer to decide what you are swinging at.
+ *
+ * ⚠️ IT IS 1 ON EVERY PATH THAT IS NOT YOUR OWN AT-BAT, and that is what keeps
+ * flightScale()'s invariant intact rather than negotiated with. In watch mode
+ * and on your half in the field this returns exactly 1, so `flight /
+ * (flightScale() * readScale())` is the expression that was already there,
+ * unchanged, on both of those paths. Watch mode cannot see this setting and
+ * neither can the computer's hitters.
+ *
+ * ⚠️ AND THE BAT IS NOT SCALED BY IT. batTravel() divides by flightScale()
+ * alone — deliberately, and it is the one place these two multipliers must
+ * part company. flightScale()'s note says the bat has to move with the ball,
+ * and that rule is about the AI swinging on an unscaled offset at 8x. A human's
+ * reflexes are the length they are: slowing his bat down with the pitch would
+ * hand straight back the reading time this exists to buy him.
+ */
+const readScale = (): number => (auto || !youBat() ? 1 : settings.pitchSpeed);
 
 /**
  * This batter's bat, on the clock the ball is actually flying on.
@@ -709,7 +813,9 @@ function deliver(): void {
 
   launchAt = performance.now();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
-  arriveAt = launchAt + flight / flightScale();
+  // readScale() is 1 on every path but your own at-bat, so this is the same
+  // expression it has always been everywhere else. See readScale().
+  arriveAt = launchAt + flight / (flightScale() * readScale());
   swingStartedAt = null;
   checkedAt = null;
 
@@ -867,6 +973,9 @@ function resolvePitch(): void {
       if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
     }
     bunting = false;
+    // A bunt is not a swing at a window and has no offset to read out. See
+    // SwingRead: the word and the bar must never describe different pitches.
+    swingRead = null;
     flashUntil = pauseFor(1000);
     phase = 'resolve';
     return;
@@ -890,6 +999,11 @@ function resolvePitch(): void {
     const call = pitch.inZone ? 'STRIKE' : 'BALL';
     lastGrade = checkedAt !== null ? `CHECKED — ${call}` : call;
     flash = pitch.hitBatter ? 'HIT BY PITCH' : lastGrade;
+    // ⚠️ swingRead IS DELIBERATELY LEFT ALONE HERE. A take is not a swing, and
+    // the last swing of this at-bat is still the last swing of this at-bat —
+    // it is also the reference a hitter most wants in front of him while he
+    // watches the next one come in. The two are kept apart by being labelled
+    // apart: `last pitch` is this, `last swing` is that. See SwingRead.
   } else {
     // ⚠️ TWO OFFSETS, AND THE DIFFERENCE BETWEEN THEM IS THE WHOLE FEATURE.
     // `raw` is measured against the ball's real arrival and is the only thing
@@ -899,14 +1013,20 @@ function resolvePitch(): void {
     // it, and is what the at-bat is actually graded on.
     const raw = computeOffsetMs(contact, arriveAt);
     const offset = computeOffsetMs(contact, gradedArrival());
-    if (!auto) {
+    // ⚠️ AND IT STOPS WHEN THE PLAYER SAYS STOP. Without holdCalibration this
+    // folds a sample in on every swing for ever, so the shift somebody has just
+    // learned to hit against goes on walking — see the note on LOCK in
+    // difficulty.ts. Holding it changes nothing else: the samples already taken
+    // stay, and the shift they produced goes on being applied.
+    if (!auto && !settings.holdCalibration) {
       settings = { ...settings, calibration: observeTiming(settings.calibration, raw) };
       saveSettings(settings);
     }
     // Graded with the SAME multipliers resolveSwing() will use, the assist
     // included, or the word on screen and the outcome in the book come from
     // different at-bats.
-    const g = grade(offset, stats.contact * stuff * assist(), stats.vision);
+    const scale = stats.contact * stuff * assist();
+    const g = grade(offset, scale, stats.vision);
     lastGrade = g.toUpperCase();
 
     const input: SwingInput = {
@@ -930,8 +1050,57 @@ function resolvePitch(): void {
     const whiffed = g === 'miss';
     observePitch(book, pitch, true, offset, whiffed);
     flash = g === 'miss' ? 'SWING AND MISS' : `${g.toUpperCase()}`;
-    if (wasFreeFoul(before, atBat)) flash = 'FOUL';
-    if (showFoul(batter.speed)) flash = 'FOUL';
+    // ⚠️ showFoul() IS A DRAW CALL THAT ALSO ANSWERS A QUESTION, so it still
+    // runs on every swing whatever the flash says. Both tests are taken into
+    // locals rather than asked twice: the read-out below needs the same two
+    // answers, and a second showFoul() would build a second replay.
+    const freeFoul = wasFreeFoul(before, atBat);
+    const drewFoul = showFoul(batter.speed);
+    if (freeFoul) flash = 'FOUL';
+    if (drewFoul) flash = 'FOUL';
+
+    // ⚠️ THE GRADE AND THE OUTCOME ARE TWO DIFFERENT FACTS, and the screen used
+    // to carry only the first. Three straight 0-2 fouls read `last swing: LATE`
+    // three times over a count that never moved and a play log that never got
+    // a line — from the batter's box, a frozen game. LATE is how the swing was
+    // TIMED; FOUL is what it CAME TO, and the second one is the one that
+    // explains why nothing happened.
+    //
+    // Read off the swing rather than off the flash: `flash` carries the streak
+    // decoration by the time anything else looks at it.
+    const swung = atBat.lastSwing?.outcome;
+    const outcome =
+      freeFoul || drewFoul
+        ? 'FOUL'
+        : swung === 'strikeout'
+          ? atBat.result?.kind === 'strikeout'
+            ? 'STRIKE THREE'
+            : 'SWING AND MISS'
+          : swung === 'foul_out'
+            ? 'FOUL POP'
+            : // Single or ground-out is not decided until finishAtBat() has
+              // asked the defence, so claiming one here would be a guess.
+              'IN PLAY';
+
+    // ⚠️ NOT IN WATCH MODE, same rule as the streak below. That offset belongs
+    // to aiSwing(), and a bar drawn from the computer's timing would teach a
+    // watching player nothing about his own.
+    //
+    // ⚠️ AND THE CLOCK IS HELD TO THE SAME BAR THE CALIBRATION IS. `raw` is the
+    // uncorrected measurement, which is what SANE_SAMPLE_MS is stated against —
+    // asking it of the corrected `offset` would move the bar by the shift. See
+    // SwingRead.offsetMs for the ten-second swing that made this necessary.
+    const timed = Math.abs(raw) <= SANE_SAMPLE_MS;
+    swingRead = auto
+      ? null
+      : {
+          offsetMs: timed ? offset : null,
+          scale,
+          eyes: stats.vision,
+          grade: g.toUpperCase(),
+          outcome,
+        };
+    if (outcome === 'FOUL') say(`${batter.name} fouls one off.`, 'out');
 
     // The streak, and the loud version of it. Only a SWING moves this — a take
     // is left alone deliberately, see streak.ts.
@@ -1163,7 +1332,9 @@ function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): v
 
   launchAt = performance.now();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
-  arriveAt = launchAt + flight / flightScale();
+  // readScale() is 1 on every path but your own at-bat, so this is the same
+  // expression it has always been everywhere else. See readScale().
+  arriveAt = launchAt + flight / (flightScale() * readScale());
   swingStartedAt = null;
   checkedAt = null;
   autoSwingAt = null;
@@ -1297,7 +1468,16 @@ function resolveTheirSwing(): void {
       // conditions on DRAWING a foul — one is the free two-strike case and the
       // other is whether there was a replay to build — and a foul that is
       // neither still has to reach the chart as a foul.
-      if (atBat.lastSwing?.outcome === 'foul') scored = 'foul';
+      // ⚠️ AND IT REACHES THE LOG, on this half as on yours. A foul is the one
+      // pitch that changes nothing a reader can see — the count sits still, no
+      // runner moves, the at-bat goes on — so a play log that skips it is a log
+      // with a hole in it exactly where somebody is asking "what just
+      // happened?". The pitch chart beside it already carried the word; the
+      // running account of the game did not.
+      if (atBat.lastSwing?.outcome === 'foul') {
+        scored = 'foul';
+        say(`${batter.name} fouls one off.`, 'out');
+      }
       if (theirCall.guess === pitch.type && g !== 'miss') flash += ' — he sat on it';
     }
   }
@@ -1505,6 +1685,19 @@ function finishAtBat(): void {
   pitch = null;
   // The chart is what you have thrown THIS hitter, so it empties with him.
   chart = [];
+  // ⚠️ THE SWING READ-OUT IS DELIBERATELY *NOT* CLEARED HERE, and it was, once.
+  // Clearing it on the batter change sounds tidy and quietly deletes the most
+  // useful reading in the game: every swing that ENDS an at-bat — every hit,
+  // every strikeout, every ball put in play — reaches this function, so the
+  // number was wiped before the replay had even finished and a player only ever
+  // saw milliseconds on foul balls. The one swing he most wants measured is the
+  // one that did something.
+  //
+  // It costs carrying the previous hitter's band widths on the bar for one
+  // at-bat, which is the honest thing anyway: those ARE the bands that swing
+  // was graded in, and the line says `last swing`, not `this hitter`. It also
+  // puts it in step with `lastGrade` on the line above, which has always
+  // survived the batter change.
   releaseGrade = null;
 
   // The COMPUTER manages its pen between batters, exactly where you get to
@@ -1792,6 +1985,19 @@ function press(key: string): void {
     say(`${next.name} — ${next.blurb}`, 'half');
     return;
   }
+  // Same rule as the three above, and for a stronger reason than any of them:
+  // the moment a player decides the ball is coming too fast to read is the
+  // moment he is standing in the box, not the moment he is on a menu.
+  if (key === 'p') {
+    const at = PITCH_SPEEDS.findIndex((s) => s.value === settings.pitchSpeed);
+    // findIndex gives -1 for a hand-edited value that is not on the list, and
+    // -1 + 1 is 0, which is FULL — the right place for "off the menu" to land.
+    const next = PITCH_SPEEDS[(at + 1) % PITCH_SPEEDS.length]!;
+    settings = { ...settings, pitchSpeed: next.value };
+    saveSettings(settings);
+    say(`PITCH ${next.name} — ${next.blurb}`, 'half');
+    return;
+  }
 
   if (phase === 'over' && key === 'b') {
     showBox();
@@ -1905,7 +2111,12 @@ addEventListener('keydown', (e) => {
     // ⚠️ THIS LIST IS THE GATE, AND A KEY press() HANDLES BUT THIS DOES NOT
     // LIST IS A DEAD KEY. The pen selector shipped broken for exactly that
     // reason: press() knew ',' and '.' and the listener never forwarded them.
-    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', ',', '.'].includes(k) ||
+    // ⚠️ 'v' WAS MISSING AND THE PANEL WAS ADVERTISING IT. renderControls()
+    // draws `DEFENCE <kbd>V</kbd>` and press() has handled 'v' since the shift
+    // shipped — this list never forwarded it, so the key printed on the screen
+    // did nothing at all. Exactly the dead key the note above describes, found
+    // the only way it ever is: by somebody pressing it. 'p' is the pitch speed.
+    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', ',', '.'].includes(k) ||
     /^[1-9]$/.test(k)
   ) {
     e.preventDefault();
@@ -2221,6 +2432,9 @@ function drawField(now: number): void {
   if (phase === 'calling' || phase === 'winding') drawCall();
   // Your half only: there is no delivery to draw while you are the hitter.
   if (!youBat() && !game.over) drawDelivery(now);
+  // The hitter's half of the same instrument, and it stands where the mound's
+  // bar stands on the other half — the bottom of the frame, under the plate.
+  if (youBat() && !game.over) drawSwingBar();
   drawFlash(now);
 
   // Last, and opaque: the cut to the field covers the at-bat view rather than
@@ -2523,6 +2737,90 @@ function drawDelivery(now: number): void {
   }
 }
 
+/**
+ * WHERE THE BAT ACTUALLY ARRIVED, against the window it was measured in.
+ *
+ * ⚠️ IT STANDS IN THE MOUND'S SLOT ON PURPOSE — the same BAR rectangle
+ * drawDelivery() uses, and the two are never on the screen together. Both
+ * halves of this game are one press timed against one window, and putting the
+ * instrument for each in the same place is the cheapest way to say so. It also
+ * clears the base diamond at x 328-372, which BAR was already sized around.
+ *
+ * ⚠️ EVERY NUMBER HERE COMES OFF THE SWING THAT WAS GRADED. bandsFor() is
+ * grade()'s own boundary function and the multipliers are the ones snapshotted
+ * at the plate — see SwingRead. Nothing is recomputed, so there is no version
+ * of this that can draw one at-bat's windows under another at-bat's verdict.
+ * Same rule releaseWindow() states for the bar above.
+ */
+function drawSwingBar(): void {
+  const read = swingRead;
+  // Nothing swung at, or nothing the clock can honestly say — a bar with no
+  // mark on it is a bar with nothing to say. See SwingRead.offsetMs.
+  if (!read || read.offsetMs === null) return;
+  const offsetMs = read.offsetMs;
+
+  const mid = BAR.x + BAR.w / 2;
+  const half = BAR.w / 2;
+  const bands = bandsFor(read.scale, read.eyes);
+  // A quarter past the whiff edge, so a swing that missed still lands ON the
+  // bar with room to see how far outside it was rather than pinned to the end.
+  const scale = half / (bands.contact * 1.25);
+
+  ctx.fillStyle = 'rgba(9,14,11,0.55)';
+  ctx.fillRect(BAR.x - 8, BAR.y - 16, BAR.w + 16, BAR.h + 36);
+
+  const band = (ms: number, color: string): void => {
+    ctx.fillStyle = color;
+    ctx.fillRect(mid - ms * scale, BAR.y, ms * 2 * scale, BAR.h);
+  };
+  band(bands.contact, '#3a4a30');
+  band(bands.good, '#5e7a3e');
+  band(bands.perfect, '#a8c25a');
+
+  // Dead on, so PERFECT has something to be perfect against.
+  ctx.fillStyle = 'rgba(232,232,216,0.35)';
+  ctx.fillRect(mid - 0.5, BAR.y - 3, 1, BAR.h + 6);
+
+  ctx.fillStyle = '#d8b44a';
+  const mark = mid + Math.max(-half, Math.min(offsetMs * scale, half));
+  ctx.fillRect(mark - 1.5, BAR.y - 5, 3, BAR.h + 10);
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillStyle = '#5f6d54';
+  ctx.textAlign = 'left';
+  ctx.fillText('EARLY', BAR.x, BAR.y - 6);
+  ctx.textAlign = 'right';
+  ctx.fillText('LATE', BAR.x + BAR.w, BAR.y - 6);
+
+  // The number itself, which is the thing this whole panel exists to say out
+  // loud. Signed, in the same convention core/timing.ts states: under zero is
+  // in front of it, over zero is behind it.
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillText(
+    // A real minus sign rather than a hyphen: this is a canvas, so what is
+    // written here is what is drawn. An HTML entity would render as its own
+    // source text.
+    `${offsetMs < 0 ? '−' : '+'}${Math.abs(offsetMs).toFixed(0)}ms`,
+    mid,
+    BAR.y - 6,
+  );
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#7a8a6a';
+  ctx.fillText(
+    // The verdict and what it came to, in the order the player experiences
+    // them. They are the same two facts the controls panel carries, from the
+    // same record, so the canvas and the panel cannot drift apart.
+    read.grade === read.outcome ? read.grade : `${read.grade} · ${read.outcome}`,
+    BAR.x,
+    BAR.y + BAR.h + 13,
+  );
+  // Left on the way out, the way drawFlash() and drawDelivery() leave it. The
+  // canvas alignment is shared state between every draw call on the frame.
+  ctx.textAlign = 'left';
+}
+
 function drawBases(): void {
   const cx = 350;
   const cy = 300;
@@ -2611,7 +2909,7 @@ function render(): void {
   // penPick shipped missing from it: the pen list highlighted the wrong arm
   // all game while the GO TO THE PEN button named the right one, because the
   // button rides on penArmed, which IS listed, and the rows rode on nothing.
-  const key = [phase, game, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade];
+  const key = [phase, game, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead];
   if (key.length === lastKey.length && key.every((v, i) => v === lastKey[i])) return;
   lastKey = key;
 
@@ -2639,6 +2937,10 @@ function renderMeta(): void {
   // grading of every swing, so it says so out loud. A silent correction and a
   // timing bug look identical from the batter's box.
   const level = levelOf(settings.level);
+  // ⚠️ TWO SPEEDS ON ONE STRIP, AND THEY ARE OPPOSITE CONTROLS. `speed 4×` cuts
+  // the parts nobody is playing; `pitch SLOW` stretches the one part somebody
+  // is. They are labelled as different words on purpose — see readScale().
+  const cage = pitchSpeedOf(settings.pitchSpeed);
   elMeta.innerHTML =
     '<button data-auto="1">' +
     (auto ? 'AUTO — computer plays your half' : 'MANUAL — you play') +
@@ -2649,9 +2951,18 @@ function renderMeta(): void {
     '<button data-diff="1" style="margin-left:8px">' +
     level.name +
     ' <kbd>G</kbd></button>' +
-    '<span class="dim" style="margin-left:10px">' +
-    calibrationLabel(settings.calibration) +
-    '</span>' +
+    '<button data-pitch="1" style="margin-left:8px" class="' +
+    (settings.pitchSpeed < 1 ? 'on' : '') +
+    '">pitch ' +
+    cage.name +
+    ' <kbd>P</kbd></button>' +
+    // Clicking the read-out is what stops it moving. It is the one control on
+    // this strip nobody reaches for until they have watched the number walk,
+    // which is exactly when their hand is already on the mouse pointing at it.
+    '<button data-hold="1" class="flat" style="margin-left:10px" ' +
+    'title="hold the calibration where it is">' +
+    calibrationLabel(settings.calibration, settings.holdCalibration) +
+    '</button>' +
     (auto
       ? '<span class="dim" style="margin-left:10px">watching · press T to take over</span>'
       : '');
@@ -2662,9 +2973,44 @@ function renderMeta(): void {
   if (speedBtn) speedBtn.onclick = () => press('f');
   const diffBtn = elMeta.querySelector<HTMLButtonElement>('[data-diff]');
   if (diffBtn) diffBtn.onclick = () => press('g');
+  const pitchBtn = elMeta.querySelector<HTMLButtonElement>('[data-pitch]');
+  if (pitchBtn) pitchBtn.onclick = () => press('p');
+  const holdBtn = elMeta.querySelector<HTMLButtonElement>('[data-hold]');
+  if (holdBtn) holdBtn.onclick = () => holdCalibration();
+}
+
+/**
+ * Nail the correction down where it is, or let it go on learning.
+ *
+ * ponytail: click only, no key. Every other control on this strip is one a
+ * hand reaches for mid-game; this one is answered once, by somebody who has
+ * just read the number next to it, and a sixth letter to remember costs more
+ * than it buys.
+ */
+function holdCalibration(): void {
+  settings = { ...settings, holdCalibration: !settings.holdCalibration };
+  saveSettings(settings);
+  // "Held at 0ms" is true and useless before the twelfth swing: there is no
+  // correction yet, so what was actually just switched off is the MEASURING.
+  const measured = settings.calibration.samples.length >= MIN_SAMPLES;
+  say(
+    settings.holdCalibration
+      ? measured
+        ? `Calibration held at ${Math.round(settings.calibration.shift)}ms — it will not move again.`
+        : 'Calibration paused — no correction will be measured or applied.'
+      : 'Calibration learning again.',
+    'half',
+  );
+  render();
 }
 
 function renderScore(): void {
+  // The season outran this game — see lastGameIsStale. An empty strip is the
+  // honest version; the FINAL line and the bracket under it are the news.
+  if (lastGameIsStale) {
+    elScore.innerHTML = '';
+    return;
+  }
   const innings = Math.max(9, game.inning);
   const head = ['', ...Array.from({ length: innings }, (_, i) => String(i + 1)), 'R', 'H'];
   const row = (side: 'home' | 'away') => {
@@ -2684,7 +3030,7 @@ function renderScore(): void {
 }
 
 function renderSituation(): void {
-  if (game.over) {
+  if (showingFinal()) {
     if (!season) {
       elSit.innerHTML = `<span><b>FINAL</b></span><span class="dim">press R for a new game</span>`;
       return;
@@ -2692,7 +3038,9 @@ function renderSituation(): void {
     const me = standings(season).find((r) => r.abbr === season!.you)!;
     const champ = champion(season);
     elSit.innerHTML = [
-      `<span><b>FINAL</b></span>`,
+      // FINAL is a word about a ball game. When the league outran the one on
+      // the screen there is no ball game to be final, only a year that ended.
+      `<span><b>${lastGameIsStale ? 'SEASON OVER' : 'FINAL'}</b></span>`,
       `<span>${season.you} <b>${me.w}-${me.l}</b></span>`,
       champ
         ? `<span class="dim">${champ} win the championship</span>`
@@ -2907,7 +3255,7 @@ const TYPE_SHORT: Record<PitchType, string> = {
 };
 
 function renderControls(): void {
-  if (game.over) {
+  if (showingFinal()) {
     // Eliminated but the bracket is not decided: the button plays it out
     // rather than disappearing and stranding you on a season with no ending.
     const label =
@@ -2916,7 +3264,10 @@ function renderControls(): void {
     // ⚠️ AN EXHIBITION HAS ONE TOO. It has no season to compare the night
     // against, which is why this used to be a franchise-only button — but the
     // night itself was fully scored the whole time. See showStats().
-    const box = '<button data-box="1">Box score <kbd>B</kbd></button>';
+    //
+    // ...but not when the league outran the game: the box score would be a
+    // night nine days ago, or the empty one this module starts holding.
+    const box = lastGameIsStale ? '' : '<button data-box="1">Box score <kbd>B</kbd></button>';
     // The book is offered on the screen where the season ENDED, which is the
     // one moment it is about — see showCareer().
     const bookBtn =
@@ -2944,7 +3295,14 @@ function renderControls(): void {
             // the warning on render() for why putting a live value in there is
             // how every button on this screen died last time.
             'SWING — press SPACE. Press it again early to check.'
-          : '…';
+          : // ⚠️ THIS WAS A SINGLE ELLIPSIS, AND AN ELLIPSIS IS NOT AN ANSWER.
+            // Nothing on the batting half is a button that can be greyed out —
+            // the control is the spacebar — so a press during the resolve is
+            // swallowed with no queue and nothing on the screen saying why. It
+            // reads as a dead key on a frozen game. Say what is happening
+            // instead; the press is still dropped, and now that is visibly a
+            // state rather than a fault.
+            'Watching the play — the ball is still live.';
 
     // The steal offer carries its ODDS. A gamble whose price you cannot see is
     // not a decision, it is a coin flip with extra steps.
@@ -2986,10 +3344,31 @@ function renderControls(): void {
     // The number and the record, together. A record you cannot see is not a
     // record — it is the steal button with no odds on it all over again.
     const heat = streak.current >= 3 ? 'var(--hot)' : 'var(--ink)';
-    const streakLine =
-      `<div class="dim">last swing: ${lastGrade || '—'}` +
+    // ⚠️ TWO LINES, BECAUSE THEY ANSWER TWO QUESTIONS. This was one line saying
+    // `last swing: <grade>`, and it was fed by every pitch — so a take wrote
+    // BALL into a field labelled "swing", and three fouls in a row wrote LATE
+    // three times over a count that never moved. The last PITCH and the last
+    // SWING are different facts about different moments and the screen now says
+    // which is which. See SwingRead.
+    const pitchLine =
+      `<div class="dim">last pitch: ${lastGrade || '—'}` +
       ` &nbsp;·&nbsp; squared up <b style="color:${heat}">${streak.current}</b> in a row` +
       ` <span class="dim">(best ${streak.best})</span></div>`;
+    // The milliseconds the game has always measured and never shown. Signed in
+    // core/timing.ts's convention: under zero is out in front of it.
+    const ms = swingRead?.offsetMs;
+    const swingLine = swingRead
+      ? `<div class="dim">last swing: <b>${swingRead.grade}</b>` +
+        ` &nbsp;·&nbsp; ${swingRead.outcome}` +
+        // No clock on this one. The grade and the outcome are still true; the
+        // milliseconds are a sleeping frame loop. See SwingRead.offsetMs.
+        (ms === null || ms === undefined
+          ? ''
+          : ` &nbsp;·&nbsp; <b style="color:var(--hot)">` +
+            `${ms < 0 ? '&minus;' : '+'}${Math.abs(ms).toFixed(0)}ms</b>`) +
+        `</div>`
+      : '';
+    const streakLine = pitchLine + swingLine;
 
     elControls.innerHTML =
       `<div style="margin-bottom:6px">${hint}</div>` +
@@ -3258,7 +3637,15 @@ function renderStandings(s: Season): void {
       `  ${String(r.rf - r.ra > 0 ? '+' + (r.rf - r.ra) : r.rf - r.ra).padStart(4)}`;
     return r.abbr === s.you ? `<b>${line}</b>` : line;
   });
-  const lines = ['<b>STANDINGS</b>', '       W -L   GB   DIFF', ...rows, ...bracketLines(s)];
+  // ⚠️ THE BRACKET GOES ON TOP ONCE THERE IS ONE. This panel scrolls and a
+  // thirty-club league is thirty rows in it, so a bracket printed underneath
+  // them is a bracket nobody sees: a season that ended while you were watching
+  // finished on "MEM TAKE THE TITLE" with no way to find out who MEM beat
+  // without scrolling a box most players do not know scrolls. In October the
+  // bracket is the news and the table is the history that seeded it.
+  const bracket = bracketLines(s);
+  const table = ['<b>STANDINGS</b>', '       W -L   GB   DIFF', ...rows];
+  const lines = bracket.length ? [...bracket, '', ...table] : table;
   elBook.innerHTML =
     '<div style="white-space:pre">' + lines.join('\n') + '</div>';
 }
@@ -3282,7 +3669,7 @@ function bracketLines(s: Season): string[] {
       out.push(`  ${p.home} v ${p.away}${score}${tail}`);
     }
   }
-  return out.length ? ['', '<b>PLAYOFFS</b>', ...out] : [];
+  return out.length ? ['<b>PLAYOFFS</b>', ...out] : [];
 }
 
 /**
@@ -3305,7 +3692,7 @@ function card(title: string, ratings: Record<string, number>): string {
 }
 
 function renderBook(): void {
-  if (game.over && season) {
+  if (showingFinal() && season) {
     renderStandings(season);
     return;
   }
@@ -4709,6 +5096,7 @@ function kickOff(
 ): void {
   YOU = you;
   game = newGame(home, away, 9, starters);
+  lastGameIsStale = false;
   penPick = 0;
   atBat = newAtBat();
   bunting = false;
@@ -4716,6 +5104,7 @@ function kickOff(
   replay = null;
   flash = '';
   lastGrade = '';
+  swingRead = null;
   autoSwingAt = null;
   chart = [];
   releaseGrade = null;
@@ -4770,12 +5159,34 @@ function nextGame(): void {
   let s = season;
   if (!s) return;
 
+  // The day the game on the screen was played on. See the note below.
+  const from = s.day;
   while (!seasonOver(s) && !yourGame(s)) s = playDay(s);
   season = s;
   saveSeason(s);
 
   const m = yourGame(s);
   if (!m) {
+    // ⚠️ THE GAME UNDERNEATH THIS SCREEN MAY NOT BE TONIGHT'S. Miss the bracket
+    // — which is most players — and the loop above just played the rest of the
+    // year without you, so the line score still on the screen is a night days
+    // or weeks ago and the marquee still names the day it was played on. Both
+    // are set by kickOff(), and this branch does not call kickOff. The result
+    // was `GAME 4 OF 14` over a game-four box score, under the word FINAL and
+    // somebody else's championship.
+    //
+    // Nothing lies now: the marquee says SEASON OVER (dayLabel's own word for a
+    // finished year) and the line score comes down rather than passing itself
+    // off as the game that ended the season. If you were IN the last game, the
+    // loop played no days, the score on the screen is yours, and it stays.
+    lastGameIsStale = s.day !== from;
+    elTitle.textContent = `BASEDBALL — ${s.you} FRANCHISE · ${dayLabel(s)}`;
+    // ⚠️ AND THE PHASE, OR THE KEYBOARD IS STILL PLAYING. press() routes N, B
+    // and K off `phase`, not off game.over, so a season simmed to its end from
+    // day one left SPACE throwing pitches in a game nobody could see and K
+    // doing nothing on the one screen the record book is offered from.
+    if (lastGameIsStale) phase = 'over';
+
     const champ = champion(s);
     if (champ) {
       elBanner.textContent =

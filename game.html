@@ -54,6 +54,52 @@
       .strip b { color: var(--hot); }
       .dim { color: var(--dim); }
 
+      /* ⚠️ IT IS TWO LINES TALL WHETHER IT NEEDS TWO OR NOT. This wraps on the
+         length of the batter's name — "Tugboat Prendergast" pushes the pitcher
+         onto a second row and "Ed Mancuso" does not — so the whole stage below
+         it, canvas and all, jumped 35px between hitters. That is furniture
+         moving underneath a screen somebody is timing a 120ms bat against.
+         Reserving the taller of the two states costs one line of empty panel
+         and nothing ever moves again.
+
+         ⚠️ THE ROW GAP IS PART OF THE SUM, and leaving it out is how the first
+         cut of this still jittered by 16px. `.strip` sets one `gap` for both
+         axes, so a wrapped second row lands 16px below the first: measured, a
+         one-line strip is 61px and a two-line strip 77px. The gap is worth
+         having BETWEEN the items on a row and worth almost nothing between the
+         rows, so it is split — 4px down, 16px across — and the reservation is
+         two 19.5px lines plus that 4px plus the panel's own 10px padding and
+         1px border, top and bottom.
+
+         #meta is deliberately not stabilised: its contents change only when the
+         player presses a key, which is an act rather than a jitter, and
+         reserving a second row of buttons there would cost 40px of a laptop
+         screen permanently.
+
+         ⚠️ AND THE COUNT FOLLOWS YOU DOWN THE PAGE. On a 1309x669 laptop the
+         strike zone and the count could not be on the screen at once: you
+         scrolled down to see the plate, and the one number telling you whether
+         to protect was above the fold. Scroll up to read it, scroll down to
+         hit, every pitch. It is the smallest panel on the page and the only one
+         that has to be readable at the moment the ball is in the air.
+
+         The box-shadow is the body's own 14px padding painted back in behind
+         it — without that the scoreboard shows through the gap above a stuck
+         panel.
+
+         z-index 1 clears the canvas and the panels, all of which are auto, and
+         stays well under the 5 the #start and #pre overlays are pinned at.
+         Matching their 5 would have left the two settling it on document order,
+         which is a stacking argument nobody should have to win twice. */
+      #situation {
+        row-gap: 4px;
+        min-height: 65px;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        box-shadow: 0 -16px 0 var(--bg);
+      }
+
       /* ---- field + side column */
       .stage { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
       canvas {
@@ -126,6 +172,13 @@
       button:disabled { opacity: 0.35; cursor: default; }
       button.on { border-color: var(--hot); color: var(--hot); }
       button kbd { color: var(--dim); font-size: 11px; }
+      /* A read-out you can click. It is a button so it can be pressed and so a
+         keyboard can reach it; it looks like the text it replaced so the strip
+         does not suddenly read as five controls instead of four. */
+      button.flat {
+        background: none; border: 1px solid transparent; color: var(--dim); padding: 7px 4px;
+      }
+      button.flat:hover:not(:disabled) { border-color: var(--line); color: var(--ink); }
 
       /* ---- log */
       #log { height: 150px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px; }
@@ -475,6 +528,14 @@
       }
       #start .clubcard .who { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
       #start .clubcard .who b { font-weight: 700; letter-spacing: 1px; }
+      /* ⚠️ THE DIMENSIONS TAKE THEIR OWN ROW ON ALL THIRTY CARDS, not on the
+         twenty-nine whose park name is long enough to force the wrap. Left to
+         itself this line breaks on width, so "The Sty 328/404/325" fitted and
+         "The Rivetworks / 325/405/325" did not — one card in the grid reading
+         as a different shape from its twenty-nine neighbours, which is the kind
+         of thing the eye catches without being able to say why. The park is the
+         name; the numbers are a caption under it. */
+      #start .clubcard .who > span { display: block; }
 
       /* ---- HOME PLATE. The one button on any screen that starts baseball.
          drop-shadow rather than box-shadow because the shadow has to follow the

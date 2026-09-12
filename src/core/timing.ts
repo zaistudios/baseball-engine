@@ -87,16 +87,41 @@ export const TIMING_WINDOWS_MS = {
 export function grade(offsetMs: number, contact = 1.0, vision = 1.0): TimingGrade {
   if (!Number.isFinite(offsetMs)) return 'miss';
 
-  const scale = contact > 0 ? contact : 1.0;
-  const eyes = vision > 0 ? vision : 1.0;
+  const b = bandsFor(contact, vision);
   const magnitude = Math.abs(offsetMs);
 
-  if (magnitude <= TIMING_WINDOWS_MS.perfect * scale) return 'perfect';
-  if (magnitude <= TIMING_WINDOWS_MS.good * scale) return 'good';
-  if (magnitude <= TIMING_WINDOWS_MS.contact * scale * eyes) {
-    return offsetMs < 0 ? 'early' : 'late';
-  }
+  if (magnitude <= b.perfect) return 'perfect';
+  if (magnitude <= b.good) return 'good';
+  if (magnitude <= b.contact) return offsetMs < 0 ? 'early' : 'late';
   return 'miss';
+}
+
+/** The three window edges, in milliseconds either side of dead on. */
+export interface TimingBands {
+  perfect: number;
+  good: number;
+  contact: number;
+}
+
+/**
+ * WHERE THE WINDOW EDGES ACTUALLY ARE, for a given bat and a given pair of eyes.
+ *
+ * ⚠️ THIS EXISTS SO A METER CANNOT LIE. A timing bar drawn from its own copy of
+ * TIMING_WINDOWS_MS stops matching the verdict beside it the first time
+ * anything scales a window — the difficulty assist, the pitcher's stuff, the
+ * hitter's own contact — and a bar that disagrees with the word next to it is
+ * worse than no bar at all. So grade() reads its boundaries from here, and so
+ * does everything that draws them. It is the same rule releaseWindow() in
+ * game/main.ts states for the mound's meter, one press over.
+ */
+export function bandsFor(contact = 1.0, vision = 1.0): TimingBands {
+  const scale = contact > 0 ? contact : 1.0;
+  const eyes = vision > 0 ? vision : 1.0;
+  return {
+    perfect: TIMING_WINDOWS_MS.perfect * scale,
+    good: TIMING_WINDOWS_MS.good * scale,
+    contact: TIMING_WINDOWS_MS.contact * scale * eyes,
+  };
 }
 
 /**

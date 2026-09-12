@@ -108,6 +108,61 @@ export const LEVELS: readonly Level[] = [
 export const levelOf = (key: string): Level =>
   LEVELS.find((l) => l.key === key) ?? LEVELS[1]!;
 
+// ------------------------------------------------------------ pitch speed
+
+/**
+ * HOW FAST THE BALL COMES, and it is a different question from how wide the
+ * window is. Both buy a struggling hitter the same thing — a chance — and they
+ * buy it in two places that are not interchangeable:
+ *
+ *   THE ASSIST above widens the window. It forgives a swing you already
+ *   committed to, and it does nothing at all for a pitch you never read.
+ *
+ *   THIS stretches the FLIGHT. The window stays ±12/±35/±80ms of real
+ *   milliseconds and squaring one up is exactly as precise an act as it was —
+ *   you simply get longer to decide what the pitch is before you have to be
+ *   that precise. That is what a batting cage is, and it is the one thing a
+ *   game with a 120ms bat and a 400ms flight ought to have had first.
+ *
+ * ⚠️ IT STRETCHES THE BALL AND NOT THE BAT, and the asymmetry is the feature.
+ * flightScale()'s note in main.ts is emphatic that the bat must move in
+ * lockstep with the ball — that rule belongs to WATCH MODE, where the computer
+ * swings on an unscaled offset and a bat that did not compress could not
+ * physically arrive. Nobody is watching here: a human is holding the bat, his
+ * reflexes are the length they are, and slowing his swing down with the pitch
+ * would hand back the reading time this exists to give him. The roguelike half
+ * of this repo settled the same question the same way — see `pitchSpeed` in
+ * web/settings.ts, whose batterTravel() is likewise unscaled.
+ *
+ * ⚠️ AND IT APPLIES TO YOUR AT-BATS ONLY. readScale() in main.ts returns 1 in
+ * watch mode and on your half in the field, so nothing here can reach the
+ * computer's hitters or the game you left running.
+ */
+export interface PitchSpeed {
+  value: number;
+  name: string;
+  blurb: string;
+}
+
+/**
+ * ⚠️ FULL IS 1.0 AND IS THE DEFAULT, for the same reason VETERAN is: the game
+ * everybody has played is still exactly the game until somebody asks for
+ * something else. Every balance number in this project's notes was measured
+ * here.
+ */
+export const PITCH_SPEEDS: readonly PitchSpeed[] = [
+  { value: 1, name: 'FULL', blurb: 'Real flight. The game as it is balanced.' },
+  { value: 0.85, name: 'EASED', blurb: 'A shade longer to read it. The window is unchanged.' },
+  { value: 0.7, name: 'SLOW', blurb: 'Half again the flight time. Good for learning a pitch.' },
+  { value: 0.55, name: 'CAGE', blurb: 'Batting practice. Nearly twice the look.' },
+];
+
+/** The slowest the ball may be asked to go, so a bad file cannot stop it. */
+export const SLOWEST_PITCH = 0.4;
+
+export const pitchSpeedOf = (value: number): PitchSpeed =>
+  PITCH_SPEEDS.find((s) => s.value === value) ?? PITCH_SPEEDS[0]!;
+
 // ------------------------------------------------------------- calibration
 
 /**
@@ -180,15 +235,43 @@ export function observe(c: Calibration, rawOffsetMs: number): Calibration {
  * secretly moved the strike window would be indistinguishable from a game with
  * a timing bug, which is precisely the complaint this exists to answer.
  */
-export function calibrationLabel(c: Calibration): string {
+export function calibrationLabel(c: Calibration, locked = false): string {
   if (c.samples.length < MIN_SAMPLES) {
-    return `calibrating ${c.samples.length}/${MIN_SAMPLES}`;
+    // ⚠️ AND IT SAYS SO WHEN THE COUNT HAS STOPPED. Holding before the twelfth
+    // swing freezes the tally where it stands — which, unlabelled, is a
+    // progress bar that silently gave up. The word is what stops a player
+    // waiting out a number that is never going to move.
+    return `calibrating ${c.samples.length}/${MIN_SAMPLES}${locked ? ' · paused' : ''}`;
   }
-  if (Math.abs(c.shift) < 4) return 'calibrated · no lag';
+  const tail = locked ? ' · held' : '';
+  if (Math.abs(c.shift) < 4) return `calibrated · no lag${tail}`;
   // Positive shift means the player's swings read LATE, so the display is
   // behind and arrival is moved later to meet him.
-  return `calibrated ${c.shift > 0 ? '+' : ''}${Math.round(c.shift)}ms`;
+  return `calibrated ${c.shift > 0 ? '+' : ''}${Math.round(c.shift)}ms${tail}`;
 }
+
+/**
+ * THE LOCK, and it is the answer to a complaint that only shows up in play.
+ *
+ * ⚠️ observe() NEVER STOPS. The window is rolling by design — the number it
+ * measures belongs to a monitor and a monitor can be swapped — so the shift
+ * keeps moving for as long as you keep swinging. Watched from the batter's
+ * box that reads as the game changing its mind: a session settled on +79ms,
+ * then +78, then +75 over three more swings, and a player trying to learn a
+ * window is trying to learn one that is walking away from him.
+ *
+ * ⚠️ AND THE DRIFT IS NOT NOISE. A player who has just been corrected swings
+ * differently, which is the correction's whole purpose — so his new offsets
+ * are a measurement of the CORRECTED game, and folding them back in is the
+ * same tail-chasing the header warns about one layer up. A median over a
+ * forty-swing window does not chase it to zero, but it does creep.
+ *
+ * So: measure it, apply it, then let the player nail it down. Off by default —
+ * a first-time player should never have to find a setting to get the fix.
+ *
+ * It is `Settings.holdCalibration` below; there is no function here because a
+ * boolean does not need one.
+ */
 
 // ------------------------------------------------------------- persistence
 
@@ -197,9 +280,18 @@ const KEY = 'asb-timing';
 export interface Settings {
   level: string;
   calibration: Calibration;
+  /** Multiplier on ball flight for YOUR at-bats. Below 1 is slower. */
+  pitchSpeed: number;
+  /** Stop folding new swings into the calibration. See the note on LOCK. */
+  holdCalibration: boolean;
 }
 
-export const defaults = (): Settings => ({ level: 'veteran', calibration: newCalibration() });
+export const defaults = (): Settings => ({
+  level: 'veteran',
+  calibration: newCalibration(),
+  pitchSpeed: 1,
+  holdCalibration: false,
+});
 
 /**
  * Off disk, validated. The shift reaches grade() through arrival, so a
@@ -223,8 +315,20 @@ export function loadSettings(): Settings {
           .slice(-WINDOW)
       : [];
     const shift = Number(s?.calibration?.shift);
+    // ⚠️ CLAMPED, NOT MATCHED TO THE LIST. A hand-edited file holding 0.62 is
+    // a perfectly playable game and there is no reason to throw it away; a
+    // file holding 0 or -3 stops the ball arriving at all, and THAT is what
+    // this is for. Same shape as the shift below: validate the range the
+    // engine needs, not the menu's taste.
+    const rawSpeed = Number(s?.pitchSpeed);
+    const pitchSpeed =
+      Number.isFinite(rawSpeed) && rawSpeed > 0
+        ? Math.max(SLOWEST_PITCH, Math.min(1, rawSpeed))
+        : 1;
     return {
       level,
+      pitchSpeed,
+      holdCalibration: s?.holdCalibration === true,
       calibration: {
         samples,
         // Recomputed rather than trusted where it can be: the samples are the

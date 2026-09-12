@@ -82,7 +82,8 @@ src/game/
   league.ts      export the thirty clubs as JSON, edit them, paste them back
   editor.ts      the club editor, minus the screen
   scene.ts       what the replay is ABOUT, in two lines and a length
-  difficulty.ts  how hard the swing is, and how honest the clock is
+  difficulty.ts  how hard the swing is, how fast the ball comes, and how honest
+                 the clock is
   tuning.ts      the knobs somebody will actually want to turn
 ```
 
@@ -986,6 +987,122 @@ two send rates), the bench is real (`pinchHit()` in `game.ts`, `manageBench()`
 in `sim.ts`, and the computer goes to its bench between hitters the same way it
 goes to its pen), and the final screen reads a full box score straight off the
 `GameState`.
+
+### The list a playthrough produced — 2026-09-09
+
+Half of a 162-game franchise played by hand, both halves, then a 14-game year
+start to finish: rules, club pick, card, moments, the deadline, the calendar,
+missing the bracket, a champion, the record book. **Everything below is a thing
+that was reached for and was not there.** In rough order of what the next
+session is worth spending on.
+
+**1. Sound.** `web/juice.ts` is a whole audio layer and `src/game/` does not
+import a line of it — grep says so. Nine innings happen in total silence. The
+crack of the bat, the glove pop, a crowd that comes up under BIG SPOT: this is
+the widest gap between what the screen already does and what it feels like, and
+the code to do it is written and in the repo.
+
+**2. A second year.** Still the honest headline. No draft, no ageing, no
+development, no free agency, and because men are re-rolled the record book can
+only ever hold single-season marks — a career total is not a missing screen,
+it is a missing model.
+
+**3. Injuries.** Fatigue is arms only. Nobody is ever hurt, which is why the
+fourth bench man and most of the 26 never have to matter. It is also the
+cheapest way to make the depth `depth.ts` already builds mean something.
+
+**4. THE DEADLINE trades blind.** The screen offers two players by name and
+prose and shows no numbers at either end of the deal. Put POW/CON/VIS/SPD on
+both sides — `card()` in `main.ts` already draws exactly that block.
+
+**5. More moments.** Five scenarios exist (`deadline`, `bench`, `slump`,
+`rotation`, `skid`) and two of them are the scheduled floor. A fourteen-game
+year sees three. A 162-game year would be silent for weeks at a stretch.
+
+**6. The box score is missing columns.** No R for batters, no SB/CS, no LOB, no
+pitch counts, and no saves anywhere — not in the box, not in LEAGUE LEADERS.
+The night's counting stats and the season's rate stats also share a row with
+nothing saying which is which.
+
+**7. The standings are one flat table of thirty.** No divisions, no
+conferences, no L10, no streak, and a four-way tie at the seed-4 line is
+printed without a word about what broke it.
+
+**8. The editor hands you raw engine floats.** `break 1.178`, `clutch 0.921` in
+bare text boxes with no range, no slider, no hint and no preview of the rating
+the card will show. Cap colours are drawn on the club-select screen and are not
+editable anywhere.
+
+**9. The game screen does not fit a laptop.** At 1212x702 the plate is below the
+fold — you cannot see the HUD and the strike zone at once — and clicking scrolls
+you back to the top. At 1568 wide the field panel spends about 40% of its box on
+empty grass. *(2026-09-12: the half that mattered is fixed — the situation strip
+is sticky, so the count follows you down the page. The empty grass is still
+there.)*
+
+**10. Nothing goes slower than 1x.** `F` is 1/2/4/8 and all of it is faster.
+There is no practice mode to learn the six deliveries against, which is the one
+thing a batting game with a 120ms bat ought to have. *(2026-09-12: done. `P`
+cycles FULL / EASED / SLOW / CAGE — see below.)*
+
+Also noticed and deliberately left alone: several clubs carry surnames one
+letter apart on purpose — Minneapolis is Scandinavian (Lindqvist / Lindquist /
+Lindgren), Maine is Québécois (Ouellet / Ouellette), Memphis is Delacroix /
+Delahunt / Delahoussaye. Those read fine because the nicknames differ. The
+three that did NOT are fixed, and `depth.test.ts` now forbids them; see the
+note there.
+
+### The hitter gets an instrument — 2026-09-12
+
+**The finding: the game measured every swing in milliseconds, and told the
+opposing manager.** `resolvePitch()` has always computed a signed offset, graded
+it, and then thrown the number away behind one adjective. That same number goes
+to `ai.ts`, gets averaged over the at-bats, and reappears at the very bottom of
+the page in the scouting panel as `timing BEHIND IT (+42ms)` — a read on how the
+HITTER is timing this arm, handed to the man on the mound. The hitter, trying to
+learn a ±35ms window, had the word LATE.
+
+Same species as the 09-03 finding one layer down: **a fact the engine knows and
+a fact the player can see are independent.** Three straight 0-2 fouls read `last
+swing: LATE` three times over a count that never moved and a play log that never
+got a line. From the batter's box that is a frozen game.
+
+- **`bandsFor()` in core/timing.ts.** `grade()` now reads its own boundaries from
+  it, and so does anything that draws them — so a meter cannot disagree with the
+  verdict beside it. Same rule `releaseWindow()` states for the mound's bar. The
+  test feeds every edge it reports straight back into `grade()`.
+- **The swing bar**, in the mound bar's own rectangle, since the two halves of
+  this game are one press timed against one window and are never on screen
+  together. Bands, a marker, and the signed number.
+- **`last pitch` and `last swing` are two lines now.** One line fed by every
+  pitch wrote BALL into a field labelled "swing".
+- **Fouls reach the play log**, on both halves. A foul is the one pitch that
+  changes nothing a reader can see, which is exactly when somebody asks what
+  just happened.
+- **`P` cycles the pitch speed** — FULL / EASED / SLOW / CAGE. It stretches the
+  FLIGHT and not the bat, and not one timing window: you get longer to read it,
+  not more room to be wrong. `readScale()` returns 1 on every path but your own
+  at-bat, so watch mode is untouched by construction.
+- **The calibration can be held.** It never stopped learning, so a shift settled
+  at +79ms read +78 then +75 over three more swings — a window walking away from
+  a player trying to learn it. Click the read-out.
+- **`V` was a dead key.** The panel has been drawing `DEFENCE <kbd>V</kbd>` and
+  `press()` has handled it since the shift shipped; the keydown gate never
+  forwarded it. Exactly the failure the note above that list warns about, found
+  the only way it ever is — by pressing it.
+
+⚠️ **And the read-out immediately caught the thing it was built to expose.** The
+first swing it ever drew reported **+10732ms**. A background tab stops getting
+animation frames, arrival goes by while the loop is asleep, and the press that
+wakes it is stamped ten seconds late — the case `SANE_SAMPLE_MS` has kept out of
+the *calibration* since it was written. Putting the number on screen handed the
+player the exact garbage the engine had been carefully discarding. The clock is
+now held to the same bar; the grade and the outcome still show, since those are
+true on that pitch. Only the clock is withheld.
+
+**Measured, playing it:** a swing read +132ms, correcting by 132ms produced
+−8ms — PERFECT, single to shallow outfield. That is the whole feature: the
+number is accurate enough to act on.
 
 ### The defence moves — and it is a lean, not a stack
 

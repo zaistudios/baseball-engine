@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  bandsFor,
   grade,
   computeOffsetMs,
   isContact,
@@ -315,5 +316,82 @@ describe('resolveSwing distribution sanity', () => {
     }
     expect(powerHr).toBeGreaterThan(normalHr);
     expect(powerK).toBeGreaterThanOrEqual(normalK);
+  });
+});
+
+/**
+ * THE METER AND THE VERDICT, and the one claim worth locking about them.
+ *
+ * bandsFor() exists so a drawn timing bar cannot disagree with the word the
+ * engine puts next to it. That is not a claim about drawing — it is a claim
+ * that ONE function decides where the edges are, and it is enforceable here:
+ * feed the boundaries bandsFor() reports straight back to grade() and assert
+ * the grade flips exactly at them. If anybody ever gives the bar its own copy
+ * of the numbers, or re-tunes grade() around bandsFor()'s back, these fail.
+ */
+describe('the bar reads the same windows the verdict is decided in', () => {
+  // A deliberately awkward set: a bat better than neutral, a bat worse, and
+  // eyes that move the whiff edge without moving the other two.
+  const cases: ReadonlyArray<[number, number]> = [
+    [1, 1],
+    [1.6, 1],
+    [0.75, 1],
+    [1.2, 1.4],
+    [0.9, 0.6],
+  ];
+
+  it('flips grade exactly at every edge it reports, early and late', () => {
+    for (const [contact, vision] of cases) {
+      const b = bandsFor(contact, vision);
+
+      // Inside an edge is that grade; a hair past it is the next one out.
+      // Both signs, since the sign convention is the thing that was inverted
+      // in the prototype and the bar draws both sides of centre.
+      for (const sign of [1, -1]) {
+        const late = sign > 0;
+        expect(grade(sign * b.perfect, contact, vision)).toBe('perfect');
+        expect(grade(sign * (b.perfect + 0.001), contact, vision)).toBe('good');
+
+        expect(grade(sign * b.good, contact, vision)).toBe('good');
+        expect(grade(sign * (b.good + 0.001), contact, vision)).toBe(late ? 'late' : 'early');
+
+        expect(grade(sign * b.contact, contact, vision)).toBe(late ? 'late' : 'early');
+        expect(grade(sign * (b.contact + 0.001), contact, vision)).toBe('miss');
+      }
+    }
+  });
+
+  it('scales the three windows the way grade() documents, and no other way', () => {
+    // CONTACT moves all three. VISION moves only the whiff edge — that split
+    // is the whole reason both stats exist, and a bar drawn from the wrong one
+    // would mis-size the band a player is aiming at.
+    const neutral = bandsFor(1, 1);
+    expect(neutral).toEqual(TIMING_WINDOWS_MS);
+
+    const better = bandsFor(2, 1);
+    expect(better.perfect).toBeCloseTo(neutral.perfect * 2);
+    expect(better.good).toBeCloseTo(neutral.good * 2);
+    expect(better.contact).toBeCloseTo(neutral.contact * 2);
+
+    const eyes = bandsFor(1, 2);
+    expect(eyes.perfect).toBe(neutral.perfect);
+    expect(eyes.good).toBe(neutral.good);
+    expect(eyes.contact).toBeCloseTo(neutral.contact * 2);
+
+    // Ordered, always. A bar whose bands crossed over would draw the perfect
+    // window outside the good one.
+    for (const [c, v] of cases) {
+      const b = bandsFor(c, v);
+      expect(b.perfect).toBeLessThan(b.good);
+      expect(b.good).toBeLessThanOrEqual(b.contact);
+    }
+  });
+
+  it('refuses a nonsense multiplier the same way grade() always has', () => {
+    // grade() has always treated a non-positive stat as 1.0 rather than
+    // collapsing the window to nothing. The bar has to agree, or a broken
+    // roster would draw a zero-width target over a playable at-bat.
+    expect(bandsFor(0, 0)).toEqual(TIMING_WINDOWS_MS);
+    expect(bandsFor(-1, -1)).toEqual(TIMING_WINDOWS_MS);
   });
 });

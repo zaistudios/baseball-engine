@@ -58,6 +58,46 @@ describe('every club dresses twenty-six', () => {
     expect(names).toHaveLength(LEAGUE.length * ROSTER_SIZE);
   });
 
+  /**
+   * ⚠️ UNIQUE IS NOT THE SAME AS TELLABLE APART, and the box score is where the
+   * difference showed. Kansas City dressed Hump Yard Delacruz AND Hump Yard
+   * Delacroix; Phoenix had Dry Heat Villalobos batting first and Dry Heat
+   * Villaseñor on the bench. Two different strings, so the test above passed —
+   * and a line score with both of them in it reads as one man printed twice.
+   *
+   * The rule is deliberately narrow, because a repeated NICKNAME is the club's
+   * voice and has to stay: Buffalo carries three Lake Effects and San Francisco
+   * three Cable Cars, and that is the joke working. What is forbidden is a
+   * repeated nickname where the surname is the only thing left doing the
+   * telling and it opens the same four letters. Repeated SURNAMES are fine for
+   * the same reason (Minneapolis is Scandinavian, Maine is Québécois) — a
+   * different nickname is already a different man on the card.
+   */
+  it('never dresses two men on one club who read as the same name', () => {
+    const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    const surname = (n: string) => fold(n.split(' ').pop() ?? '');
+    const nickname = (n: string) => n.split(' ').slice(0, -1).join(' ');
+
+    const clashes: string[] = [];
+    for (const t of LEAGUE) {
+      const names = [
+        ...t.lineup.map((p) => p.name),
+        ...(t.bench ?? []).map((p) => p.name),
+        ...t.rotation.map((a) => a.name),
+        ...t.bullpen.map((a) => a.name),
+      ];
+      for (let i = 0; i < names.length; i++)
+        for (let j = i + 1; j < names.length; j++) {
+          const a = names[i]!;
+          const b = names[j]!;
+          if (!nickname(a) || nickname(a) !== nickname(b)) continue;
+          if (surname(a).slice(0, 4) !== surname(b).slice(0, 4)) continue;
+          clashes.push(`${t.abbr}: ${a} / ${b}`);
+        }
+    }
+    expect(clashes).toEqual([]);
+  });
+
   it('gives every generated arm a putaway he actually throws', () => {
     // The invariant core/__tests__/pitcher.test.ts holds the written nine to.
     // depthArm() copies the mix and the out pitch as a pair, which is the
