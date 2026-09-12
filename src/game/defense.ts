@@ -126,6 +126,39 @@ function relayQuality(a: Alignment): number {
   return (ss + second) / 2;
 }
 
+/**
+ * HOW MUCH OF A DOUBLE-PLAY BALL THIS IS, by who fielded it.
+ *
+ * ⚠️ WHERE THE BALL WENT DID NOT REACH THE RELAY, and it is the first thing a
+ * person watching thinks about. core/fielding.ts rolls one flat DOUBLE_PLAY_RATE
+ * on every ground out with a force, so a two-hopper straight at the second
+ * baseman — which is the double-play ball, the single most recognisable shape in
+ * the sport — and a swinging bunt the pitcher had to come off the mound for were
+ * the same 35% coin. Zane, watching the first of those: "grounder to second
+ * baseman and doesn't turn double play."
+ *
+ * The spread is the real one. The two men who make the pivot start the play
+ * already standing where the play goes; the corners have a long throw and the
+ * pitcher is falling off the mound. Nobody has ever turned two from the
+ * outfield, which is the zero.
+ *
+ * ⚠️ IT MULTIPLIES, IT DOES NOT REPLACE. DOUBLE_PLAY_RATE is still the league
+ * number and still the only place to tune the overall frequency — this decides
+ * which balls get to be above it. Measured with scripts/balance.ts.
+ */
+export const DP_BY_POSITION: Readonly<Record<Position, number>> = {
+  SS: 1.3,
+  '2B': 1.3,
+  '3B': 1.0,
+  '1B': 0.8,
+  P: 0.7,
+  C: 0.4,
+  LF: 0,
+  CF: 0,
+  RF: 0,
+  DH: 0,
+};
+
 export interface DefensivePlay extends FieldingResult {
   /** Who it was hit at. Shown in the play-by-play — "6-4-3" needs a 6. */
   by: Position;
@@ -158,7 +191,8 @@ export function fieldBall(
       forceAtFirst: opts.forceAtFirst,
       outs: opts.outs,
       errorMult: POSITION_DIFFICULTY[by] / glove,
-      dpMult: relayQuality(alignment),
+      // The gloves that turn it, and whether this was a ball to turn it on.
+      dpMult: relayQuality(alignment) * DP_BY_POSITION[by],
       // ⚠️ THE ARM IS THE GLOVE, and that is a deliberate simplification. A
       // real outfielder's arm and his range are different scouting numbers;
       // here gloveOf() is one number off build and legs, and inventing a

@@ -59,6 +59,49 @@ const justOut = (exitVelocityMph: number, wallFt: number): number =>
   wallFt + 2 + Math.max(0, exitVelocityMph - 95) * 0.9;
 
 /**
+ * HOW DEEP A TRIPLE IS DRAWN, AT THE LEAST, as a share of the fence.
+ *
+ * ⚠️ EXACTLY THE SAME RECONCILIATION justOut() DOES, for exactly the same
+ * reason, on the other three-base hit. The table calls the triple before any of
+ * this runs, and it calls plenty of them on soft liners — measured over 120,000
+ * swings, a triple's median plotted distance was 262 FEET against a DOUBLE's
+ * 321, and 41% of them landed inside the median SINGLE. So the most exciting
+ * hit in the sport was routinely drawn as a bloop, with a runner sprinting
+ * three bases on it. Zane, in one line: "Triple when the scene looks like a
+ * single."
+ *
+ * It is a floor and not a shove, so a triple that already carried stays where
+ * the physics put it; only the ones the picture would contradict get moved.
+ *
+ * ⚠️ AND IT SCALES WITH THE EXIT VELOCITY FOR THE REASON justOut() DOES — a
+ * FLAT floor just moves the pile, which is the mistake this file has now made
+ * twice (the 460 ceiling, then 404 feet on an eighth of all home runs). Tried
+ * flat at 0.80 first: it put p5 through p75 of every triple in the game on
+ * exactly 320 feet. The table's triples run 78 to 107mph, so the velocity is 29
+ * miles an hour of real spread and it is the only honest information here.
+ *
+ * ⚠️ IT FEEDS BACK INTO THE HIT MIX AND THAT IS NOT A SIDE EFFECT TO IGNORE.
+ * place() measures `gapFt` from this distance and stretch() holds a table
+ * triple to a double on a small gap, so moving the ball out among the
+ * outfielders costs some of them. Measured, not assumed: 2.1% of hits against a
+ * real 2.0% and 3.8% off the raw table, so TRIPLE_GAP_FT did NOT need moving.
+ * Re-measure with scripts/place.ts after any change here — that constant is the
+ * paired knob if it ever does.
+ *
+ * Where the ball now lands: p5 302ft, p50 353, p95 385, and the most repeated
+ * single distance is 13 of 339. Deeper than the median double, which is what a
+ * triple is, and no pile anywhere.
+ */
+const TRIPLE_MIN_SHARE = 0.75;
+const TRIPLE_FT_PER_MPH = 2.8;
+const TRIPLE_BASE_MPH = 78;
+
+/** How deep a triple is drawn, at the least. See TRIPLE_MIN_SHARE. */
+const deepEnough = (exitVelocityMph: number, wallFt: number): number =>
+  wallFt * TRIPLE_MIN_SHARE +
+  Math.max(0, exitVelocityMph - TRIPLE_BASE_MPH) * TRIPLE_FT_PER_MPH;
+
+/**
  * Drag, as one number: the share of the vacuum range a real ball keeps.
  *
  * ⚠️ RAISED FROM 0.57 WHEN hit.ts STOPPED SATURATING THE VELOCITY CAP, and the
@@ -300,7 +343,13 @@ export function plotBatted(
     const rolled = Math.max(50, Math.min(240, exitVelocityMph * 1.6));
     // A foul chopper dies against the screen or trickles into the coach's box;
     // it does not run 200ft the way a fair one down the line does.
-    const distFt = foul ? Math.max(18, rolled * foulCarry(directionDeg) * 0.6) : rolled;
+    const distFt = foul
+      ? Math.max(18, rolled * foulCarry(directionDeg) * 0.6)
+      : // A triple on the ground is a ball in the corner that nobody cut off,
+        // so it has to have got there. See TRIPLE_MIN_SHARE.
+        outcome === 'triple'
+        ? Math.min(wallFt - 8, Math.max(rolled, deepEnough(exitVelocityMph, wallFt)))
+        : rolled;
     return { distFt, hangMs: groundHang(distFt, foul), ground: true };
   }
 
@@ -325,7 +374,11 @@ export function plotBatted(
   distFt =
     outcome === 'home_run'
       ? Math.max(distFt, justOut(exitVelocityMph, wallFt))
-      : Math.min(distFt, wallFt - 8);
+      : outcome === 'triple'
+        ? // A triple has to be a ball that got out there — see TRIPLE_MIN_SHARE.
+          // The ceiling still applies: nothing but a home run clears the wall.
+          Math.min(Math.max(distFt, deepEnough(exitVelocityMph, wallFt)), wallFt - 8)
+        : Math.min(distFt, wallFt - 8);
 
   // ⚠️ THE FOUL CLAMP COMES BEFORE THE FAIR ONE, and it has a much lower floor.
   // The 60ft minimum below is right for a ball in play — nothing fair finishes
@@ -605,9 +658,21 @@ export function raceTiming(opts: {
   fieldedAt: number;
   /** 6-4-3: the ball stops at second on its way to first. */
   doublePlay?: boolean;
+  /**
+   * 4-6: the ball stops at second AND STAYS THERE. The lead man is out at the
+   * bag and there is no play at first behind him — see FORCE_AT_SECOND.
+   */
+  force?: boolean;
 }): Race {
   const { speed, safe, play, fieldedAt } = opts;
   const base = runToFirstMs(speed);
+
+  // ⚠️ CHECKED BEFORE `play`, because the play is not at first. The throw goes
+  // to the bag, the man from first is out there, and the batter reaches with
+  // nobody contesting it — so there is a relay and no first-base throw at all.
+  // Drawing a throw to first here is what put a SAFE call under an out.
+  if (opts.force) return { runMs: base, throwMs: null, relayMs: fieldedAt + MIN_THROW_MS };
+
   if (!play) return { runMs: base, throwMs: null, relayMs: null };
 
   const earliest = fieldedAt + MIN_THROW_MS;

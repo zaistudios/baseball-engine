@@ -106,6 +106,8 @@ export interface Replay {
   safe: boolean;
   /** 6-4-3. The relay stops at second and the forced man is erased there. */
   doublePlay: boolean;
+  /** 4-6. The same throw, and nothing after it: the batter reaches first. */
+  force: boolean;
   /** Booted: the chaser gets there and it gets past him anyway. */
   error: boolean;
   /**
@@ -169,6 +171,7 @@ export function newReplay(o: {
   speed: number;
   safe: boolean;
   doublePlay?: boolean;
+  force?: boolean;
   error?: boolean;
   moves?: RunnerMove[];
   held?: number[];
@@ -203,6 +206,7 @@ export function newReplay(o: {
     speed: o.speed,
     safe: o.safe,
     doublePlay: !!o.doublePlay,
+    force: !!o.force,
     error: !!o.error,
     moves: o.moves ?? [],
     held: o.held ?? [],
@@ -293,6 +297,7 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
       play: !isFoul(r) && (hasPlayAtFirst(r.plot, chaser) || r.doublePlay),
       fieldedAt,
       doublePlay: r.doublePlay,
+      force: r.force,
     }),
   };
 }
@@ -914,10 +919,11 @@ function drawRace(
     drawRunnerDot(ctx, runnerPoint(cam, gunned.from, gunned.at, t / gunned.ms), t > gunned.ms);
   }
 
-  // The forced man on a double play. He is erased from the base state, so he is
-  // in neither list above — he has to be drawn from the fact of the DP itself.
-  // He stops dead at second when the relay beats him, which IS the out.
-  if (r.doublePlay && relayMs !== null) {
+  // The forced man, on a double play AND on a plain force. He is erased from
+  // the base state, so he is in neither list above — he has to be drawn from
+  // the fact of the play itself. He stops dead at second when the throw beats
+  // him, which IS the out.
+  if ((r.doublePlay || r.force) && relayMs !== null) {
     const k = Math.min(1, t / relayMs);
     drawRunnerDot(
       ctx,
@@ -957,6 +963,9 @@ function drawRace(
     } else {
       throwLeg(landing, first, fieldedAt, throwMs);
     }
+  } else if (r.force && relayMs !== null) {
+    // One leg, and it ends at the bag. Nothing is thrown to first behind it.
+    throwLeg(landing, second, fieldedAt, relayMs);
   }
 
   // The batter, running it out as far as the scoreboard says he got.

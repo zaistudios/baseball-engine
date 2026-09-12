@@ -130,7 +130,51 @@ export interface Delivery {
   releaseAtMs: number;
   /** Multiplies every release window. Below 1 is a harder pitch to repeat. */
   scale: number;
+  /**
+   * THE ARM ACTION — how the marker MOVES down the bar, as an exponent on its
+   * progress. This is the answer to Zane's "sliders and changeups are the same".
+   *
+   * ⚠️ WHERE THE LINE SITS WAS THE ONLY THING THAT EVER DIFFERED, and it is not
+   * enough. Six pitches, one marker, one constant speed: the release line sat
+   * 27 pixels apart for the slider and the changeup and the two motions were
+   * literally identical to perform. Moving the line further cannot fix it,
+   * because the bar runs out of room — the spread is already 52% to 78% and
+   * the note below says so.
+   *
+   * So the MOTION differs instead. Above 1 the marker crawls out of the hand
+   * and whips through the release: the slider's wrist snap, at 1.55 the
+   * sharpest in the game. Below 1 it leaps out with the arm and visibly dies
+   * into the release: the changeup you have to hold, at 0.65. Those two are
+   * opposite motions rather than the same motion 27 pixels apart, which is the
+   * whole of the fix. 1 is dead even, and only the knuckleball is.
+   *
+   * ⚠️ THE GRADE IS STILL PURE MILLISECONDS AND NONE OF IT MOVED.
+   * gradeRelease() has never seen a pixel. What the exponent changes is how
+   * many pixels a millisecond is worth NEAR THE RELEASE POINT, and therefore
+   * how wide the band you are aiming at looks — a whipping marker draws a
+   * narrow band, a dying one draws a wide one. That is a real second axis of
+   * difficulty and it is deliberately NOT lined up with `scale`: the curveball
+   * is hard because you have to wait it out, not because it is hard to see, so
+   * at 0.55 its band is the most legible on the bar. Turn an exponent toward 1
+   * if a pitch reads as unfair rather than as a different motion.
+   *
+   * ⚠️ releaseAtMs IS COMPENSATED FOR IT, so the line lands where the design
+   * always wanted it. releaseMark() is where the line actually is, and it is
+   * what the spread tests assert against — the raw ratio stopped being the
+   * drawn position the moment this field existed.
+   */
+  ease: number;
 }
+
+/**
+ * WHERE THE RELEASE LINE IS DRAWN, 0 to 1 across the bar.
+ *
+ * ⚠️ ONE ANSWER, so the renderer, the tempo word and the tests cannot disagree
+ * about where the target is. Before `ease` this was just releaseAtMs / sweepMs
+ * and three separate places worked it out.
+ */
+export const releaseMark = (d: Delivery): number =>
+  Math.pow(d.releaseAtMs / d.sweepMs, d.ease);
 
 /**
  * ⚠️ THE RATIO release/sweep IS A DESIGN NUMBER, NOT A CONSEQUENCE — and the
@@ -146,25 +190,40 @@ export interface Delivery {
  * The spread is now 52.1% to 78.0% — 65px — so the target visibly walks right
  * as the pitches get slower, and the marker speed still varies underneath it.
  * Two cues, not one. Keep the spread when retuning: delivery.test.ts asserts it.
+ *
+ * ⚠️ AND 65px OF LINE WAS STILL NOT ENOUGH — 2026-09-12. Zane, off a shift on
+ * the mound: "Pitches during pitching need to be more unique. Sliders and
+ * changeups are the same." He is right and the note above says why without
+ * noticing: two cues, and the second one — marker SPEED — was a constant
+ * within a pitch, so all it ever did was make one line arrive slightly sooner
+ * than another. `ease` is the third cue and the only one that is a MOTION. The
+ * releases below are set so releaseMark() still lands on the same six places
+ * this note describes; what changed is how the marker gets to them.
  */
 export const DELIVERIES: Record<PitchType, Delivery> = {
   // Quick, early, and the most forgiving of the six. It is the pitch you go
-  // back to when the rhythm is gone, which is what a fastball is for.
-  fastball: { sweepMs: 960, releaseAtMs: 500, scale: 1.1 },
-  // The fastball's cousin, a touch longer through the bottom.
-  sinker: { sweepMs: 980, releaseAtMs: 560, scale: 1.05 },
-  // Middle tempo, and the first one that asks for something.
-  slider: { sweepMs: 1000, releaseAtMs: 640, scale: 0.95 },
-  // ⚠️ HELD PAST WHERE THE FASTBALL WENT, which is the whole pitch. Coming to
-  // it straight off a fastball is a 270ms difference in when to let go, and
-  // that mis-press is the changeup's own deception turned on the man throwing it.
-  changeup: { sweepMs: 1110, releaseAtMs: 830, scale: 0.92 },
-  // The long slow wind. Latest release in the game and you have to wait it out.
-  curveball: { sweepMs: 1180, releaseAtMs: 920, scale: 0.9 },
-  // Nobody repeats a knuckleball, including you. Ordinary tempo, narrowest
-  // window — this is the per-PITCH half of what COMMAND.knuckler already says
-  // about the per-ARM half.
-  knuckleball: { sweepMs: 1000, releaseAtMs: 700, scale: 0.8 },
+  // back to when the rhythm is gone, which is what a fastball is for — and the
+  // arm comes through it, so the marker builds into the release.
+  fastball: { sweepMs: 960, releaseAtMs: 603, scale: 1.1, ease: 1.4 },
+  // The fastball's cousin, a touch longer and flatter through the bottom.
+  sinker: { sweepMs: 980, releaseAtMs: 614, scale: 1.05, ease: 1.2 },
+  // ⚠️ THE SHARPEST MOTION IN THE GAME. The arm is even and then the wrist
+  // goes: the marker hangs back and snaps through the line, so the band is at
+  // its narrowest exactly when you need it. The changeup below is its mirror.
+  slider: { sweepMs: 1040, releaseAtMs: 780, scale: 0.95, ease: 1.55 },
+  // ⚠️ HELD PAST WHERE THE FASTBALL WENT, which is the whole pitch — and the
+  // marker now SHOWS the hold: it leaps out with the arm and dies into the
+  // release. Coming to it straight off a fastball is a different place on the
+  // bar AND a different motion to get there, which is the changeup's own
+  // deception turned on the man throwing it.
+  changeup: { sweepMs: 1110, releaseAtMs: 710, scale: 0.92, ease: 0.65 },
+  // The long slow wind. Furthest-right line in the game, and the marker crawls
+  // the last third of the way to it — you have to wait it out.
+  curveball: { sweepMs: 1180, releaseAtMs: 751, scale: 0.9, ease: 0.55 },
+  // Nobody repeats a knuckleball, including you. Dead-even motion with no
+  // character at all, narrowest window — this is the per-PITCH half of what
+  // COMMAND.knuckler already says about the per-ARM half.
+  knuckleball: { sweepMs: 1000, releaseAtMs: 700, scale: 0.8, ease: 1 },
 };
 
 /**
@@ -174,7 +233,14 @@ export const DELIVERIES: Record<PitchType, Delivery> = {
  * been told about pitch types keeps the behaviour it was written against.
  */
 export const deliveryOf = (type?: PitchType): Delivery =>
-  (type && DELIVERIES[type]) || { sweepMs: DELIVERY_MS, releaseAtMs: RELEASE_AT_MS, scale: 1 };
+  (type && DELIVERIES[type]) || {
+    sweepMs: DELIVERY_MS,
+    releaseAtMs: RELEASE_AT_MS,
+    scale: 1,
+    // Dead even, which is exactly the constant-speed marker this file drew
+    // before `ease` existed.
+    ease: 1,
+  };
 
 /**
  * BEFORE THIS, THE ARM HAS NOT COME FORWARD AND THERE IS NOTHING TO LET GO OF.
@@ -314,6 +380,11 @@ export const RELEASE_SHORT: Record<ReleaseGrade, string> = {
  * the word follows it.
  */
 export const tempoWord = (type: PitchType): string => {
-  const r = DELIVERIES[type].releaseAtMs;
-  return r <= 600 ? 'quick' : r <= 700 ? 'even' : r <= 850 ? 'slow' : 'long';
+  // ⚠️ OFF THE MARK, NOT OFF releaseAtMs. The word names where the target SITS
+  // on the bar, and the raw millisecond stopped being that the moment `ease`
+  // existed — the same failure the release band had before it was drawn off
+  // releaseWindowMs(): a second way of computing one thing, which goes quietly
+  // wrong the first time somebody retunes a row above it.
+  const m = releaseMark(DELIVERIES[type]);
+  return m <= 0.55 ? 'quick' : m <= 0.65 ? 'even' : m <= 0.75 ? 'slow' : 'long';
 };

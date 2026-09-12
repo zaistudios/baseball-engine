@@ -665,7 +665,7 @@ const COVERS: Record<number, number> = { 1: 3, 2: 4, 3: 5, 4: 2 };
 export function scorecard(
   outcome: Outcome,
   fielderNum: number,
-  opts: { error?: boolean; doublePlay?: boolean } = {},
+  opts: { error?: boolean; doublePlay?: boolean; force?: boolean } = {},
 ): string {
   if (opts.error) return `E${fielderNum}`;
 
@@ -675,6 +675,9 @@ export function scorecard(
 
     case 'ground_out':
       if (opts.doublePlay) return `${fielderNum}-${pivotFor(fielderNum)}-3`;
+      // ⚠️ THE FORCE ENDS AT THE BAG, so the notation does too — `6-4`, not
+      // `6-3`. Nobody was retired at first and the batter is standing on it.
+      if (opts.force) return `${fielderNum}-${pivotFor(fielderNum)}`;
       // Unassisted: he fielded it standing on the bag he was going to throw to.
       return fielderNum === 3 ? '3U' : `${fielderNum}-3`;
 

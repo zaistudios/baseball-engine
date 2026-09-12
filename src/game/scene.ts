@@ -351,6 +351,74 @@ export function sceneFor(f: SceneFacts): Scene {
   return made(ROUTINE[f.outcome] ?? 'OUT', fielder ? `TO ${fielder}` : '', 'routine');
 }
 
+/**
+ * THE AT-BAT THAT ENDED WITHOUT A BALL IN PLAY — the strikeout, the walk, and
+ * the man who wears one.
+ *
+ * ⚠️ NONE OF THESE HAD A SCENE, AND BETWEEN THEM THEY ARE ABOUT A THIRD OF
+ * EVERY PLATE APPEARANCE IN THE GAME. sceneFor() is written from a Placement
+ * and a batted ball, and main.ts only ever called it on `in_play` — so the
+ * loudest ordinary thing that happens on a pitcher's afternoon went past in
+ * total silence, with the count simply resetting and the next man walking up.
+ * Zane, playing the mound: "NO STRIKEOUT PROMPT ON SCREEN."
+ *
+ * ⚠️ AND IT IS A SCENE WITH NO REPLAY UNDER IT, which is the one structural
+ * difference from sceneFor(). There is no ball to watch, so main.ts gives the
+ * caption its own clock rather than riding the overhead's — see drawScene().
+ * The tier still buys the beat, for the same reason it does everywhere else: a
+ * punch-out with the bases loaded is not the same event as a first-inning K.
+ */
+export function sceneForTake(f: {
+  kind: 'strikeout' | 'walk' | 'hit_by_pitch';
+  /** He went down swinging rather than looking. */
+  swinging: boolean;
+  /** Runs forced in. Only a bases-loaded walk or plunking can be above zero. */
+  runs: number;
+  before: Situation;
+  walkOff: boolean;
+}): Scene {
+  const big = isHighLeverage(f.before);
+  const menOn = occupied(f.before.bases).some(Boolean);
+  const made = (title: string, detail: string, tier: Tier, leverage = false): Scene => ({
+    title,
+    detail,
+    tier,
+    hold: TIER_HOLD_MS[tier],
+    leverage,
+  });
+
+  if (f.walkOff) {
+    return { ...made('WALK-OFF', 'AND THAT IS THE BALL GAME', 'huge', true), hold: TIER_HOLD_MS.huge + 500 };
+  }
+
+  if (f.kind === 'strikeout') {
+    // ⚠️ LOOKING AND SWINGING ARE DIFFERENT EVENTS AND THE SCREEN SHOULD SAY SO.
+    // A called third strike is the pitcher's; a swing through it is the
+    // hitter's mistake. One word apart, and it is the difference between "he
+    // painted it" and "he is out in front of everything".
+    const head = f.swinging ? 'SWINGING' : 'CAUGHT LOOKING';
+    if (big && menOn) {
+      return made('STRUCK HIM OUT', f.before.outs === 2 ? 'OUT OF THE JAM' : head, 'solid', true);
+    }
+    return made('STRIKE THREE', head, menOn && f.before.outs === 2 ? 'solid' : 'routine', big);
+  }
+
+  const how = f.kind === 'walk' ? 'FOUR WIDE' : 'HE WEARS ONE';
+  if (f.runs > 0) {
+    // The bases were loaded. A run that scores without the ball leaving the
+    // infield is worth the same beat as one that does.
+    return made(f.kind === 'walk' ? 'WALKED IN' : 'FORCED IN', `${how} — A RUN SCORES`, 'big', big);
+  }
+  return made(
+    f.kind === 'walk' ? 'WALK' : 'HIT BY PITCH',
+    // A free pass in a tight spot is a different event from one in the second
+    // inning, and it is the one the man on the mound has to feel.
+    big && menOn ? `${how} — AND THE TYING RUN IS ABOARD` : how,
+    big && menOn ? 'solid' : 'routine',
+    big,
+  );
+}
+
 const ROUTINE: Partial<Record<Outcome, string>> = {
   ground_out: 'GROUND OUT',
   line_out: 'LINE OUT',

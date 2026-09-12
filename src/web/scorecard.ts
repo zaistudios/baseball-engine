@@ -66,6 +66,13 @@ export interface PlayInput {
   /** Scorer's number of whoever got to the ball. */
   chaser: number;
   doublePlay: boolean;
+  /**
+   * THE FIELDER'S CHOICE — the throw went to the bag and the batter reached.
+   * "Grounded out to short" is the wrong sentence for it in two ways: nobody
+   * grounded out, and the man who is out was standing on first when the pitch
+   * was thrown. See FORCE_AT_SECOND in core/fielding.ts.
+   */
+  force?: boolean;
   error: boolean;
   /** Outs AFTER the play, for the "two away" tag. */
   outs: number;
@@ -111,6 +118,14 @@ export function callPlay(p: PlayInput): PlayCall {
     return {
       score: `${p.chaser}-4-3`,
       says: `Two! Around the horn, ${away(p.outs)}.${runs}`,
+    };
+  }
+
+  // One throw, and it goes to the bag rather than to first.
+  if (p.force) {
+    return {
+      score: `${p.chaser}-4`,
+      says: `Force at second — ${who} to the bag, and the hitter beats it out. ${away(p.outs)}.${runs}`,
     };
   }
 

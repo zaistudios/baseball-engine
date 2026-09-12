@@ -1104,6 +1104,130 @@ true on that pitch. Only the clock is withheld.
 −8ms — PERFECT, single to shallow outfield. That is the whole feature: the
 number is accurate enough to act on.
 
+### A shift on the mound, and eight things it found — 2026-09-12
+
+`Work Playtest Notes 9/12` at the repo root is Zane's own file, written while
+playing, and the headline in it is not a bug report:
+
+> *"The plays need to feel more fluid. Not scripted. And the problem is I dont
+> know how to convey that to the bot."*
+
+He conveyed it. Every line under it turns out to name the same defect from a
+different angle, and the defect has a one-sentence statement:
+
+> **THINGS WERE HAPPENING WITH NO VISIBLE CAUSE, AND THE PICTURE DID NOT ALWAYS
+> AGREE WITH THE BOOK.**
+
+That is what "scripted" means in a game with no script in it. Below is each
+note, what it actually was, and what it is now.
+
+**1. Runners moved between plate appearances, with no ball anywhere.** The two
+loudest notes — *"Pop up first base foul line and runner from second advanced to
+third. THIS DOES NOT PLAY LIKE BASEBALL"* and *"SOMEONE FROM SECOND JUST SCORED
+ON A GROUNDOUT"* — were both this, and neither was a baserunning bug.
+`core/inning.ts` never moves a man further than the play is worth and was right
+in both cases. `finishAtBat()` called `rollLoose()` and `runTheBases()` **after
+the at-bat**, between hitters: a wild pitch and a steal resolving with the
+screen showing nothing at all. The runner appeared one bag along and the
+play-by-play explained it afterwards in text, which is not the same as watching
+it happen.
+
+Both now run from `runnersGoOnThePitch()`, on the first pitch of the at-bat that
+the batter does not put in play. Same odds, same once per plate appearance — the
+rates in `running.ts` are per-at-bat numbers and the run environment was
+measured against them — but there is a ball in the air when the runner goes, and
+the flash over that pitch says BALL GETS AWAY. The headless sim keeps its own
+call sites untouched, which is why `scripts/balance.ts` cannot have moved.
+
+**2. A strikeout said nothing.** *"NO STRIKEOUT PROMPT ON SCREEN. PROMPTS ARE
+TOO FAST."* `sceneFor()` is written from a batted ball and `main.ts` only ever
+called it on in-play results, passing null for everything else — so the
+strikeout, the walk and the hit batsman, **about a third of every plate
+appearance in the game**, had no caption at all. `sceneForTake()` is the other
+half. It has no replay under it, so it runs on its own clock (`TAKE_SCENE_MS`,
+1600ms against the replay caption's 900) and comes up immediately rather than
+anchored to the end of a flight that does not exist. It still does not block:
+the next pitch is yours to throw straight through it.
+
+It also tells **going down swinging from going down looking**, which are two
+different things to watch and were one word before.
+
+**3. A foul pop announced itself as IN PLAY.** Your half worked the word out
+inline; the computer's half said IN PLAY for anything that was not a whiff. So a
+ball that ENDS the at-bat in the seats behind first — on a replay that barely
+moves, which is the *"no ball movement on the screen"* half of the note — came
+up as a ball in play. One `swingWord()` now, called by both halves.
+
+**4. The throw always went to the wrong bag.** *"grounder to second baseman and
+doesn't turn double play"*, then *"Throw-outs are not shown"*. Those are one
+note. Every ground ball retired the **batter at first** and handed the man on
+first second base for nothing — one out either way, so no run total in three
+rounds of tuning ever noticed, and it is the commonest play in baseball rendered
+backwards. There was never a runner at the far end of a throw to be thrown out,
+because the game had no force play in it.
+
+`FORCE_AT_SECOND` (0.6) and `fieldersChoice()` add it: the lead man is out at
+the bag, the batter reaches, and everyone else runs the ground ball exactly as
+before. The replay draws the one throw ending at second with an OUT call on it,
+the scorer writes 6-4, and the sentence says *reached on a fielder's choice*. It
+costs the offence a base, which is what a force play is.
+
+**And the double play now knows where the ball went.** `DP_BY_POSITION` — one
+flat 35% coin used to cover both a two-hopper at the second baseman and a
+swinging bunt the pitcher fell off the mound for. The middle infield is at 1.3,
+the corners below 1, the outfield at zero.
+
+**5. A triple was drawn as a bloop.** *"Triple when the scene looks like a
+single."* Measured over 120,000 swings: a triple's median plotted distance was
+**262 feet against a double's 321**, and 41% of them landed inside the median
+single. The table calls triples on 8–17° liners and the range formula does not
+carry those. `TRIPLE_MIN_SHARE` in `plot.ts` is the same reconciliation
+`justOut()` already does for the home run — a floor, velocity-scaled so it
+spreads instead of piling. (The flat first cut put p5 through p75 on exactly 320
+feet, which is the 460-foot ceiling mistake for the third time in this file.)
+Now p5 302, p50 353, p95 385, and 2.1% of hits against a real 2.0%.
+
+**6. Six pitches, one motion.** *"Pitches during pitching need to be more
+unique. Sliders and changeups are the same."* He is right, and the standing note
+in `delivery.ts` says why without noticing: there were two cues, and the second
+one — marker SPEED — was constant *within* a pitch, so all it ever did was make
+one line arrive slightly sooner than another. The release lines for the slider
+and the changeup sat 27 pixels apart and the two presses were identical to
+perform.
+
+`Delivery.ease` is a third cue and the only one that is a **motion**. Above 1
+the marker crawls out of the hand and whips through the release — the slider's
+wrist snap at 1.55, the sharpest in the game. Below 1 it leaps out with the arm
+and dies into the release — the changeup you have to hold, at 0.65. Opposite
+motions, not the same motion 27 pixels apart. `releaseAtMs` is compensated so
+every line still lands where the design put it; `releaseMark()` is the one
+answer to where that is, and the spread tests assert against it now.
+
+A second axis of difficulty falls out of it for free and is deliberately **not**
+aligned with `scale`: a whipping marker draws a narrow band and a dying one
+draws a wide one, so the curveball — which is hard because you have to wait it
+out, not because it is hard to see — has the most legible band on the bar.
+
+**7. "He sat on it" is gone.** *"He sat on it is stupid thing to have."* One
+line deleted. The hot bat and the squared-up streak he says he likes are
+untouched.
+
+**⚠️ What this cost on the scoreboard.** The force play takes a base off the
+offence on every non-double-play grounder with a man on first, and that is real:
+**4.28 runs per team over 1200 games, against 4.47 before and a real 4.4.** Hits
+8.46, K rate 22.6%, everything else inside noise. It sits in the band this repo
+has accepted before — 4.25 and 4.34 are both in the notes above — and the trade
+was taken knowingly, because the play it buys is the one the sport is made of.
+`FORCE_AT_SECOND` is the single knob if it reads as too few runs.
+
+**What is still open from that file.** *"My game inning ended with a runner on
+third, an error on base"* is the one line nobody has been able to reproduce or
+explain; it may be a scoring-display problem and it may be nothing. And the
+deepest reading of "not scripted" is untouched: the outcome table still decides
+hit-or-out before the ball is ever plotted, and geometry only gets a vote
+afterwards in `contest()`. Everything above makes the picture agree with that
+verdict. None of it makes the verdict come from the picture.
+
 ### The defence moves — and it is a lean, not a stack
 
 `describePlay()` had been promising this for weeks: the scorer's sentence exists

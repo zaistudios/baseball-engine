@@ -16,6 +16,7 @@ import {
   isHighLeverage,
   momentLine,
   sceneFor,
+  sceneForTake,
   situationOf,
   TIER_HOLD_MS,
   LATE_INNING,
@@ -320,5 +321,70 @@ describe('the pacing bill', () => {
     }
     const perBall = ms / n;
     expect(perBall).toBeLessThan(120);
+  });
+});
+
+/**
+ * ⚠️ THE AT-BAT THAT ENDS WITHOUT A BALL IN PLAY. Before sceneForTake() these
+ * produced NO caption at all — main.ts called sceneFor() on `in_play` and
+ * passed null for everything else — so a strikeout, a walk and a plunking, about
+ * a third of every plate appearance in the game, went past with nothing on the
+ * screen. Zane, playing the mound: "NO STRIKEOUT PROMPT ON SCREEN."
+ */
+describe('the caption for a strikeout, a walk and a plunking', () => {
+  const quiet = sit({ inning: 2, us: 0, them: 0, bases: EMPTY_BASES });
+  const jam = sit({ inning: 9, outs: 2, us: 3, them: 4, bases: on([0, 1]) });
+
+  it('always says something — a caption is never empty', () => {
+    for (const kind of ['strikeout', 'walk', 'hit_by_pitch'] as const) {
+      for (const before of [quiet, jam]) {
+        const s = sceneForTake({ kind, swinging: true, runs: 0, before, walkOff: false });
+        expect(s.title, kind).toBeTruthy();
+        expect(s.hold, kind).toBe(TIER_HOLD_MS[s.tier]);
+      }
+    }
+  });
+
+  it('tells going down swinging from going down looking', () => {
+    const swung = sceneForTake({ kind: 'strikeout', swinging: true, runs: 0, before: quiet, walkOff: false });
+    const looked = sceneForTake({ kind: 'strikeout', swinging: false, runs: 0, before: quiet, walkOff: false });
+    expect(swung.detail).not.toBe(looked.detail);
+  });
+
+  it('makes a punch-out in a jam a bigger scene than one in the second', () => {
+    const quietK = sceneForTake({ kind: 'strikeout', swinging: true, runs: 0, before: quiet, walkOff: false });
+    const jamK = sceneForTake({ kind: 'strikeout', swinging: true, runs: 0, before: jam, walkOff: false });
+    expect(quietK.tier).toBe('routine');
+    expect(jamK.hold).toBeGreaterThan(quietK.hold);
+    expect(jamK.leverage).toBe(true);
+  });
+
+  it('says a run scored when the bases were loaded', () => {
+    const forced = sceneForTake({
+      kind: 'walk',
+      swinging: false,
+      runs: 1,
+      before: sit({ bases: on([0, 1, 2]) }),
+      walkOff: false,
+    });
+    expect(forced.detail).toContain('RUN SCORES');
+    expect(forced.tier).toBe('big');
+  });
+
+  it('lets a walk-off outrank everything, including how it happened', () => {
+    const s = sceneForTake({ kind: 'walk', swinging: false, runs: 1, before: jam, walkOff: true });
+    expect(s.tier).toBe('huge');
+    // The longest beat in the game, same as sceneFor's walk-off arm.
+    expect(s.hold).toBeGreaterThan(TIER_HOLD_MS.huge);
+  });
+
+  /**
+   * The same pacing bill sceneFor() is held to. A strikeout is the single most
+   * common way a plate appearance ends, so a tier that crept up here would cost
+   * more time than any ball in play.
+   */
+  it('keeps the ordinary strikeout free', () => {
+    const s = sceneForTake({ kind: 'strikeout', swinging: true, runs: 0, before: quiet, walkOff: false });
+    expect(s.hold).toBe(0);
   });
 });

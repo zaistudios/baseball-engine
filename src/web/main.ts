@@ -277,6 +277,8 @@ if (import.meta.env.DEV) {
       speed,
       safe: isHit(outcome) || !!extra.error,
       doublePlay: !!extra.doublePlay,
+      // The roguelike has no fielder's choice — see FORCE_AT_SECOND.
+      force: false,
       error: !!extra.error,
       moves: extra.moves ?? [],
       held: extra.held ?? [],
@@ -790,6 +792,7 @@ function finishPitch(pitch: ThrownPitch, text: string): void {
         speed,
         safe: h.isHit || fielding.error,
         doublePlay: fielding.doublePlay,
+        force: !!fielding.force,
         error: fielding.error,
         // from === -1 is the batter, and he is drawn by the race instead.
         // Scorers ride in the same list — see scorersFrom(), whose `to` of 3
@@ -825,6 +828,7 @@ function finishPitch(pitch: ThrownPitch, text: string): void {
         outcome: result.hit.outcome,
         chaser: raceFor(replay).chaser.num,
         doublePlay: fielding.doublePlay,
+        force: !!fielding.force && result.hit.outcome === 'ground_out',
         error: fielding.error,
         outs: match.outs,
         scored,

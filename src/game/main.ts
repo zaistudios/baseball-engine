@@ -28,6 +28,7 @@ import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.
 import {
   ARM_MS,
   deliveryOf,
+  type Delivery,
   tempoWord,
   RELEASE_LABEL,
   RELEASE_SHORT,
@@ -190,6 +191,7 @@ import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
 import {
   momentLine,
   sceneFor,
+  sceneForTake,
   situationOf,
   TIER_COLOUR,
   type Scene,
@@ -408,6 +410,51 @@ let flashUntil = 0;
  * over it in drawField, and dropped with it in the frame loop.
  */
 let scene: Scene | null = null;
+
+/**
+ * WHEN THE CAPTION WENT UP AND HOW LONG IT IS UP FOR.
+ *
+ * ⚠️ ONLY A SCENE WITH NO REPLAY UNDER IT READS THESE. A ball in play rides the
+ * overhead's clock — the caption is a lower third anchored to the END of the
+ * replay, so it lands once the ball has finished doing whatever it was going to
+ * do (see drawScene). A strikeout has no ball to wait on, so it gets its own
+ * two numbers instead of being given a replay it does not deserve.
+ */
+let sceneAt = 0;
+let sceneMs = 0;
+
+/**
+ * HOW LONG A CAPTION WITH NO REPLAY UNDER IT STAYS UP.
+ *
+ * ⚠️ LONGER THAN CAPTION_MS ON PURPOSE, and this is the other half of Zane's
+ * "PROMPTS ARE TOO FAST". A ball in play gives you the caption on top of two
+ * seconds of watching the ball, so nine hundred milliseconds of words is plenty
+ * — you already know what happened and the line is confirming it. A strikeout
+ * gives you nothing but the words. They have to be up long enough to read cold,
+ * and long enough that the punch-out registers as an event rather than as the
+ * count quietly resetting.
+ *
+ * It does NOT block: the next pitch is yours to throw straight through it, the
+ * same rule drawMoment() follows. So this is a floor on how long you CAN look,
+ * never a wait you have to sit out.
+ */
+const TAKE_SCENE_MS = 1600;
+
+/** Put a caption on the screen, with the clock a replay-less one needs. */
+function showScene(s: Scene | null, now = performance.now()): void {
+  scene = s;
+  sceneAt = now;
+  // Speed-scaled like every other beat in the file — at 4x the replay is 4x
+  // faster and the words have to be too, or watch mode stacks captions.
+  sceneMs = s ? (TAKE_SCENE_MS + s.hold) / speed() : 0;
+}
+
+/**
+ * DID HE OFFER AT THE LAST PITCH — the one bit "STRIKE THREE" needs and
+ * AtBatResult does not carry. `{ kind: 'strikeout' }` says he is out and not
+ * whether he went down looking, and those are two different things to watch.
+ */
+let lastWasSwing = false;
 
 /**
  * THE HIGH-LEVERAGE CARD, and its two-step life.
@@ -932,6 +979,102 @@ function steal(): void {
 }
 
 /**
+ * ⚠️ EVERYTHING THAT MOVES A RUNNER NOW HAPPENS ON A PITCH — 2026-09-12.
+ *
+ * THE DEFECT, in Zane's words: "Pop up first base foul line and runner from
+ * second advanced to third. THIS DOES NOT PLAY LIKE BASEBALL", and "SOMEONE
+ * FROM SECOND JUST SCORED ON A GROUNDOUT". Neither was a baserunning bug —
+ * core/inning.ts moves nobody more than the play is worth, and it is right.
+ * Both were THIS: rollLoose() and runTheBases() were called from
+ * finishAtBat(), BETWEEN plate appearances, with no ball anywhere on the
+ * screen. A runner appeared one bag further along, a run came in behind an
+ * out, and nothing the player had watched could account for either. That is
+ * the whole of what "scripted, not fluid" means — a state change with no
+ * visible cause. The play-by-play did print a line; a line of text arriving
+ * after the fact is not the same as seeing it happen.
+ *
+ * THE RULE NOW. One roll per plate appearance, exactly as before — the rates
+ * in running.ts are per-at-bat numbers and the run environment was measured
+ * against them, so moving them per-pitch would quietly quadruple the running
+ * game — but taken on the FIRST pitch of the at-bat the batter does not put in
+ * play. There is a ball in the air when the runner goes, and the flash says so
+ * over the pitch that caused it.
+ *
+ * ⚠️ THE HEADLESS SIM IS UNTOUCHED. sim.ts keeps its own call sites and the
+ * same per-at-bat odds; nothing about how often either event happens has moved,
+ * only where in the at-bat it is asked. scripts/balance.ts is unaffected by
+ * construction, which is the reason it was done this way round rather than by
+ * dividing the rates through.
+ */
+let looseRolled = false;
+
+function runnersGoOnThePitch(): void {
+  // A ball in play is not a pitch anybody steals on, and the at-bat is over.
+  if (game.over || looseRolled || atBat.result?.kind === 'in_play') return;
+  looseRolled = true;
+
+  const outsBefore = game.outs;
+
+  // One gets away from the catcher. It can happen in EITHER half — you are
+  // behind the plate for one of them and at it for the other, and a backstop
+  // that only leaked while you batted would read as the game cheating.
+  const loose = rollLoose(game, rng);
+  game = loose.game;
+  if (loose.wild) {
+    const who = loose.wild.advanced.map((r) => r.name).join(' and ');
+    say(
+      loose.wild.runs > 0
+        ? `Ball gets away — ${who} moves up, and a run scores.`
+        : `Ball gets away — ${who} moves up.`,
+      loose.wild.runs > 0 ? 'big' : 'out',
+    );
+    // ⚠️ IT TAKES THE FLASH OVER FROM THE PITCH, and that is the right order:
+    // "BALL" is what the umpire said, and the ball rolling to the backstop is
+    // what the player needs to look at. It also holds longer than an ordinary
+    // pitch, because two things happened on it.
+    flash = loose.wild.runs > 0 ? 'BALL GETS AWAY — A RUN SCORES' : 'BALL GETS AWAY';
+    flashUntil = pauseFor(1500);
+  }
+
+  // ...and THEY run on you while you are the one on the mound. Your own
+  // running game is the STEAL button and stays where it is — see steal().
+  if (!game.over && !youBat()) {
+    const op = stealOpportunity(game);
+    const basesBefore = game.bases;
+    game = runTheBases(game, rng);
+    if (op && game.bases !== basesBefore) {
+      const caught = game.outs > outsBefore;
+      say(
+        caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
+        caught ? 'out' : 'big',
+      );
+      flash = caught ? 'CAUGHT STEALING' : `${op.runner.name.toUpperCase()} STEALS`;
+      flashUntil = pauseFor(1500);
+    }
+  }
+
+  if (game.over) {
+    finalize();
+    return;
+  }
+  // ⚠️ CAUGHT STEALING CAN BE THE THIRD OUT, and it lands MID-AT-BAT now. The
+  // half rolls over underneath a count that is still 2-1, so the count has to
+  // go with it — the same reset steal() does on your half, and without it the
+  // next hitter walks up already behind.
+  if (game.outs === 0 && outsBefore > 0) {
+    atBat = newAtBat();
+    // A fresh hitter, so a fresh roll — finishAtBat() never ran on this one.
+    looseRolled = false;
+    bunting = false;
+    penArmed = false;
+    previous = [];
+    chart = [];
+    pitch = null;
+  }
+  render();
+}
+
+/**
  * The ball got to the plate. Resolve whatever you did about it.
  *
  * Called from the frame loop rather than a timer, so the resolution uses the
@@ -951,6 +1094,8 @@ function resolvePitch(): void {
   // THE BUNT resolves before anything else and shares none of the swing path.
   if (bunting) {
     observePitch(book, pitch, false);
+    // Squared and the ball was there: that is an offer. See lastWasSwing.
+    lastWasSwing = pitch.inZone;
     if (!pitch.inZone) {
       // You do not chase with the bat out over the plate. Pull it back.
       atBat = takePitch(atBat, false, pitch.hitBatter);
@@ -982,6 +1127,7 @@ function resolvePitch(): void {
   }
 
   const contact = contactAt();
+  lastWasSwing = contact !== null;
 
   if (contact === null) {
     // Took it — and a swing pulled back in time IS a take, which is the whole
@@ -1068,19 +1214,7 @@ function resolvePitch(): void {
     //
     // Read off the swing rather than off the flash: `flash` carries the streak
     // decoration by the time anything else looks at it.
-    const swung = atBat.lastSwing?.outcome;
-    const outcome =
-      freeFoul || drewFoul
-        ? 'FOUL'
-        : swung === 'strikeout'
-          ? atBat.result?.kind === 'strikeout'
-            ? 'STRIKE THREE'
-            : 'SWING AND MISS'
-          : swung === 'foul_out'
-            ? 'FOUL POP'
-            : // Single or ground-out is not decided until finishAtBat() has
-              // asked the defence, so claiming one here would be a guess.
-              'IN PLAY';
+    const outcome = swingWord(freeFoul, drewFoul);
 
     // ⚠️ NOT IN WATCH MODE, same rule as the streak below. That offset belongs
     // to aiSwing(), and a bar drawn from the computer's timing would teach a
@@ -1423,6 +1557,7 @@ function resolveTheirSwing(): void {
     }
   } else {
     const contact = contactAt();
+    lastWasSwing = contact !== null;
     if (contact === null) {
       atBat = takePitch(atBat, pitch.inZone, pitch.hitBatter);
       // ⚠️ THE PLUNKING USED TO READ 'BALL'. takePitch() has taken hitBatter
@@ -1456,14 +1591,15 @@ function resolveTheirSwing(): void {
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
       const g = grade(offset, stats.contact * stuff, stats.vision);
-      flash = g === 'miss' ? 'SWING AND MISS' : 'IN PLAY';
       scored = g === 'miss' ? 'swinging strike' : 'in play';
       // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
       // `atBat === before` and so started calling every two-strike foul the
       // computer hit "IN PLAY".
-      if (wasFreeFoul(before, atBat)) flash = 'FOUL';
+      const freeFoul = wasFreeFoul(before, atBat);
       // Their fouls are drawn too. Same event, same picture.
-      if (showFoul(batter.speed)) flash = 'FOUL';
+      const drewFoul = showFoul(batter.speed);
+      // ⚠️ THE SAME WORD YOUR HALF GETS, off the same function. See swingWord().
+      flash = g === 'miss' ? 'SWING AND MISS' : swingWord(freeFoul, drewFoul);
       // ⚠️ ASKED OF THE SWING, NOT OF THE TWO LINES ABOVE. Both of those are
       // conditions on DRAWING a foul — one is the free two-strike case and the
       // other is whether there was a replay to build — and a foul that is
@@ -1478,7 +1614,6 @@ function resolveTheirSwing(): void {
         scored = 'foul';
         say(`${batter.name} fouls one off.`, 'out');
       }
-      if (theirCall.guess === pitch.type && g !== 'miss') flash += ' — he sat on it';
     }
   }
 
@@ -1509,6 +1644,28 @@ const wasFreeFoul = (before: AtBatState, after: AtBatState): boolean =>
   after.balls === before.balls;
 
 /**
+ * WHAT THE SWING CAME TO, in one word, for the screen.
+ *
+ * ⚠️ ONE FUNCTION FOR BOTH HALVES, and having two was the defect. Your half
+ * worked this out inline and the computer's half did not: it said `IN PLAY` for
+ * anything that was not a whiff, so a FOUL POP — a ball that ends the at-bat in
+ * the seats behind first, on a replay that barely moves — announced itself as a
+ * ball in play. Zane reported exactly that. A word the two halves derive
+ * separately is a word they eventually disagree about.
+ */
+function swingWord(freeFoul: boolean, drewFoul: boolean): string {
+  if (freeFoul || drewFoul) return 'FOUL';
+  const swung = atBat.lastSwing?.outcome;
+  if (swung === 'strikeout') {
+    return atBat.result?.kind === 'strikeout' ? 'STRIKE THREE' : 'SWING AND MISS';
+  }
+  if (swung === 'foul_out') return 'FOUL POP';
+  // Single or ground-out is not decided until finishAtBat() has asked the
+  // defence, so claiming one here would be a guess.
+  return 'IN PLAY';
+}
+
+/**
  * DRAW THE FOUL, if the last swing was one. Returns whether it did.
  *
  * ⚠️ EVERY OTHER BATTED BALL REACHES THE REPLAY FROM finishAtBat(), which a
@@ -1526,6 +1683,12 @@ const wasFreeFoul = (before: AtBatState, after: AtBatState): boolean =>
 function showFoul(runnerSpeed: number): boolean {
   const swing = atBat.lastSwing;
   if (!swing || swing.outcome !== 'foul') return false;
+  // ⚠️ THE PREVIOUS CAPTION HAS TO GO WITH THE PREVIOUS PLAY. A strikeout's
+  // caption lives on its own clock for TAKE_SCENE_MS, which outlasts the first
+  // pitch of the next at-bat — and this is the one other place a replay is
+  // built. Without the clear, a foul one hitter later cuts to the overhead with
+  // "STRIKE THREE" still written across the bottom of it.
+  showScene(null);
   replay = newReplay({
     now: performance.now(),
     outcome: swing.outcome,
@@ -1580,7 +1743,7 @@ function finishAtBat(): void {
   // WHAT THE BROADCAST MAKES OF IT. Built from the state BEFORE the play —
   // leverage is a fact about the spot he walked into, not about the one he
   // left behind him. See scene.ts.
-  scene =
+  showScene(
     result.kind === 'in_play'
       ? sceneFor({
           outcome: result.hit.outcome,
@@ -1594,7 +1757,19 @@ function finishAtBat(): void {
           gameOver: game.over,
           walkOff: game.over && game.ending === 'walk_off',
         })
-      : null;
+      : // ⚠️ THE STRIKEOUT, THE WALK AND THE PLUNKING USED TO LAND HERE AS
+        // `null` — no caption, no beat, nothing on the screen at all. Between
+        // them that is about a third of every plate appearance in the game, and
+        // the loudest of the three is the one a man on the mound is actually
+        // playing for. See sceneForTake().
+        sceneForTake({
+          kind: result.kind,
+          swinging: lastWasSwing,
+          runs: log.runs,
+          before: spotHeWalkedInto,
+          walkOff: game.over && game.ending === 'walk_off',
+        }),
+  );
 
   // Cut to the overhead. Built HERE and not at contact because two of the
   // things it needs are only known now: whether the defence booted it, and
@@ -1615,12 +1790,15 @@ function finishAtBat(): void {
           // The shift that decided whether this was a hit is the one that has
           // to be under it — see the note on Replay.fielders.
           fielders: fieldersFor(shift),
-          safe: result.hit.isHit || !!fielding?.error,
+          // ⚠️ THE BATTER IS SAFE ON A FORCE PLAY, and the replay has to know or
+          // it draws a throw beating him to a bag nothing was thrown to.
+          safe: result.hit.isHit || !!fielding?.error || isForce(result, fielding),
           // The same fence place() just used — see newReplay's note on wallFt.
           wallFt: wallAt(result.hit.direction, game.home.park),
           // The beat this play earned. A routine grounder adds nothing.
           holdMs: scene?.hold ?? 0,
           doublePlay: !!fielding?.doublePlay,
+          force: isForce(result, fielding),
           error: !!fielding?.error,
           // Only a foul out sets this, and only because nobody stands in foul
           // ground for nearestFielder() to find. See raceFor().
@@ -1668,6 +1846,9 @@ function finishAtBat(): void {
   }
 
   atBat = newAtBat();
+  // The next man gets his own roll for the ball getting away and for the man
+  // on first going. See runnersGoOnThePitch().
+  looseRolled = false;
   // THE MOMENT THE NEXT MAN WALKS INTO, queued rather than shown — the replay
   // of the play that just ended is still on the screen, and two cards at once
   // is neither of them. The frame loop promotes it when the replay cuts away.
@@ -1720,35 +1901,10 @@ function finishAtBat(): void {
     if (after !== before) say(`Pinch hitter: ${after.name} bats for ${before.name}.`, 'half');
   }
 
-  // ...and THEY run the bases while you are the one on the mound.
-  if (!game.over && !youBat()) {
-    const op = stealOpportunity(game);
-    const outsBefore = game.outs;
-    const basesBefore = game.bases;
-    game = runTheBases(game, rng);
-    if (op && game.bases !== basesBefore) {
-      const caught = game.outs > outsBefore;
-      say(caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
-        caught ? 'out' : 'big');
-    }
-  }
-
-  // One can get away in EITHER half. You are on the mound for the top and at
-  // the plate for the bottom, and the backstop is live in both — a wild pitch
-  // that only ever happened to one side would read as the game cheating.
-  if (!game.over) {
-    const loose = rollLoose(game, rng);
-    game = loose.game;
-    if (loose.wild) {
-      const who = loose.wild.advanced.map((r) => r.name).join(' and ');
-      say(
-        loose.wild.runs > 0
-          ? `Ball gets away — ${who} moves up, and a run scores.`
-          : `Ball gets away — ${who} moves up.`,
-        loose.wild.runs > 0 ? 'big' : 'out',
-      );
-    }
-  }
+  // ⚠️ THE STEAL AND THE WILD PITCH USED TO BE HERE, and moving them out is the
+  // single biggest thing in this commit. Both moved a runner between plate
+  // appearances, with no ball on the screen to explain it. They happen on a
+  // pitch now — see runnersGoOnThePitch().
 
   if (game.over) {
     say(
@@ -1864,9 +2020,26 @@ function finalize(): void {
  * read down a column of and notice that everything you hit ends up at 6. See
  * scorecard() in placement.ts.
  */
+/**
+ * WAS THIS THE FORCE AT SECOND — asked in three places and derived in none of
+ * them twice. `fielding.force` is rolled on any ground ball with a man on first,
+ * and inning.ts only ACTS on it when the ball really was a ground out, so the
+ * screen has to ask the same pair of questions or the picture and the book part
+ * company on a line drive.
+ */
+const isForce = (
+  result: AtBatState['result'],
+  fielding?: { doublePlay: boolean; force?: boolean; error: boolean },
+): boolean =>
+  !!fielding?.force &&
+  !fielding.error &&
+  !fielding.doublePlay &&
+  result?.kind === 'in_play' &&
+  result.hit.outcome === 'ground_out';
+
 function describe(
   result: AtBatState['result'],
-  fielding?: { error: boolean; doublePlay: boolean },
+  fielding?: { error: boolean; doublePlay: boolean; force?: boolean },
   placed?: string,
   fielderNum?: number,
 ): string {
@@ -1886,6 +2059,12 @@ function describe(
       const outcome = result.hit.outcome;
       if (fielding?.error) return mark('reached on an error', outcome);
       if (fielding?.doublePlay) return mark('grounded into a double play', outcome);
+      // ⚠️ "GROUNDED OUT TO SHORT" IS THE WRONG SENTENCE FOR A FORCE PLAY in
+      // two ways: he did not ground out — he is standing on first — and the man
+      // who is out never left the bag he started on. See FORCE_AT_SECOND.
+      if (fielding?.force && outcome === 'ground_out') {
+        return mark('reached on a fielder’s choice, the force at second', outcome);
+      }
       return mark(placed ?? outcome.replace('_', ' '), outcome);
     }
   }
@@ -2450,6 +2629,16 @@ function drawField(now: number): void {
       if (scene) drawScene(scene, rn - replay.startedAt, replayLength(replay));
       ctx.globalAlpha = 1;
     }
+  } else if (scene) {
+    // A caption with no ball under it — the strikeout and the walk. It runs on
+    // its own clock rather than the replay's; see showScene().
+    //
+    // ⚠️ THE `total` IS THE CAPTION'S OWN LENGTH, NOT sceneMs, and the two are
+    // deliberately different numbers. drawScene anchors to the END of what it
+    // is given so a caption lands after the ball has finished; with nothing to
+    // wait for, handing it its own length puts the anchor at zero and the words
+    // come up immediately. sceneMs is how long they then STAY.
+    drawScene(scene, now - sceneAt, CAPTION_MS + scene.hold);
   }
   drawMoment(now);
 }
@@ -2655,9 +2844,20 @@ const BAR = { x: 24, y: 296, w: 252, h: 14 } as const;
  * a fastball's 880, so the marker CRAWLS on the slow pitches and SNAPS on the
  * quick ones. Scaling the bar's width to the sweep instead would have made
  * every pitch look and feel identical again, which is the thing being fixed.
+ *
+ * ⚠️ AND THE TRAVEL IS NOT LINEAR ANY MORE — see Delivery.ease. The marker
+ * whips through the release on a slider and dies into it on a changeup, which
+ * is what makes the six presses six different motions rather than one motion
+ * at six speeds.
+ *
+ * ⚠️ EVERYTHING ON THE BAR GOES THROUGH THIS ONE FUNCTION — the marker, the
+ * release line, both bands and the dead arm region. That is load-bearing, not
+ * tidiness: a marker eased one way against a line placed another is a picture
+ * that disagrees with the verdict, which is the one thing the swing model's
+ * fault-5 note refuses to allow.
  */
-const barX = (ms: number, sweepMs: number): number =>
-  BAR.x + (Math.max(0, Math.min(sweepMs, ms)) / sweepMs) * BAR.w;
+const barX = (ms: number, tempo: Delivery): number =>
+  BAR.x + Math.pow(Math.max(0, Math.min(tempo.sweepMs, ms)) / tempo.sweepMs, tempo.ease) * BAR.w;
 
 /** What each verdict is painted in. Gold rewards, red costs, dim is the shrug. */
 const RELEASE_COLOR: Record<ReleaseGrade, string> = {
@@ -2674,8 +2874,8 @@ function drawDelivery(now: number): void {
   // fault-5 rule, that the picture and the verdict are one event.
   const tempo = deliveryOf(phase === 'winding' ? deliveryPitch : callType);
   const band = (halfWidthMs: number, fill: string): void => {
-    const a = barX(tempo.releaseAtMs - halfWidthMs, tempo.sweepMs);
-    const b = barX(tempo.releaseAtMs + halfWidthMs, tempo.sweepMs);
+    const a = barX(tempo.releaseAtMs - halfWidthMs, tempo);
+    const b = barX(tempo.releaseAtMs + halfWidthMs, tempo);
     ctx.fillStyle = fill;
     ctx.fillRect(a, BAR.y, b - a, BAR.h);
   };
@@ -2686,7 +2886,7 @@ function drawDelivery(now: number): void {
   // where a press does nothing at all is a place on the bar rather than a
   // surprise. See ARM_MS.
   ctx.fillStyle = '#131a14';
-  ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS, tempo.sweepMs) - BAR.x, BAR.h);
+  ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS, tempo) - BAR.x, BAR.h);
   band(releaseWindow('good'), '#243320');
   band(releaseWindow('perfect'), '#3d5733');
 
@@ -2696,7 +2896,7 @@ function drawDelivery(now: number): void {
 
   // The release point. One line, and it is the thing you are aiming the press
   // at — the bands either side of it are what that press is worth.
-  const rx = barX(tempo.releaseAtMs, tempo.sweepMs);
+  const rx = barX(tempo.releaseAtMs, tempo);
   ctx.strokeStyle = '#cfd6c4';
   ctx.beginPath();
   ctx.moveTo(rx, BAR.y - 3);
@@ -2714,7 +2914,7 @@ function drawDelivery(now: number): void {
   if (at !== null) {
     ctx.fillStyle =
       phase === 'winding' ? '#e8e8d8' : RELEASE_COLOR[releaseGrade ?? 'good'];
-    ctx.fillRect(barX(at, tempo.sweepMs) - 1, BAR.y - 4, 2, BAR.h + 8);
+    ctx.fillRect(barX(at, tempo) - 1, BAR.y - 4, 2, BAR.h + 8);
   }
 
   ctx.font = '10px ui-monospace, monospace';
@@ -3776,6 +3976,11 @@ function frame(): void {
 function step(): void {
   const now = performance.now();
 
+  // The replay-less caption expires on its own clock. Checked first, and only
+  // when there is no replay, so the branch below stays the single owner of a
+  // scene that belongs to one.
+  if (!replay && scene && now - sceneAt > sceneMs) scene = null;
+
   if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
     replay = null;
     scene = null;
@@ -3821,6 +4026,8 @@ function step(): void {
     if (contact !== null ? now >= contact : now > arriveAt + 90 / flightScale()) {
       if (youBat()) resolvePitch();
       else resolveTheirSwing();
+      // ⚠️ AFTER the pitch, never between at-bats. See runnersGoOnThePitch().
+      runnersGoOnThePitch();
     }
   }
 

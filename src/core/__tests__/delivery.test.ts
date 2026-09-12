@@ -20,6 +20,7 @@ import {
   RELEASE_WINDOWS_MS,
   controlOf,
   gradeRelease,
+  releaseMark,
   releaseWindowMs,
   type ReleaseGrade,
 } from '../delivery.ts';
@@ -162,14 +163,39 @@ describe('the invariants the design rests on', () => {
    * was built to fix is back. Release points have to be genuinely apart.
    */
   it('gives the six pitches genuinely different deliveries', () => {
-    const releases = Object.values(DELIVERIES).map((d) => d.releaseAtMs);
-    expect(new Set(releases).size).toBe(releases.length);
+    // ⚠️ ASKED OF THE MARK, NOT OF releaseAtMs. This test used to read the raw
+    // millisecond, which WAS the drawn position until `ease` existed and is not
+    // any more — a curveball with a low exponent reaches a line further right
+    // than a slider with a high one off a smaller number. See releaseMark().
+    const marks = Object.values(DELIVERIES).map(releaseMark);
+    expect(new Set(marks).size).toBe(marks.length);
     // The fastball and the changeup are the pair the deception rests on, and
-    // the gap between them has to be big enough to actually mis-time.
-    expect(DELIVERIES.changeup.releaseAtMs - DELIVERIES.fastball.releaseAtMs).toBeGreaterThan(200);
+    // the gap between them has to be big enough to actually mis-time: a fifth
+    // of the bar is 50px on the real screen.
+    expect(releaseMark(DELIVERIES.changeup) - releaseMark(DELIVERIES.fastball)).toBeGreaterThan(0.2);
     // Nobody is quicker than the fastball or slower than the curveball.
-    expect(Math.min(...releases)).toBe(DELIVERIES.fastball.releaseAtMs);
-    expect(Math.max(...releases)).toBe(DELIVERIES.curveball.releaseAtMs);
+    expect(Math.min(...marks)).toBe(releaseMark(DELIVERIES.fastball));
+    expect(Math.max(...marks)).toBe(releaseMark(DELIVERIES.curveball));
+  });
+
+  /**
+   * ⚠️ THE POINT OF `ease`, AND THE REGRESSION THAT WOULD UNDO IT SILENTLY.
+   * Retuning a row back toward 1 costs nothing a bounds test can see, and it
+   * takes the game straight back to "sliders and changeups are the same" — six
+   * identical motions at six speeds. The pair Zane actually named has to stay
+   * on OPPOSITE sides of 1: one marker that builds into the release, one that
+   * dies into it.
+   */
+  it('makes the slider and the changeup opposite motions, not one motion twice', () => {
+    expect(DELIVERIES.slider.ease).toBeGreaterThan(1.2);
+    expect(DELIVERIES.changeup.ease).toBeLessThan(0.8);
+    const eases = Object.values(DELIVERIES).map((d) => d.ease);
+    // Every one of them is a real motion, and none of them is a cartoon: past
+    // about 2 the marker is stationary and then teleports.
+    for (const e of eases) {
+      expect(e).toBeGreaterThan(0.4);
+      expect(e).toBeLessThan(2);
+    }
   });
 
   it('never widens a window past the default — a pitch is a cost, not a buff', () => {
@@ -205,18 +231,22 @@ describe('the release line has to visibly move between pitches', () => {
    * Both bounds tests above still passed with that table, because neither of
    * them is about where the line is DRAWN. This one is.
    */
-  it('spreads the release ratios across a quarter of the bar', () => {
-    const ratios = Object.values(DELIVERIES).map((d) => d.releaseAtMs / d.sweepMs);
-    expect(Math.max(...ratios) - Math.min(...ratios)).toBeGreaterThan(0.2);
+  it('spreads the release marks across a quarter of the bar', () => {
+    const marks = Object.values(DELIVERIES).map(releaseMark);
+    expect(Math.max(...marks) - Math.min(...marks)).toBeGreaterThan(0.2);
   });
 
-  it('walks the line rightward as the pitch gets slower', () => {
-    // The ordering is the mechanic: a slower pitch is held longer AND its line
-    // sits further right, so the two cues agree instead of fighting.
-    const byRelease = Object.values(DELIVERIES).sort((a, b) => a.releaseAtMs - b.releaseAtMs);
-    const ratios = byRelease.map((d) => d.releaseAtMs / d.sweepMs);
-    for (let i = 1; i < ratios.length; i++) {
-      expect(ratios[i]!).toBeGreaterThan(ratios[i - 1]!);
+  it('walks the line rightward as the pitch is held longer', () => {
+    // ⚠️ THE ORDER IS NAMED RATHER THAN DERIVED, and it has to be now. It used
+    // to fall out of sorting by releaseAtMs, which was the drawn position; with
+    // `ease` compensating that number, neither the raw release nor the sweep
+    // ranks the six any more — the slider's sweep is the third longest and its
+    // line is the third from the left. This list IS the design: how long the
+    // pitch is held, and therefore how far right you are aiming.
+    const order = ['fastball', 'sinker', 'slider', 'knuckleball', 'changeup', 'curveball'] as const;
+    const marks = order.map((t) => releaseMark(DELIVERIES[t]));
+    for (let i = 1; i < marks.length; i++) {
+      expect(marks[i]!, order[i]).toBeGreaterThan(marks[i - 1]!);
     }
   });
 });

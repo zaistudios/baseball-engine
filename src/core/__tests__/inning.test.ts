@@ -502,6 +502,68 @@ describe('running the bases on a ball in play', () => {
     expect(occupied(p.bases)).toEqual([false, true, false]);
   });
 
+  /**
+   * ⚠️ THE FORCE AT SECOND — see FORCE_AT_SECOND in fielding.ts. The batter
+   * used to be retired at first EVERY time and the man on first was handed
+   * second for nothing, which is one out either way and therefore invisible to
+   * every run total this suite checks. It is the commonest play in baseball and
+   * it was in the game backwards.
+   */
+  const force = (a: number, b: number, c: number) =>
+    ({ error: false, doublePlay: false, force: true, advanceRolls: [a, b, c] }) as const;
+
+  it('takes the lead runner at second and leaves the batter standing on first', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), null, null] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.outs).toBe(1);
+    expect(p.bases[0]?.name).toBe('batter');
+    // The man who was on first is off the bases entirely. He is the out.
+    expect(occupied(p.bases)).toEqual([true, false, false]);
+  });
+
+  it('still moves everyone who is not the man being forced', () => {
+    // Men on first and second: the force is at second, the man from second
+    // takes third, and the batter inherits first behind them.
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), null] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.outs).toBe(1);
+    expect(occupied(p.bases)).toEqual([true, false, true]);
+    expect(p.bases[0]?.name).toBe('batter');
+    expect(p.bases[2]?.name).toBe('b');
+  });
+
+  it('scores the man from third on the force, same as on any grounder', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), null, man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.runs).toBe(1);
+    expect(p.bases[0]?.name).toBe('batter');
+  });
+
+  it('ignores the force when there was nobody on first to force', () => {
+    // The roll is made on any ground ball; only a man on first can be erased
+    // at second, and the batter is out at first exactly as before.
+    const p = applyAtBat(
+      { outs: 0, bases: [null, man('b'), null] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.outs).toBe(1);
+    expect(occupied(p.bases)).toEqual([false, false, true]);
+  });
+
   it('scores the man from third on a grounder when he goes', () => {
     const bases: Bases = [null, null, man('c')];
     // 0 beats any send chance; 0.99 beats none.

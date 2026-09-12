@@ -475,4 +475,42 @@ describe('the wall', () => {
       }
     }
   });
+
+  /**
+   * ⚠️ A TRIPLE HAS TO LOOK LIKE ONE — see TRIPLE_MIN_SHARE. Measured over
+   * 120,000 swings before this existed, a triple's median plotted distance was
+   * 262 FEET against a double's 321, and 41% of them landed inside the median
+   * single. So the game drew a bloop and then ran a man three bases on it.
+   * Zane: "Triple when the scene looks like a single."
+   */
+  it('always plots a triple deep, however softly the table struck it', () => {
+    for (let ev = 60; ev <= 130; ev += 5) {
+      for (let angle = -10; angle <= 40; angle += 5) {
+        const p = plotBatted('triple', ev, angle);
+        expect(p.distFt, `${ev}mph ${angle}deg`).toBeGreaterThan(WALL_FT * 0.7);
+        // And it is still a ball in the park. The wall is a boundary in both
+        // directions and a triple is not exempt from the half that matters.
+        expect(p.distFt, `${ev}mph ${angle}deg`).toBeLessThanOrEqual(WALL_FT - 8);
+      }
+    }
+  });
+
+  /**
+   * ⚠️ THE PILE. A flat floor is what the 460-foot ceiling and the 404-foot
+   * home run both were, and the first cut of the triple floor made it a third
+   * time: p5 through p75 of every triple in the game landed on exactly 320
+   * feet. The floor has to read the velocity, the way justOut() does.
+   */
+  it('spreads the triples it moves instead of stacking them on one number', () => {
+    const seen = new Set<number>();
+    for (let ev = 78; ev <= 110; ev += 2) seen.add(Math.round(plotBatted('triple', ev, 13).distFt));
+    expect(seen.size).toBeGreaterThan(12);
+  });
+
+  it('leaves a triple that genuinely carried where the physics put it', () => {
+    // A scorched liner that already reaches the gap is not pulled back to the
+    // floor: the floor is a minimum, not a placement.
+    const hard = plotBatted('triple', 110, 18);
+    expect(hard.distFt).toBeGreaterThan(plotBatted('triple', 80, 13).distFt);
+  });
 });

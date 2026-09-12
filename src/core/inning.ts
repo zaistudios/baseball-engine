@@ -522,6 +522,36 @@ function groundOut(
 }
 
 /**
+ * THE FIELDER'S CHOICE — the man forced at second is out, the batter is safe.
+ *
+ * ⚠️ THE COMMONEST OUT IN BASEBALL, AND IT WAS NOT IN THE GAME. Every ground
+ * ball retired the BATTER at first and handed the man on first second base for
+ * nothing. One out either way, so no run total ever noticed; but it means the
+ * throw the player watches on a grounder with a man on first always went to
+ * the wrong bag, and nobody was ever thrown out at the one the play was
+ * actually at. See FORCE_AT_SECOND in fielding.ts for the note this pairs with.
+ *
+ * ⚠️ IT IS groundOut() PLUS ONE SUBSTITUTION, and deliberately not a second set
+ * of advancement rules. Everyone who is not the man on first runs the ground
+ * ball exactly as they always did — the man on third still gambles on the
+ * plate, the man on second still takes third on a ball to the right side. The
+ * only difference is at the end: the runner groundOut() moved from first to
+ * second never got there, and the batter is standing on first behind him.
+ */
+function fieldersChoice(
+  bases: Bases,
+  batter: Runner,
+  rolls?: readonly [number, number, number],
+  infieldIn = false,
+): { bases: Bases; runs: number } {
+  const g = groundOut(bases, rolls, infieldIn);
+  // g.bases[1] is the man forced up from first. He is out at the bag instead.
+  // g.bases[0] is always null — nobody advances INTO first on a ground ball —
+  // so the batter drops straight in.
+  return { bases: [batter, null, g.bases[2]], runs: g.runs };
+}
+
+/**
  * Fold one finished at-bat into the match. Rolls the inning on the third out
  * and ends the match after the last one.
  *
@@ -686,7 +716,14 @@ export function applyAtBat(
             // chances — see groundOut(). Gated on outs < 2 because the batter
             // being thrown out at first for the third out scores nobody,
             // however far down the line the runner from third got.
-            const g = groundOut(bases, fielding.advanceRolls, defense.infieldIn);
+            //
+            // ⚠️ WHICH MAN IS OUT is the defence's call, not this file's: with a
+            // force at second they mostly take the lead runner and the batter
+            // reaches. See fieldersChoice(), and FORCE_AT_SECOND for the roll.
+            const g =
+              fielding.force && bases[0] !== null
+                ? fieldersChoice(bases, batter, fielding.advanceRolls, defense.infieldIn)
+                : groundOut(bases, fielding.advanceRolls, defense.infieldIn);
             bases = g.bases;
             runs += g.runs;
           }

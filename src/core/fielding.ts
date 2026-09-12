@@ -42,6 +42,33 @@ export const DOUBLE_PLAY_RATE = 0.35;
  */
 export const ERROR_RATE = 0.05;
 
+/**
+ * THE FORCE AT SECOND — how often a ground ball with a man on first that does
+ * NOT turn two takes the LEAD runner instead of the batter.
+ *
+ * ⚠️ THE BATTER USED TO BE RETIRED AT FIRST EVERY SINGLE TIME, and the man on
+ * first strolled up to second on the play. That is one out either way, so it
+ * never showed up in a run total — and it is the most common play in baseball
+ * rendered backwards. Zane, watching a grounder to his second baseman: "THIS
+ * GAME NEEDS TO BE REWRITTEN to feel FLUID and like baseball", and one line
+ * later, "Throw-outs are not shown". They are the same note. The throw that
+ * was missing is 4-6 — the one that goes to the BAG rather than to first — and
+ * with the batter always out at first there was never a runner at the other
+ * end of it to be thrown out.
+ *
+ * ⚠️ IT COSTS THE OFFENCE A BASE AND THAT IS THE POINT. Before, a grounder with
+ * a man on first bought him second for free. Now he is usually erased there and
+ * the batter inherits first, which is the same out and a worse base state —
+ * exactly the trade a real force play is. Measured with scripts/balance.ts, not
+ * argued: see the README.
+ *
+ * 0.6 rather than something nearer 1 because the fielder does not always have
+ * the lead man: a slow chopper, a ball to the first baseman with his foot on
+ * the bag, a hitter who beat it out of the box. This is the share of them where
+ * the play at the bag is there to be made.
+ */
+export const FORCE_AT_SECOND = 0.6;
+
 /** Only these can be booted. A popup is caught or it is not, and a strikeout has no fielder. */
 const BOOTABLE: ReadonlySet<Outcome> = new Set<Outcome>(['ground_out', 'line_out']);
 
@@ -50,6 +77,13 @@ export interface FieldingResult {
   error: boolean;
   /** The batter and the forced runner are both out. */
   doublePlay: boolean;
+  /**
+   * THE FIELDER'S CHOICE: the man forced at second is out and the BATTER IS
+   * SAFE at first. One out, like the play at first it replaces, and a bag worse
+   * for the side that hit it. Only ever set on a ground ball with a force and
+   * fewer than two down — see FORCE_AT_SECOND.
+   */
+  force?: boolean;
   /**
    * THE THROW TO THE EXTRA BASE, pre-rolled — see gunDown() and the note on
    * ARM_STRENGTH below.
@@ -184,5 +218,9 @@ function rollOuts(
   if (!canTurnTwo) return CLEAN;
 
   const dp = Math.max(0, Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1)));
-  return { error: false, doublePlay: rng.next() < dp };
+  if (rng.next() < dp) return { error: false, doublePlay: true };
+
+  // He did not turn two, and the throw still mostly goes to the bag rather
+  // than to first. See FORCE_AT_SECOND.
+  return { error: false, doublePlay: false, force: rng.next() < FORCE_AT_SECOND };
 }
