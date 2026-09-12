@@ -16,7 +16,7 @@ const PAIRS = LEAGUE.flatMap((h) => LEAGUE.filter((a) => a !== h).map((a) => [h,
 
 const N = Number(process.argv[2] ?? 500);
 let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfinished = 0;
-let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0;
+let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0;
 const scores: number[] = [];
 
 for (let i = 0; i < N; i++) {
@@ -24,7 +24,7 @@ for (let i = 0; i < N; i++) {
   // Both rotations turn over, for the same reason league.ts does — the shape
   // of a plate appearance should be read off the arms a season actually sends
   // out, not off thirty aces.
-  const { game, pitches: p, outcomes, errors, wilds, bunts } = simulateGame(
+  const { game, pitches: p, outcomes, errors, wilds, bunts, forceOuts } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
   );
@@ -40,6 +40,7 @@ for (let i = 0; i < N; i++) {
   errs += errors;
   wp += wilds;
   sacs += bunts;
+  forces += forceOuts;
   pas += outcomes.walk + outcomes.hit_by_pitch + outcomes.strikeout + outcomes.in_play;
   if (game.inning > 9) extras++;
   if (game.ending === 'walk_off') walkoffs++;
@@ -59,6 +60,7 @@ console.log(`K rate           ${((ks / pas) * 100).toFixed(1)}%  (MLB ~22%)`);
 console.log(`errors per team  ${(errs / played / 2).toFixed(2)}   (MLB ~0.55)`);
 console.log(`wild pitches     ${(wp / played / 2).toFixed(2)}   (MLB ~0.46)`);
 console.log(`bunts per team   ${(sacs / played / 2).toFixed(2)}   (MLB ~0.25)`);
+console.log(`force outs/team   ${(forces / played / 2).toFixed(2)}   (feel ~1; FORCE_AT_SECOND)`);
 console.log(`shutouts         ${((scores.filter((s) => s === 0).length / scores.length) * 100).toFixed(1)}%`);
 console.log('');
 console.log(boxLine(simulateGame(13).game));

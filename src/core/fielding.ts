@@ -213,12 +213,21 @@ function rollOuts(
   const errorChance = Math.max(0, Math.min(0.5, ERROR_RATE * (opts.errorMult ?? 1)));
   if (rng.next() < errorChance) return { error: true, doublePlay: false };
 
-  const canTurnTwo =
-    outcome === 'ground_out' && opts.forceAtFirst && opts.outs < 2;
-  if (!canTurnTwo) return CLEAN;
+  // ⚠️ THE FORCE AND THE DOUBLE PLAY NEED DIFFERENT GATES, and hanging both off
+  // `canTurnTwo` hid a third of every force out in the game. Turning two needs
+  // an out to spare; taking the lead man at the bag needs only a man on first,
+  // and with TWO down it is the easiest out on the field and the most
+  // recognisable version of the play there is — the bang-bang throw to second
+  // that ends the inning. Measured: 0.52 force outs per team per game with the
+  // shared gate, which from one seat across nine innings reads as none at all.
+  // Zane played it and said exactly that: "Theres no force outs."
+  const forceable = outcome === 'ground_out' && opts.forceAtFirst;
+  if (!forceable) return CLEAN;
 
-  const dp = Math.max(0, Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1)));
-  if (rng.next() < dp) return { error: false, doublePlay: true };
+  if (opts.outs < 2) {
+    const dp = Math.max(0, Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1)));
+    if (rng.next() < dp) return { error: false, doublePlay: true };
+  }
 
   // He did not turn two, and the throw still mostly goes to the bag rather
   // than to first. See FORCE_AT_SECOND.

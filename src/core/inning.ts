@@ -711,21 +711,29 @@ export function applyAtBat(
           if (isSacrificeFly(outcome, result.hit.exitVelocity, outs, bases)) {
             bases = removeRunner(bases, 2);
             runs++;
-          } else if (outcome === 'ground_out' && outs < 2) {
-            // The ordinary ground ball. Forced men go, the rest take their
-            // chances — see groundOut(). Gated on outs < 2 because the batter
-            // being thrown out at first for the third out scores nobody,
-            // however far down the line the runner from third got.
-            //
+          } else if (outcome === 'ground_out') {
             // ⚠️ WHICH MAN IS OUT is the defence's call, not this file's: with a
             // force at second they mostly take the lead runner and the batter
             // reaches. See fieldersChoice(), and FORCE_AT_SECOND for the roll.
+            //
+            // ⚠️ THE FORCE IS NOT GATED ON `outs < 2` AND THE PLAIN GROUND OUT
+            // IS. They are different questions. A force with two down is the
+            // third out at the BAG — perfectly legal, and the commonest way an
+            // inning ends — while the plain ground ball's advancement only
+            // matters when there are outs left to use it. A run never crosses
+            // on either one with two away, which is what the `outs < 2` on
+            // `runs` says; the bases are about to be wiped by the half rolling
+            // over, so they are set for the picture's sake and nothing else.
             const g =
               fielding.force && bases[0] !== null
                 ? fieldersChoice(bases, batter, fielding.advanceRolls, defense.infieldIn)
-                : groundOut(bases, fielding.advanceRolls, defense.infieldIn);
-            bases = g.bases;
-            runs += g.runs;
+                : outs < 2
+                  ? groundOut(bases, fielding.advanceRolls, defense.infieldIn)
+                  : null;
+            if (g) {
+              bases = g.bases;
+              if (outs < 2) runs += g.runs;
+            }
           }
           outs++;
         }

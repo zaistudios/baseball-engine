@@ -87,6 +87,12 @@ export interface AtBatLog {
   error?: boolean;
   /** He squared up at least once. Counted for the same reason errors are. */
   bunt?: boolean;
+  /**
+   * The lead man was taken at the bag and the batter reached — the fielder's
+   * choice. Counted for the same reason errors are, and it is the one that
+   * needed it most: it was shipped at 0.52 a game and read as never happening.
+   */
+  force?: boolean;
 }
 
 /**
@@ -246,6 +252,10 @@ export function playAiAtBat(
       outcome: result.kind === 'in_play' ? result.hit.outcome : undefined,
       guesses,
       error: fielding?.error,
+      // ⚠️ COUNTED FOR THE SAME REASON `error` IS: it is a rule that changes
+      // the base state, it has a tuning knob (FORCE_AT_SECOND), and a balance
+      // run that cannot see it cannot say whether the knob is set right.
+      force: !!fielding?.force && result.kind === 'in_play' && result.hit.outcome === 'ground_out',
       bunt: bunted,
     },
   };
@@ -353,6 +363,12 @@ export interface SimResult {
    */
   foulOuts: number;
   /**
+   * Ground balls taken at the BAG rather than at first — the fielder's choice.
+   * See FORCE_AT_SECOND in core/fielding.ts; this is how you check it is
+   * actually happening as often as that number says.
+   */
+  forceOuts: number;
+  /**
    * How the plate appearances ended, both sides.
    *
    * Here because runs-per-game alone cannot say WHY the number is off. A run
@@ -402,6 +418,7 @@ export function simulateGame(
   let wilds = 0;
   let bunts = 0;
   let foulOuts = 0;
+  let forceOuts = 0;
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -430,6 +447,7 @@ export function simulateGame(
     if (out.atBat.error) errors++;
     if (out.atBat.bunt) bunts++;
     if (out.atBat.outcome === 'foul_out') foulOuts++;
+    if (out.atBat.force) forceOuts++;
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -440,7 +458,7 @@ export function simulateGame(
     }
   }
 
-  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts };
+  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts };
 }
 
 /** A one-line box score, for the CLI and for eyeballing a sim run. */

@@ -551,7 +551,38 @@ describe('running the bases on a ball in play', () => {
     expect(p.bases[0]?.name).toBe('batter');
   });
 
-  it('ignores the force when there was nobody on first to force', () => {
+  /**
+   * ⚠️ THE GATE THAT HID A THIRD OF THEM. The force roll used to hang off
+   * `canTurnTwo` in fielding.ts, which needs an out to spare — so with TWO down
+   * the batter was always taken at first and the bang-bang throw to second that
+   * ends an inning, the most recognisable version of the play in the sport,
+   * could not happen. Measured 0.52 force outs per team per game before, 1.11
+   * after. Zane played it and said "Theres no force outs."
+   */
+  it('takes the third out at the bag, not at first', () => {
+    const p = applyAtBat(
+      { outs: 2, bases: [man('a'), null, null] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.outs).toBe(3);
+    // No run crosses on a force for the third out, however far anyone got.
+    expect(p.runs).toBe(0);
+  });
+
+  it('scores nobody on a two-out force even with a man on third', () => {
+    const p = applyAtBat(
+      { outs: 2, bases: [man('a'), null, man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      force(0, 0, 0),
+    );
+    expect(p.outs).toBe(3);
+    expect(p.runs).toBe(0);
+  });
+
+    it('ignores the force when there was nobody on first to force', () => {
     // The roll is made on any ground ball; only a man on first can be erased
     // at second, and the batter is out at first exactly as before.
     const p = applyAtBat(
