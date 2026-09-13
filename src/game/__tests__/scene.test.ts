@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deficitOf,
   isHighLeverage,
+  halfBreak,
   momentLine,
   sceneFor,
   sceneForTake,
@@ -386,5 +387,57 @@ describe('the caption for a strikeout, a walk and a plunking', () => {
   it('keeps the ordinary strikeout free', () => {
     const s = sceneForTake({ kind: 'strikeout', swinging: true, runs: 0, before: quiet, walkOff: false });
     expect(s.hold).toBe(0);
+  });
+});
+
+/**
+ * THE BREAK CARD, and the one thing about it that would be confidently wrong:
+ * WHICH HALF IT IS TALKING ABOUT. `half` is already the NEXT one by the time
+ * anything can draw a card about the last one, so the card is always reading
+ * one step behind the state it is handed. Off by one here and every card in the
+ * game names the wrong inning — which looks like a deliberate design choice
+ * rather than a bug, and so would never get reported.
+ */
+describe('the half break', () => {
+  const gameAt = (
+    half: 'top' | 'bottom',
+    inning: number,
+    away: readonly number[],
+    home: readonly number[],
+  ) => {
+    const g = newGame(LEAGUE_AS_WRITTEN[0]!, LEAGUE_AS_WRITTEN[1]!);
+    const sum = (r: readonly number[]) => r.reduce((a, b) => a + b, 0);
+    return {
+      ...g,
+      half,
+      inning,
+      awayState: { ...g.awayState, byInning: away, runs: sum(away) },
+      homeState: { ...g.homeState, byInning: home, runs: sum(home) },
+    };
+  };
+
+  it('calls the top of the fifth the MIDDLE of the fifth', () => {
+    const b = halfBreak(gameAt('bottom', 5, [0, 1, 0, 0, 2], [0, 0, 1, 0]));
+    expect(b.label).toBe('MIDDLE OF THE 5TH');
+    // Two runs in the half just closed — the away club's last column.
+    expect(b.note).toBe('2 RUNS IN THE INNING');
+    expect(b.score).toContain('3');
+  });
+
+  it('calls the bottom of the fifth the END of the fifth', () => {
+    const b = halfBreak(gameAt('top', 6, [0, 1, 0, 0, 2], [0, 0, 1, 0, 0]));
+    expect(b.label).toBe('END OF THE 5TH');
+    expect(b.note).toBe('A SCORELESS HALF');
+  });
+
+  it('names the inning by number in extras', () => {
+    expect(halfBreak(gameAt('bottom', 10, [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [])).label).toBe(
+      'MIDDLE OF THE 10TH',
+    );
+  });
+
+  it('reads the score away-first, the way a line score does', () => {
+    const g = gameAt('bottom', 3, [4], [1]);
+    expect(halfBreak(g).score).toBe(`${g.away.abbr} 4 · ${g.home.abbr} 1`);
   });
 });

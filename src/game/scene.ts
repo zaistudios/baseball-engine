@@ -545,3 +545,67 @@ export const TIER_COLOUR: Readonly<Record<Tier, string>> = {
   big: '#7fd68a',
   huge: '#ffd76a',
 };
+
+// --------------------------------------------------------- the half break
+
+/**
+ * THE BREAK BETWEEN HALVES — the beat the broadcast takes and this game did not.
+ *
+ * ⚠️ THE PROBLEM THIS FIXES, in Zane's words: "the innings intertwine too
+ * quickly, and ruins the moment when there is only two outs". The third out
+ * used to roll straight into the next hitter: recordPlay flips the half the
+ * instant the ball is caught, so the strip above the field was already reading
+ * B5 · 0 out while the replay of the out that ENDED the top of the fifth was
+ * still on the screen. Two innings were on one screen at once, and the out that
+ * got the club out of a jam — the loudest thing a defence ever does — was over
+ * before it registered as having happened.
+ *
+ * Every broadcast on earth solves this the same way: it stops, says where the
+ * game is and what the score is, and comes back. So does this.
+ *
+ * ⚠️ IT SAYS THE SCORE AND NOTHING ELSE CLEVER. The line score is already on
+ * the screen all game, so this is not information the player lacks — it is the
+ * PAUSE that makes the half that just ended a thing with an end. The only fact
+ * it adds is what the half was worth, because that is the one number the line
+ * score makes you count columns to find.
+ */
+export interface HalfBreak {
+  /** "MIDDLE OF THE 5TH" or "END OF THE 5TH". */
+  label: string;
+  /** Away first, the way a line score reads: "AWY 4 · HOM 2". */
+  score: string;
+  /** What the half just gone was worth. */
+  note: string;
+}
+
+/**
+ * The break card for the half that just closed, read off the state AFTER the
+ * roll-over — which is the only state that exists by the time anything wants to
+ * draw it.
+ *
+ * ⚠️ `half` IS ALREADY THE NEXT ONE. Sitting in the bottom of the fifth means
+ * the TOP of the fifth just ended, which is the middle of the fifth; sitting in
+ * the top of the sixth means the fifth is over. Getting this backwards is the
+ * one way to produce a card that is confidently wrong about where the game is.
+ */
+export function halfBreak(g: GameState): HalfBreak {
+  const middle = g.half === 'bottom';
+  const of = middle ? g.inning : g.inning - 1;
+  // The club that just batted, and the column it just posted. game.ts pushes it
+  // as the half closes, so the last entry IS the half this card is about.
+  const batted = middle ? g.awayState : g.homeState;
+  const runs = batted.byInning[batted.byInning.length - 1] ?? 0;
+  return {
+    // ⚠️ THE NUMBER, NOT "EXTRAS". momentLine() says EXTRAS because it is
+    // describing tension; a break card says WHERE THE GAME IS, and "end of the
+    // 10th" is what the broadcast says. ordinal() already covers both.
+    label: `${middle ? 'MIDDLE' : 'END'} OF THE ${ordinal(of)}`,
+    score: `${g.away.abbr} ${g.awayState.runs} · ${g.home.abbr} ${g.homeState.runs}`,
+    note:
+      runs === 0
+        ? 'A SCORELESS HALF'
+        : runs === 1
+          ? 'ONE RUN IN'
+          : `${runs} RUNS IN THE INNING`,
+  };
+}

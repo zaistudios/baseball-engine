@@ -20,6 +20,15 @@ and direction. Design notes live outside this repo.
   thirty clubs in thirty ballparks, 26 men to a club, and an editor that lets
   you rewrite any of it without touching the repo. Shipped as one html file:
   [the latest release](https://github.com/zaistudios/baseball-engine/releases/latest).
+
+  **Where the current work is: making a play look like a play.** Three graded
+  presses — the pitch out of the hand, the swing, and the throw on the one play
+  worth stopping the game for — and everything a ball in play can now be: the
+  force, the fielder's choice, the double and triple play, the tag, the relay,
+  the man doubled off, the sacrifice fly and the throw that beats it. Over the
+  top of it, a broadcast that says what just happened: a caption on every ball
+  in play, a card when a big spot arrives, and a **score recap between halves**
+  so the innings stop running together.
 - **The roguelike** — a full nine-encounter run in the browser, or a single
   encounter in the terminal. Still builds, still passes, not being extended.
 
@@ -81,7 +90,8 @@ src/game/
   rules.ts       what your league decided before it played a game
   league.ts      export the thirty clubs as JSON, edit them, paste them back
   editor.ts      the club editor, minus the screen
-  scene.ts       what the replay is ABOUT, in two lines and a length
+  scene.ts       what the replay is ABOUT, in two lines and a length — and the
+                 break card between halves
   difficulty.ts  how hard the swing is, how fast the ball comes, and how honest
                  the clock is
   tuning.ts      the knobs somebody will actually want to turn
@@ -1593,6 +1603,62 @@ team** against 4.4 real and 4.34 before this pass. Double plays 0.72 (real 0.75)
 doubled off 0.08 (real ~0.08), hits 8.38, K rate 22.3%. The new outs and the new
 runs cancel, which is the same pairing `inning.ts` has been balancing since the
 double play first shipped.
+
+### The break between halves — 2026-09-13
+
+Zane: *"I want to have a scene during every half inning giving a score recap
+similar to how irl baseball broadcast are. The innings interwine too quickly,
+and ruins the moment when there is only two outs."*
+
+**The third out rolled straight into the next hitter, and two innings were on
+one screen at once.** `recordPlay()` flips the half the instant the ball is
+caught, and the situation strip is redrawn every frame — so it already read
+`B5 · 0 out` while the replay of the out that *ended the top of the fifth* was
+still playing under it. The loudest thing a defence ever does, the out that gets
+the club out of a jam with two down, was over before it registered as having
+happened.
+
+Every broadcast on earth solves this the same way: it stops, says where the game
+is and what the score is, and comes back. `halfBreak()` in `scene.ts` is that
+card — **`MIDDLE OF THE 5TH` / `ALB 0 · CHI 0` / `A SCORELESS HALF`** — and it
+is the one card in the game that **holds**: the next pitch does not start until
+it runs out (2.4s, speed-scaled) or you press through it.
+
+⚠️ **THE ROLL-OVER IS WATCHED, NOT ANNOUNCED, and that is the whole reason this
+is one small diff.** *Three* places in `main.ts` can make the third out —
+`finishAtBat()`, `steal()`, and `runnersGoOnThePitch()`, because a man can be
+caught stealing mid-count — so a card wired into one of them is a card that
+silently does not appear on the other two. The frame loop reads a monotone
+half-index (`inning * 2 + bottom`) instead and fires on a step of exactly one,
+which is also what makes the start of a game and the start of the *next* game of
+a season not break cards: a fresh `GameState` jumps from the 9th back to the 1st,
+which is not a half ending.
+
+⚠️ **IT BLOCKS, AND IT IS THE ONLY THING HERE THAT DOES.** The moment card and
+the replay caption are both deliberately non-blocking; a break you could pitch
+through is the innings running together again with a picture over them. It is
+still not a prompt — it expires on its own, `SPACE`/`ENTER` skips it, and
+`T`/`F`/the pen and bench keys stay live through it, because the break is exactly
+when a manager reaches for them. Watch mode takes the break too, or the computer
+throws the first pitch of the next half straight through the one thing the card
+exists to stop.
+
+**Screen order is now replay → caption → break → the next man's card**, one at a
+time. `!scene` is in that gate for the strikeout that ends a half: it has no
+replay to wait on, only a caption on its own clock, and a break card arriving on
+top of `STRIKE THREE` would step on the out it is there to celebrate — the exact
+defect this pass is about.
+
+**That ordering also closed a hole nobody had noticed.** The high-leverage card
+was only ever promoted inside `if (replay && expired)`, so a strikeout — which
+never builds a replay — left it queued indefinitely. `9TH · TWO DOWN · TYING RUN
+IN SCORING POSITION` could not appear after a punch-out, which is one of the
+likelier ways to arrive at that spot.
+
+⚠️ **Caught by driving the real game, not by the suite.** The fades were a fixed
+200ms in and 400ms out against a card that is 300ms long at 8x, so the alpha
+never left the floor and the whole thing played as a faint flicker. They scale
+with the card now. A green suite says nothing about a card you cannot see.
 
 ## Play it
 

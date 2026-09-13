@@ -189,11 +189,13 @@ import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './plac
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
 import {
+  halfBreak,
   momentLine,
   sceneFor,
   sceneForTake,
   situationOf,
   TIER_COLOUR,
+  type HalfBreak,
   type Scene,
 } from './scene.ts';
 import { momentOn, decide, valueShift, type Moment } from './moments.ts';
@@ -491,6 +493,44 @@ let lastMoment = '';
 
 /** How long the high-leverage card stays up. Long enough to read once. */
 const MOMENT_MS = 1700;
+
+/**
+ * THE BREAK BETWEEN HALVES — see halfBreak() in scene.ts for what it is for.
+ *
+ * Two-step like the moment card and for the same reason: it is queued when the
+ * half rolls over — which is DURING the replay of the out that ended it — and
+ * put up when the replay cuts away.
+ */
+let breakPending: HalfBreak | null = null;
+let breakCard: HalfBreak | null = null;
+let breakFrom = 0;
+
+/**
+ * WHICH HALF THE BREAK CARD HAS ALREADY MARKED, as a half-index that only ever
+ * counts up: `inning * 2 + (bottom ? 1 : 0)`.
+ *
+ * ⚠️ THE ROLL-OVER IS WATCHED RATHER THAN ANNOUNCED, and that is deliberate.
+ * THREE places in this file can be the third out — finishAtBat(), steal() and
+ * runnersGoOnThePitch(), because a man can be caught stealing mid-count — and a
+ * break card wired into one of them is a break card that silently does not
+ * happen on the other two. Reading the state in the frame loop is one site that
+ * cannot be forgotten by the fourth one.
+ *
+ * ⚠️ ONLY A STEP OF EXACTLY ONE FIRES IT. That is what makes the start of a
+ * game and the start of the NEXT game of a season not break cards: a fresh
+ * GameState jumps from the 9th back to the 1st, which is not a half ending.
+ */
+let markedHalf = -1;
+
+/**
+ * How long the break card stays up before the game comes back from it.
+ *
+ * ⚠️ SPEED-SCALED, LIKE EVERY OTHER BEAT IN THE FILE. A full two and a half
+ * seconds of stop every half inning is the point at 1x and unbearable at 8x,
+ * where eighteen of them are most of what you would be watching.
+ */
+const BREAK_MS = 2400;
+const breakLen = (): number => BREAK_MS / speed();
 let lastGrade = '';
 
 /**
@@ -2356,6 +2396,11 @@ const lineClass = (result: AtBatState['result']): string => {
  */
 function autoStep(): void {
   if (game.over) return;
+  // ⚠️ WATCH MODE TAKES THE BREAK TOO. Without this the computer throws the
+  // first pitch of the next half straight through the card, which is the one
+  // thing the card exists to stop — and watch mode is where a player is most
+  // likely to be reading it rather than playing.
+  if (breakCard) return;
 
   // ⚠️ TAKING OVER MID-DELIVERY. You can press T at any moment, including with
   // the arm already going, and watch mode does not play the meter — so it
@@ -2455,6 +2500,18 @@ function press(key: string): void {
   if (phase === 'over') {
     if (key === 'r') location.reload();
     if (key === 'n' && season && !seasonOver(season)) nextGame();
+    return;
+  }
+
+  // COMING BACK FROM THE BREAK. The press that would have thrown the next pitch
+  // skips the card instead — so a player in a hurry loses nothing but the beat,
+  // and a player who was reading it does not find the pitch already gone.
+  //
+  // ⚠️ SPACE AND ENTER ONLY. Everything else falls through, because the break
+  // is exactly when a manager wants the pen and the bench keys.
+  if (breakCard && (key === ' ' || key === 'enter')) {
+    breakCard = null;
+    promoteMoment(performance.now());
     return;
   }
 
@@ -2979,7 +3036,56 @@ function drawField(now: number): void {
     // come up immediately. sceneMs is how long they then STAY.
     drawScene(scene, now - sceneAt, CAPTION_MS + scene.hold);
   }
+  drawBreak(now);
   drawMoment(now);
+}
+
+/**
+ * THE BREAK CARD — the one card in the game that HOLDS.
+ *
+ * ⚠️ EVERY OTHER CARD HERE IS DELIBERATELY NON-BLOCKING and this one is not,
+ * because stopping is the entire feature: a break you could pitch through is
+ * the innings running together again with a picture over them. It is still not
+ * a prompt — it runs out on its own in BREAK_MS, speed-scaled like every other
+ * beat, and one press skips it. Nobody ever has to press anything.
+ */
+function drawBreak(now: number): void {
+  const b = breakCard;
+  if (!b) return;
+  const t = now - breakFrom;
+  // ⚠️ THE FADES SCALE WITH THE CARD, and fixed 200/400ms was the first cut and
+  // invisible: at 8x the card is only 300ms long, so a 200ms ramp in and a
+  // 400ms ramp out never let the alpha off the floor and the whole thing played
+  // as a faint flicker. Caught by driving it, not by the suite.
+  const len = breakLen();
+  const a = Math.min(1, t / (len / 12)) * Math.min(1, (len - t) / (len / 6));
+
+  const h = 104;
+  const y = Math.round(canvas.height / 2 - h / 2);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, a);
+  // Darker than the moment card: the field behind it is between innings and
+  // there is nothing on it worth seeing through the words.
+  ctx.fillStyle = 'rgba(9,13,11,0.92)';
+  ctx.fillRect(0, y, canvas.width, h);
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillRect(0, y, canvas.width, 2);
+  ctx.fillRect(0, y + h - 2, canvas.width, 2);
+
+  ctx.textAlign = 'center';
+  const cx = canvas.width / 2;
+  ctx.fillStyle = '#d8b44a';
+  ctx.font = '13px ui-monospace, monospace';
+  ctx.fillText(b.label, cx, y + 28);
+  // The score is the big thing on the card. It is what the break is for.
+  ctx.fillStyle = '#e8e8d8';
+  ctx.font = '26px ui-monospace, monospace';
+  ctx.fillText(b.score, cx, y + 62);
+  ctx.fillStyle = '#9aa896';
+  ctx.font = '11px ui-monospace, monospace';
+  ctx.fillText(b.note, cx, y + 86);
+  ctx.restore();
+  ctx.textAlign = 'left';
 }
 
 /**
@@ -3043,6 +3149,17 @@ const CAPTION_MS = 900;
  * had to be dismissed would turn the tensest half-inning in the game into the
  * one with the most button presses in it.
  */
+/**
+ * Put the queued moment card up, if there is one. Called from the one place in
+ * the frame loop that knows the screen is free — see the note there.
+ */
+function promoteMoment(now: number): void {
+  if (!momentPending) return;
+  momentText = momentPending;
+  momentFrom = now;
+  momentPending = null;
+}
+
 function drawMoment(now: number): void {
   if (!momentText) return;
   const t = now - momentFrom;
@@ -4375,14 +4492,39 @@ function step(): void {
   // scene that belongs to one.
   if (!replay && scene && now - sceneAt > sceneMs) scene = null;
 
+  // THE HALF ROLLED OVER. Queued here, not at any of the three places that can
+  // make the third out — see markedHalf.
+  const halfIdx = game.inning * 2 + (game.half === 'bottom' ? 1 : 0);
+  if (halfIdx !== markedHalf) {
+    if (halfIdx === markedHalf + 1 && !game.over) breakPending = halfBreak(game);
+    markedHalf = halfIdx;
+  }
+
   if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
     replay = null;
     scene = null;
-    // The replay has cut away, so the screen is free for the next man's card.
-    if (momentPending) {
-      momentText = momentPending;
-      momentFrom = now;
-      momentPending = null;
+  }
+
+  // WHOSE SCREEN IS IT. The play that just happened owns it until it is done —
+  // the replay, and the caption over it — then the break, then the next man's
+  // card. One at a time, in that order, because two of them at once is neither.
+  //
+  // ⚠️ `!scene` MATTERS FOR THE STRIKEOUT THAT ENDS THE HALF. That one has no
+  // replay to wait on, only a caption on its own clock, and a break card
+  // arriving on top of STRIKE THREE would step on the out it is there to
+  // celebrate — which is the exact defect this whole thing is about.
+  if (!replay && !scene) {
+    if (breakPending) {
+      breakCard = breakPending;
+      breakFrom = now;
+      breakPending = null;
+      // The previous hitter's card does not ride over the break.
+      momentText = null;
+    } else if (breakCard && now - breakFrom > breakLen()) {
+      breakCard = null;
+      promoteMoment(now);
+    } else if (!breakCard) {
+      promoteMoment(now);
     }
   }
 
