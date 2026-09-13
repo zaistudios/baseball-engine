@@ -359,7 +359,36 @@ export function foulDirection(direction: number): number {
 const LAUNCH_ANGLE: Record<Outcome, readonly [number, number]> = {
   strikeout: [0, 0],
   ground_out: [-10, 5],
-  line_out: [10, 20],
+  /**
+   * ⚠️ WIDENED FROM [10, 20] — THE ORDINARY FLY BALL DID NOT EXIST IN THIS
+   * GAME, and that is a bigger hole than it sounds.
+   *
+   * The three out angles were `ground_out` [-10, 5], `line_out` [10, 20] and
+   * `popup` [45, 80]. So the band from 20° to 45° — the routine fly caught in
+   * the outfield, which is the single most common out in baseball — was
+   * literally unreachable. Every out in the game was a grounder, a line drive
+   * or a ball straight up over the infield. Measured: 21.0 ground outs and 8.6
+   * infield popups a game against 4.6 balls caught in the outfield, which is
+   * roughly the inverse of real ball and the reason the outfield reads as
+   * scenery.
+   *
+   * ⚠️ AND inning.ts ALREADY READS `line_out` AS THIS. FLY_OUTS holds
+   * `line_out` alone and its note says so out loud: "'line_out' is the ball hit
+   * to the outfield and 'popup' is the INFIELD FLY". SAC_FLY_MIN_EV then splits
+   * a deep one from a lazy one by exit velocity. The rules were written for a
+   * fly ball the angle table could not produce; this is the table catching up
+   * with them, not a new idea.
+   *
+   * A new `fly_out` outcome would have been the other way to do it and it is
+   * the wrong one: the header on hitTables.ts is explicit that adding a column
+   * means re-normalising forty-five hand-tuned rows, which is the balance
+   * change this deliberately is not.
+   *
+   * ⚠️ IT MOVES WHERE THESE BALLS LAND, so HOLE_FT.line_out in placement.ts is
+   * measured against a population that just changed. Re-measure with
+   * scripts/place.ts — that constant's own header says to.
+   */
+  line_out: [10, 38],
   popup: [45, 80],
   /**
    * ⚠️ WIDENED FROM [-45, 45] SO THAT FOUL POPS EXIST AT ALL. A foul is every

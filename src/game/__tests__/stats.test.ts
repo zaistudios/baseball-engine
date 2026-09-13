@@ -314,3 +314,74 @@ describe('a season keeps its own book', () => {
     expect(Object.keys(next.stats!.bat).length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * THE GLOVES. Nobody in this league had ever recorded a putout — placement.ts
+ * had written "6-4-3" on the screen since the scorecard shipped and nothing
+ * added the numbers up. See FieldLine in stats.ts.
+ *
+ * The claim is the same one every other block here makes: the fielding book has
+ * to agree with the game it came out of, not merely look like a fielding book.
+ */
+describe('the fielding book agrees with the game', () => {
+  const games = Array.from({ length: 10 }, (_, i) => simulateGame(5200 + i, 9, HOME, AWAY));
+
+  it('gives somebody a putout for every out that was recorded', () => {
+    for (const { game } of games) {
+      const book = boxScore(game);
+      const putouts = sum(Object.values(book.field ?? {}).map((l) => l.po));
+      // ⚠️ NOT EVERY OUT HAS A FIELDER. A man gunned down stretching, a runner
+      // caught stealing and a batter doubled off are outs recorded outside
+      // recordPlay's ball-in-play path, so the book can only be short — never
+      // long, which would mean an out was invented.
+      const outs = sum(Object.values(book.arm).map((l) => l.outs));
+      expect(putouts).toBeGreaterThan(0);
+      expect(putouts).toBeLessThanOrEqual(outs);
+      // ...and it cannot be far short, or something common is uncredited.
+      expect(putouts).toBeGreaterThan(outs * 0.8);
+    }
+  });
+
+  it('charges the errors the pitchers were forgiven for', () => {
+    for (const { game } of games) {
+      const book = boxScore(game);
+      const errors = sum(Object.values(book.field ?? {}).map((l) => l.e));
+      // Runs allowed that were not earned can only come from a booted ball —
+      // see ArmLine.er — so an unearned run with nobody charged an error is the
+      // two books telling different stories about the same play.
+      const unearned = sum(Object.values(book.arm).map((l) => l.r - l.er));
+      if (unearned > 0) expect(errors).toBeGreaterThan(0);
+    }
+  });
+
+  it('credits the gloves to the side that was IN THE FIELD', () => {
+    for (const { game } of games) {
+      const book = boxScore(game);
+      // A club's fielding line is stamped with its own abbreviation, so every
+      // name in it has to be somebody who plays for that club — a putout
+      // credited to the wrong dugout is the alignment lookup gone wrong.
+      //
+      // ⚠️ THE BENCH IS IN THIS LIST AND LEAVING IT OUT FAILED THE TEST, which
+      // is the right answer to the wrong question: a pinch hitter does not go
+      // back to the dugout, he takes a glove and plays the rest of the night.
+      // assignPositions() reads the LINEUP, and the lineup is not the one the
+      // club started with.
+      const names = new Set(
+        [...HOME.lineup, ...(HOME.bench ?? []), ...HOME.rotation, ...HOME.bullpen].map(
+          (p) => p.name,
+        ),
+      );
+      for (const [name, line] of Object.entries(book.field ?? {})) {
+        if (line.tm === 'ALB') expect(names.has(name)).toBe(true);
+      }
+    }
+  });
+
+  it('adds two books together without losing a putout', () => {
+    const a = boxScore(games[0]!.game);
+    const b = boxScore(games[1]!.game);
+    const both = merge(a, b);
+    const po = (bk: StatBook): number => sum(Object.values(bk.field ?? {}).map((l) => l.po));
+    expect(po(both)).toBe(po(a) + po(b));
+  });
+});

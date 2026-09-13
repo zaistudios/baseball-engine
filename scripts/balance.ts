@@ -17,6 +17,7 @@ const PAIRS = LEAGUE.flatMap((h) => LEAGUE.filter((a) => a !== h).map((a) => [h,
 const N = Number(process.argv[2] ?? 500);
 let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfinished = 0;
 let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
+let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0;
 const scores: number[] = [];
 
 for (let i = 0; i < N; i++) {
@@ -24,7 +25,11 @@ for (let i = 0; i < N; i++) {
   // Both rotations turn over, for the same reason league.ts does — the shape
   // of a plate appearance should be read off the arms a season actually sends
   // out, not off thirty aces.
-  const { game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces, stretchSafe, stretchOut } = simulateGame(
+  const {
+    game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
+    doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
+    stretchSafe, stretchOut,
+  } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
   );
@@ -44,6 +49,12 @@ for (let i = 0; i < N; i++) {
   leads += leadForces;
   strSafe += stretchSafe;
   strOut += stretchOut;
+  dps += doublePlays;
+  leadDps += leadDoublePlays;
+  tps += triplePlays;
+  dOff += doubledOff;
+  sf += sacFlies;
+  sfOut += sacFlyOuts;
   pas += outcomes.walk + outcomes.hit_by_pitch + outcomes.strikeout + outcomes.in_play;
   if (game.inning > 9) extras++;
   if (game.ending === 'walk_off') walkoffs++;
@@ -65,6 +76,12 @@ console.log(`wild pitches     ${(wp / played / 2).toFixed(2)}   (MLB ~0.46)`);
 console.log(`bunts per team   ${(sacs / played / 2).toFixed(2)}   (MLB ~0.25)`);
 console.log(`force outs/team   ${(forces / played / 2).toFixed(2)}   (feel ~1; FORCE_AT_SECOND)`);
 console.log(`  ...at 3rd/plate ${(leads / played / 2).toFixed(2)}   (${((leads / Math.max(1, forces)) * 100).toFixed(0)}% of them; LEAD_FORCE)`);
+console.log(`double plays/tm  ${(dps / played / 2).toFixed(2)}   (MLB ~0.75; DOUBLE_PLAY_RATE)`);
+console.log(`  ...at 3rd/plate ${(leadDps / played / 2).toFixed(2)}   (${((leadDps / Math.max(1, dps)) * 100).toFixed(0)}% of them; LEAD_FORCE)`);
+console.log(`doubled off/team ${(dOff / played / 2).toFixed(2)}   (MLB ~0.10; DOUBLE_OFF)`);
+console.log(`triple plays     1 per ${tps ? Math.round(played / tps) : 'never'} games   (MLB ~1 per 3000; TRIPLE_PLAY)`);
+console.log(`sac flies/team   ${(sf / played / 2).toFixed(2)}   (MLB ~0.25; SAC_FLY_MIN_EV)`);
+console.log(`  ...cut down     ${(sfOut / played / 2).toFixed(2)}   (${((sfOut / Math.max(1, sf + sfOut)) * 100).toFixed(0)}% of the sends; TAG_THROW)`);
 console.log(`stretches/team   ${((strSafe + strOut) / played / 2).toFixed(2)}   (${((strSafe / Math.max(1, strSafe + strOut)) * 100).toFixed(0)}% made it; STRETCH_RATE/STRETCH_THROW)`);
 console.log(`shutouts         ${((scores.filter((s) => s === 0).length / scores.length) * 100).toFixed(1)}%`);
 console.log('');

@@ -35,6 +35,7 @@ import {
   type ThrowEffect,
 } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
+import { SAC_FLY_MIN_ANGLE } from '../core/inning.ts';
 import type { Placement } from './placement.ts';
 import type { Rng } from '../core/rng.ts';
 import { plotBatted, nearestFielder } from '../web/plot.ts';
@@ -52,6 +53,14 @@ export const POSITION_BY_NUMBER: Record<number, Position> = {
   7: 'LF',
   8: 'CF',
   9: 'RF',
+};
+
+/** The same table read backwards, for a scorer that has a position and wants a number. */
+export const NUMBER_BY_POSITION: Record<Position, number> = {
+  P: 1, C: 2, '1B': 3, '2B': 4, '3B': 5, SS: 6, LF: 7, CF: 8, RF: 9,
+  // He never fields. Scored as the pitcher so the lookup is total rather than
+  // partial; nothing can reach it, because fielderFor() never returns DH.
+  DH: 1,
 };
 
 /**
@@ -83,6 +92,7 @@ export const POSITION_DIFFICULTY: Record<Position, number> = {
  * league by construction rather than by decision.
  */
 const FILL_ORDER: readonly Position[] = ['SS', 'CF', '2B', '3B', 'C', 'RF', 'LF', '1B', 'DH'];
+
 
 export type Alignment = Readonly<Record<Position, Player | null>>;
 
@@ -245,6 +255,14 @@ export function fieldBall(
       // ponytail: split arm from glove when a club is built around one rifle
       // in right and the shared number stops telling that story.
       arm: glove,
+      // ⚠️ WAS IT HIT ON A LINE. One `line_out` outcome covers everything from
+      // 10° to 38° now, and the two ends of that band are completely different
+      // plays: a rope caught on the line can double a man off first, a fly ball
+      // he stood and watched cannot. SAC_FLY_MIN_ANGLE is the same line
+      // inning.ts uses to decide who can TAG on it, which is what stops one ball
+      // from being both. See DOUBLE_OFF in core/fielding.ts, including why this
+      // does not also ask whether an infielder caught it.
+      lineDrive: hit.launchAngle < SAC_FLY_MIN_ANGLE,
     },
     rng,
   );

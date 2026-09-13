@@ -399,9 +399,27 @@ export const ROBBED_FT = 22;
  * of batted ball. Each is roughly p93 of its own distribution — see the table
  * above, and re-measure with scripts/place.ts if the flight model moves.
  */
+/**
+ * ⚠️ `line_out` WENT 94 → 106 WHEN IT BECAME A FLY BALL — 2026-09-12, and the
+ * reason is baseball rather than arithmetic.
+ *
+ * The rule above says each bar sits at roughly p93 of its own population, and
+ * 94 was p93 of `line_out` back when LAUNCH_ANGLE gave it [10, 20]° — a LINE
+ * DRIVE. It is [10, 38]° now, a ball hit in the air to the outfield, and those
+ * are not the same population or the same play. Real BABIP by batted-ball type
+ * is roughly **line drives .690, ground balls .240, fly balls .120**: a line
+ * drive is the most likely thing in baseball to fall in and a fly ball is the
+ * least. So the bar a fly has to clear before it drops SHOULD be much further
+ * out than the one a liner has to clear — holding to p93 out of tidiness would
+ * have made every fly ball in the game as likely to find grass as a screamer.
+ *
+ * Measured across the sweep, at 300 games each: 94 → 4.60 runs and 8.75 hits;
+ * 100 → 4.46 and 8.58; 106 → 4.31 and 8.41; 112 → 4.26 and 8.36. Real is 4.4
+ * and 8.5, and the population's own p97 is about 106.
+ */
 export const HOLE_FT: Readonly<Record<string, number>> = {
   ground_out: 46,
-  line_out: 94,
+  line_out: 106,
   popup: 96,
 };
 
@@ -662,24 +680,75 @@ const pivotFor = (fielderNum: number): number => (fielderNum === 4 ? 6 : 4);
 /** Scorer's number of the man standing on each bag. Home is the catcher. */
 const COVERS: Record<number, number> = { 1: 3, 2: 4, 3: 5, 4: 2 };
 
-export function scorecard(
-  outcome: Outcome,
-  fielderNum: number,
-  opts: { error?: boolean; doublePlay?: boolean; force?: boolean } = {},
-): string {
+/**
+ * WHO TAKES THE THROW AT THE BAG THE FORCE IS BEING MADE AT.
+ *
+ * Second is the only one with a choice in it, and pivotFor() is that choice —
+ * whichever middle infielder did not field the ball. Third and the plate are
+ * simply the man standing there.
+ */
+const coverFor = (bag: number, fielderNum: number): number =>
+  bag === 2 ? pivotFor(fielderNum) : (COVERS[bag] ?? 2);
+
+/** What the scorer writes on a ground ball, given how far the throw went. */
+export interface PlayShape {
+  error?: boolean;
+  doublePlay?: boolean;
+  /** THREE outs on the ball. Written the same as a double play — see below. */
+  triplePlay?: boolean;
+  /** A line drive caught, and the man on first doubled off. */
+  doubledOff?: boolean;
+  /**
+   * THE BAG THE FORCE WAS TAKEN AT — 2, 3 or 4, or `true` for the old
+   * "somewhere, assume second" that every caller written before the lead force
+   * existed passes.
+   */
+  force?: number | boolean;
+}
+
+/** The bag a force ended at, as a number. `true` and nothing both mean second. */
+const bagOf = (force: PlayShape['force']): number =>
+  typeof force === 'number' ? force : 2;
+
+export function scorecard(outcome: Outcome, fielderNum: number, opts: PlayShape = {}): string {
   if (opts.error) return `E${fielderNum}`;
+
+  // ⚠️ THE LINE-DRIVE DOUBLE PLAY IS SCORED OFF THE CATCH, not off a bag. `L6-3`
+  // is the whole play: caught at 6, thrown to 3, and the man who could not get
+  // back is out there. It is checked before the switch because the outcome is
+  // `line_out` and the plain `L6` below would drop the second out on the floor.
+  if (opts.doubledOff) return `L${fielderNum}-3`;
 
   switch (outcome) {
     case 'strikeout':
       return 'K';
 
-    case 'ground_out':
-      if (opts.doublePlay) return `${fielderNum}-${pivotFor(fielderNum)}-3`;
+    case 'ground_out': {
+      // ⚠️ A TRIPLE PLAY IS WRITTEN THE SAME AS A DOUBLE PLAY and that is not a
+      // shortcut — `5-4-3` really is the notation for both, and what separates
+      // them is the number of men who were on, which the line does not carry.
+      // Real scorecards mark it "TP" beside the same three numbers.
+      if (opts.doublePlay || opts.triplePlay) {
+        // ⚠️ A TRIPLE PLAY ALWAYS RELAYS THROUGH SECOND. Its lead out is the one
+        // the fielder makes standing on his own bag before he throws — see
+        // TRIPLE_PLAY in core/fielding.ts — so the notation is the pivot's, not
+        // the lead bag's, and `5-4-3` covers both plays exactly as a real
+        // scorecard does.
+        const cover = opts.triplePlay
+          ? pivotFor(fielderNum)
+          : coverFor(bagOf(opts.force), fielderNum);
+        // He fielded it standing on the bag: no throw, no assist, one man.
+        return cover === fielderNum ? `${fielderNum}-3` : `${fielderNum}-${cover}-3`;
+      }
       // ⚠️ THE FORCE ENDS AT THE BAG, so the notation does too — `6-4`, not
       // `6-3`. Nobody was retired at first and the batter is standing on it.
-      if (opts.force) return `${fielderNum}-${pivotFor(fielderNum)}`;
+      if (opts.force) {
+        const cover = coverFor(bagOf(opts.force), fielderNum);
+        return cover === fielderNum ? `${fielderNum}U` : `${fielderNum}-${cover}`;
+      }
       // Unassisted: he fielded it standing on the bag he was going to throw to.
       return fielderNum === 3 ? '3U' : `${fielderNum}-3`;
+    }
 
     // The infield fly and the fly ball are scored differently on purpose —
     // P is a pop, F is a fly, and which one it was is the difference between
@@ -703,6 +772,68 @@ export function scorecard(
     default:
       return '';
   }
+}
+
+/**
+ * THE PUTOUTS, ASSISTS AND ERRORS ON ONE BALL — the other half of scorecard().
+ *
+ * ⚠️ WHY IT IS NOT A PARSER OVER THE STRING. That was the first cut and it is
+ * the wrong kind of lazy: `L6-3` credits 6 with a putout AND an assist, `6-4-3`
+ * credits 6 and 4 with assists and only 3 with a putout, and `K` credits a man
+ * whose number is not in the string at all. A reader that gets all three right
+ * is bigger than this function and breaks silently the first time the notation
+ * gains a shape. Two short functions off one PlayShape, side by side, with a
+ * test asserting the putouts always add up to the outs recorded.
+ *
+ * ⚠️ THE STRIKEOUT'S PUTOUT BELONGS TO THE CATCHER, which surprises people and
+ * is real scoring: somebody has to catch strike three. It is the reason a
+ * catcher leads every club in putouts, and printing a fielding table where he
+ * does not would look wrong to anyone who has read one.
+ */
+export function creditsFor(
+  outcome: Outcome,
+  fielderNum: number,
+  opts: PlayShape = {},
+): { po: number[]; a: number[]; e: number[] } {
+  const none = { po: [] as number[], a: [] as number[], e: [] as number[] };
+  // ⚠️ AN ERROR IS CHARGED AND NOBODY IS RETIRED. Both halves matter: the man
+  // wears it, and no putout is invented for an out that was not made.
+  if (opts.error) return { ...none, e: [fielderNum] };
+  if (outcome === 'strikeout') return { ...none, po: [2] };
+  if (opts.doubledOff) return { po: [fielderNum, 3], a: [fielderNum], e: [] };
+
+  if (outcome === 'ground_out') {
+    const cover = coverFor(bagOf(opts.force), fielderNum);
+    if (opts.triplePlay) {
+      // THREE PUTOUTS, and they are the three men in the notation. He retires
+      // the lead runner himself standing on the bag, throws to the pivot for the
+      // second, and the pivot throws to first for the third.
+      const pivot = pivotFor(fielderNum);
+      return { po: [fielderNum, pivot, 3], a: [fielderNum, pivot], e: [] };
+    }
+    if (opts.doublePlay) {
+      // TWO PUTOUTS: the forced man at the bag, and the batter at first. When
+      // the fielder IS the man covering the bag he takes that one himself and
+      // there is no assist on it.
+      return cover === fielderNum
+        ? { po: [fielderNum, 3], a: [fielderNum], e: [] }
+        : { po: [cover, 3], a: [fielderNum, cover], e: [] };
+    }
+    if (opts.force) {
+      return cover === fielderNum
+        ? { po: [fielderNum], a: [], e: [] }
+        : { po: [cover], a: [fielderNum], e: [] };
+    }
+    return fielderNum === 3
+      ? { po: [3], a: [], e: [] }
+      : { po: [3], a: [fielderNum], e: [] };
+  }
+
+  // Caught in the air — popup, line_out, foul_out. One man, one putout, no
+  // throw. A hit and a live foul reach here with nothing to record.
+  return outcome === 'popup' || outcome === 'line_out' || outcome === 'foul_out'
+    ? { ...none, po: [fielderNum] }
+    : none;
 }
 
 /** "8-5" — the man who chased it down, to the man standing on the bag. */

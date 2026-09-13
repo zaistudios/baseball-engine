@@ -184,6 +184,26 @@ export interface SceneFacts {
   /** The defence booted it. */
   error: boolean;
   doublePlay: boolean;
+  /** Three outs on one ball. Outranks everything but the game ending. */
+  triplePlay?: boolean;
+  /** A line drive caught, and the man on first never got back. */
+  doubledOff?: boolean;
+  /**
+   * A CAUGHT FLY THAT MOVED SOMEBODY — the sacrifice fly, and the caption it
+   * never had.
+   *
+   * ⚠️ A RUN SCORED AND THE SCREEN SAID "LINE OUT". The out branches below are
+   * ordered error → double play → force → routine, and a deep fly with a man on
+   * third is none of those, so it fell through to ROUTINE and printed LINE OUT
+   * over a picture of a man crossing the plate. The one out in baseball that
+   * the hitter MEANT to make was the one out the broadcast had no word for.
+   */
+  sacFly?: boolean;
+  /**
+   * The bag a runner was gunned down at — 4 is the plate, which on a fly ball
+   * is the throw home that beat the tag. See TAG_THROW in core/fielding.ts.
+   */
+  thrownOutAt?: number;
   /**
    * THE FORCE AT SECOND — the lead man is out at the bag and the batter
    * reached. Its own fact because it is its own PLAY: without it the caption
@@ -328,7 +348,56 @@ export function sceneFor(f: SceneFacts): Scene {
 
   // ---- how it was fielded
   if (f.error) return made('ERROR', 'HE IS ABOARD ON THE MISPLAY', 'solid', big);
-  if (f.doublePlay) return made('TWO', 'TURNED, AND THE INNING IS OVER', 'solid', big);
+
+  /**
+   * ⚠️ THE RAREST THING ON THE FIELD GETS THE BIGGEST BEAT THAT IS NOT A
+   * WALK-OFF. A triple play happens about once a season in this league — see
+   * TRIPLE_PLAY in core/fielding.ts — and the whole reason the rate was set
+   * above the measured one is so somebody would ever see it. A caption that
+   * called it TWO would throw that away at the last step.
+   */
+  if (f.triplePlay) return made('THREE', 'A TRIPLE PLAY, AND THE SIDE IS OUT', 'huge', big);
+
+  if (f.doubledOff) {
+    // ⚠️ NOT THE SAME PICTURE AS A 6-4-3 AND NOT THE SAME WORDS. Nobody was
+    // forced anywhere: the ball was caught in the air and a man who had already
+    // broken was tagged before he could get back. It is the only out in the
+    // game made with a tag on a batted ball, and the detail says so.
+    return made('TWO', `LINED INTO IT — DOUBLED OFF${who(p) ? `, ${who(p)} TO FIRST` : ''}`, 'solid', big);
+  }
+
+  if (f.doublePlay) {
+    // The bag decides what it was worth. A 6-4-3 is two outs; a 2-3 with the
+    // bases loaded is two outs AND a run that did not score, which is the play
+    // the infield came in for.
+    if (f.forceAt === 4) {
+      return made('TWO, AND THE RUN IS OUT', 'HOME TO FIRST — NOTHING SCORES', 'big', big);
+    }
+    // ⚠️ IT IS ONLY OVER IF THERE WAS ONE DOWN. This read "TURNED, AND THE
+    // INNING IS OVER" on every double play ever turned, and two thirds of them
+    // are turned with NOBODY out — so the commonest version of the caption was
+    // the screen announcing the end of an inning that had one out left in it.
+    // Seen by watching a game, not by any test: `B2 Bea "Two Bags" Slocum:
+    // grounded into a double play, 5-4-3` in the second with nobody out.
+    return made(
+      'TWO',
+      f.before.outs === 1 ? 'TURNED, AND THE INNING IS OVER' : 'TURNED — TWO WITH ONE PITCH',
+      'solid',
+      big,
+    );
+  }
+
+  /**
+   * THE SACRIFICE FLY, both ways it can end. He gave himself up and the run
+   * scored, or the arm out there beat the man home — and the second of those is
+   * the reason TAG_THROW exists at all, so it cannot go by unnamed.
+   */
+  if (f.sacFly) {
+    if (f.thrownOutAt === 4) {
+      return made('HE IS OUT AT THE PLATE', who(p) ? `${who(p)} THROWS HIM DOWN` : 'THE THROW BEAT HIM', 'big', big);
+    }
+    return made('SACRIFICE FLY', `${rbi(f.runs || 1)}${who(p) ? ` — TO ${who(p)}` : ''}`, 'solid', big);
+  }
   // ⚠️ ROUTINE, AND IT HAS TO STAY ROUTINE. This is the commonest out in
   // baseball — it happens several times a game — so a tier above zero here
   // would cost more clock than every big play on the list put together. The

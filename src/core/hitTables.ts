@@ -167,21 +167,47 @@ export const OUTCOME_TABLES: Record<TimingGrade, Record<PitchType, OutcomeTable>
     slider: t(0.07, 0.18, 0.281, 0.13, 0.15, 0.126, 0.025, 0.008, 0.03),
     knuckleball: t(0.1, 0.24, 0.2, 0.08, 0.24, 0.094, 0.017, 0.009, 0.02),
   },
+  /**
+   * ⚠️ `line_out` WAS EXACTLY 0.0 ON EVERY ROW BELOW, and that one zero is why
+   * this game's outfield looked like scenery.
+   *
+   * A mistimed swing could not put a ball in the air to the outfield. At all.
+   * Early or late, the only things the table would hand back were a strikeout,
+   * an infield popup, a ground out or a foul — and early/late is most of the
+   * swings anybody takes. Measured over 150 games: 21.0 ground outs and 8.6
+   * infield popups a game against 4.6 balls caught in the outfield, which is
+   * roughly the inverse of real baseball.
+   *
+   * It is also not what a mistimed swing does. Getting out in front of a
+   * fastball is the canonical lazy fly to the pull side; being late is the same
+   * ball the other way. Those are two of the most ordinary outcomes in the
+   * sport and neither one existed.
+   *
+   * ⚠️ THE MASS COMES OUT OF `popup` AND NOWHERE ELSE, which is what makes this
+   * safe to do to a hand-tuned table. Both are outs, so the hit-or-out split of
+   * every row is untouched to the third decimal and every row still sums to 1 —
+   * what changes is WHICH out, and therefore what the play looks like and
+   * whether a man on third can tag on it. 60% of the popup mass on each row,
+   * because a miss-hit really does produce both.
+   *
+   * The paired change is LAUNCH_ANGLE.line_out in hit.ts, which had no fly-ball
+   * band to draw from — read that note first. Measured after both: see README.
+   */
   early: {
-    fastball: t(0.15, 0.25, 0.3, 0.0, 0.2, 0.08, 0.02, 0.0, 0.0),
-    sinker: t(0.136, 0.124, 0.474, 0, 0.181, 0.072, 0.013, 0, 0),
-    curveball: t(0.25, 0.3, 0.25, 0.0, 0.15, 0.05, 0.0, 0.0, 0.0),
-    changeup: t(0.2, 0.35, 0.25, 0.0, 0.15, 0.05, 0.0, 0.0, 0.0),
-    slider: t(0.22, 0.28, 0.27, 0.0, 0.16, 0.06, 0.01, 0.0, 0.0),
-    knuckleball: t(0.28, 0.3, 0.16, 0.0, 0.22, 0.04, 0.0, 0.0, 0.0),
+    fastball: t(0.15, 0.1, 0.3, 0.15, 0.2, 0.08, 0.02, 0.0, 0.0),
+    sinker: t(0.136, 0.05, 0.474, 0.074, 0.181, 0.072, 0.013, 0, 0),
+    curveball: t(0.25, 0.12, 0.25, 0.18, 0.15, 0.05, 0.0, 0.0, 0.0),
+    changeup: t(0.2, 0.14, 0.25, 0.21, 0.15, 0.05, 0.0, 0.0, 0.0),
+    slider: t(0.22, 0.112, 0.27, 0.168, 0.16, 0.06, 0.01, 0.0, 0.0),
+    knuckleball: t(0.28, 0.12, 0.16, 0.18, 0.22, 0.04, 0.0, 0.0, 0.0),
   },
   late: {
-    fastball: t(0.2, 0.15, 0.35, 0.0, 0.2, 0.08, 0.02, 0.0, 0.0),
-    sinker: t(0.168, 0.069, 0.516, 0, 0.168, 0.067, 0.012, 0, 0),
-    curveball: t(0.15, 0.2, 0.3, 0.0, 0.25, 0.08, 0.02, 0.0, 0.0),
-    changeup: t(0.1, 0.25, 0.35, 0.0, 0.2, 0.08, 0.02, 0.0, 0.0),
-    slider: t(0.18, 0.18, 0.32, 0.0, 0.23, 0.07, 0.02, 0.0, 0.0),
-    knuckleball: t(0.22, 0.22, 0.2, 0.0, 0.3, 0.05, 0.01, 0.0, 0.0),
+    fastball: t(0.2, 0.06, 0.35, 0.09, 0.2, 0.08, 0.02, 0.0, 0.0),
+    sinker: t(0.168, 0.028, 0.516, 0.041, 0.168, 0.067, 0.012, 0, 0),
+    curveball: t(0.15, 0.08, 0.3, 0.12, 0.25, 0.08, 0.02, 0.0, 0.0),
+    changeup: t(0.1, 0.1, 0.35, 0.15, 0.2, 0.08, 0.02, 0.0, 0.0),
+    slider: t(0.18, 0.072, 0.32, 0.108, 0.23, 0.07, 0.02, 0.0, 0.0),
+    knuckleball: t(0.22, 0.088, 0.2, 0.132, 0.3, 0.05, 0.01, 0.0, 0.0),
   },
   // The row whose absence crashed the prototype. A whiff is a whiff.
   miss: {

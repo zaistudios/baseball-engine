@@ -77,18 +77,55 @@ export interface ArmLine {
   tm: string;
 }
 
+/**
+ * ONE FIELDER'S LINE — the third book, and it was the missing one.
+ *
+ * ⚠️ NOBODY IN THIS LEAGUE HAD EVER RECORDED A PUTOUT. placement.ts has been
+ * writing "6-4-3" on the screen since the scorecard shipped and its own header
+ * said what was absent: "no assists column, no errors column, no box score. The
+ * moment somebody wants a per-fielder total, the numbers are already here to
+ * add up." They were. Nothing added them up, so a club could build its whole
+ * defence around gloveOf() — which decides who plays shortstop and how often a
+ * ball is booted — and finish a season with no record of anybody having fielded
+ * anything.
+ *
+ * ⚠️ THREE COUNTING COLUMNS, NOT NINE. PO, A and E are the three a box score
+ * has always printed and the three every other number is derived from. No
+ * chances column (it is PO + A + E), no innings at a position, no range factor,
+ * no defensive runs saved — the first is arithmetic and the rest need a position
+ * history this engine does not keep, because assignPositions() is recomputed
+ * from the lineup every half-inning.
+ */
+export interface FieldLine {
+  /** Outs he was credited with recording. */
+  po: number;
+  /** Throws that led to somebody else's putout. */
+  a: number;
+  /** Balls he booted. The one column a player actually feels. */
+  e: number;
+  tm: string;
+}
+
 export interface StatBook {
   bat: Readonly<Record<string, BatLine>>;
   arm: Readonly<Record<string, ArmLine>>;
+  /**
+   * Gloves. Optional on the type so that a book saved before fielding existed
+   * still loads — save.ts reads these straight off disk, and a season in
+   * progress must not become unreadable because a column was added.
+   */
+  field?: Readonly<Record<string, FieldLine>>;
 }
 
-export const EMPTY_BOOK: StatBook = { bat: {}, arm: {} };
+export const EMPTY_BOOK: StatBook = { bat: {}, arm: {}, field: {} };
 
 const newBat = (tm: string): BatLine =>
   ({ pa: 0, ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, k: 0, rbi: 0, tm });
 
 const newArm = (tm: string): ArmLine =>
   ({ outs: 0, h: 0, bb: 0, k: 0, r: 0, er: 0, w: 0, l: 0, tm });
+
+const newField = (tm: string): FieldLine => ({ po: 0, a: 0, e: 0, tm });
 
 /** Everything one completed at-bat is worth to both men in it. */
 export interface PlayFacts {
@@ -147,7 +184,39 @@ export function recordAtBat(book: StatBook, f: PlayFacts): StatBook {
     }
   }
 
-  return { bat: { ...book.bat, [f.batter]: b }, arm: { ...book.arm, [f.pitcher]: a } };
+  // ⚠️ `...book` FIRST, AND IT IS LOAD-BEARING. This used to build a fresh
+  // object out of exactly `bat` and `arm`, so the moment a third book existed
+  // every at-bat silently threw it away — the fielding lines reset to whatever
+  // the last play credited, all game. Nothing could have caught that but a test
+  // that adds the columns up, which is what stats.test.ts now does.
+  return { ...book, bat: { ...book.bat, [f.batter]: b }, arm: { ...book.arm, [f.pitcher]: a } };
+}
+
+/** What one ball was worth to the gloves. Names, because the book is by name. */
+export interface FieldFacts {
+  /** Who recorded outs, by name. A man can appear twice — see a triple play. */
+  po: readonly string[];
+  a: readonly string[];
+  e: readonly string[];
+  tm: string;
+}
+
+/**
+ * Fold the gloves in. Separate from recordAtBat() because the two books are
+ * keyed off different things: that one knows the batter and the pitcher by
+ * name, and this one needs the ALIGNMENT to turn a scorer's number into a man.
+ * game.ts holds both and calls both — see recordPlay().
+ */
+export function recordField(book: StatBook, f: FieldFacts): StatBook {
+  const field: Record<string, FieldLine> = { ...(book.field ?? {}) };
+  const bump = (name: string, col: 'po' | 'a' | 'e'): void => {
+    const l = field[name] ?? newField(f.tm);
+    field[name] = { ...l, [col]: l[col] + 1, tm: f.tm };
+  };
+  f.po.forEach((n) => bump(n, 'po'));
+  f.a.forEach((n) => bump(n, 'a'));
+  f.e.forEach((n) => bump(n, 'e'));
+  return { ...book, field };
 }
 
 /**
@@ -188,6 +257,7 @@ export function recordDecision(book: StatBook, winner: string, loser: string): S
 export function merge(into: StatBook, from: StatBook): StatBook {
   const bat: Record<string, BatLine> = { ...into.bat };
   const arm: Record<string, ArmLine> = { ...into.arm };
+  const field: Record<string, FieldLine> = { ...(into.field ?? {}) };
 
   for (const [name, l] of Object.entries(from.bat)) {
     const p = bat[name] ?? newBat(l.tm);
@@ -203,7 +273,11 @@ export function merge(into: StatBook, from: StatBook): StatBook {
       r: p.r + l.r, er: p.er + l.er, w: p.w + l.w, l: p.l + l.l, tm: l.tm || p.tm,
     };
   }
-  return { bat, arm };
+  for (const [name, l] of Object.entries(from.field ?? {})) {
+    const p = field[name] ?? newField(l.tm);
+    field[name] = { po: p.po + l.po, a: p.a + l.a, e: p.e + l.e, tm: l.tm || p.tm };
+  }
+  return { bat, arm, field };
 }
 
 // ------------------------------------------------------------------ derived
@@ -224,6 +298,13 @@ export const ip = (outs: number): string => `${Math.floor(outs / 3)}.${outs % 3}
 export const era = (l: ArmLine): number => (l.outs === 0 ? 0 : (l.er * 27) / l.outs);
 
 export const whip = (l: ArmLine): number => (l.outs === 0 ? 0 : ((l.h + l.bb) * 3) / l.outs);
+
+/** Chances: everything that came his way. The denominator fielding runs on. */
+export const chances = (l: FieldLine): number => l.po + l.a + l.e;
+
+/** ".983" — the one rate a fielding line is read for. */
+export const fpct = (l: FieldLine): number =>
+  chances(l) === 0 ? 0 : (l.po + l.a) / chances(l);
 
 /** ".380", not "0.380" — the way an average is written on a scoreboard. */
 export const rate = (n: number): string => n.toFixed(3).replace(/^0\./, '.');
@@ -284,4 +365,13 @@ export function clubArms(
   return names
     .map((name) => ({ name, line: book.arm[name] }))
     .filter((r): r is { name: string; line: ArmLine } => !!r.line);
+}
+
+export function clubGloves(
+  book: StatBook,
+  names: readonly string[],
+): { name: string; line: FieldLine }[] {
+  return names
+    .map((name) => ({ name, line: book.field?.[name] }))
+    .filter((r): r is { name: string; line: FieldLine } => !!r.line);
 }

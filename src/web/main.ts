@@ -767,7 +767,16 @@ function finishPitch(pitch: ThrownPitch, text: string): void {
       result.kind === 'in_play' &&
       !fielding.error &&
       !fielding.doublePlay &&
-      isSacrificeFly(result.hit.outcome, result.hit.exitVelocity, match.outs, match.bases);
+      // The launch angle rides along so a LINE DRIVE cannot score a man from
+      // third — see SAC_FLY_MIN_ANGLE. The roguelike shows the same caption the
+      // league game does and has to mean the same thing by it.
+      isSacrificeFly(
+        result.hit.outcome,
+        result.hit.exitVelocity,
+        match.outs,
+        match.bases,
+        result.hit.launchAngle,
+      );
     match = recordAtBat(match, result, { name: batter().player.name, speed }, fielding);
 
     // Cut to the overhead. Built HERE rather than at contact because two things

@@ -14,7 +14,7 @@
 
 import { isHit, isOut, type Outcome } from './hitTables.ts';
 import type { AtBatResult } from './atBat.ts';
-import { CLEAN, gunDown, type FieldingResult, type ForceBag } from './fielding.ts';
+import { CLEAN, gunDown, TAG_THROW, type FieldingResult, type ForceBag } from './fielding.ts';
 
 /**
  * [first, second, third]. A slot holds the RUNNER standing on it, or null.
@@ -415,9 +415,24 @@ const FLY_OUTS: ReadonlySet<Outcome> = new Set<Outcome>(['line_out']);
  * discriminator costs nothing and means the right thing: you cannot tag up on
  * an infield popup, and a well-struck ball to the outfield scores him.
  *
- * At 85 a `line_out` on good timing (95 × 0.95) qualifies, and a weakly hit
- * one does not. That is the intended shape — the sacrifice fly should be a fly
- * ball you hit, not an out you got lucky on.
+ * A well-struck ball qualifies and a weakly hit one does not. That is the
+ * intended shape — the sacrifice fly should be a fly ball you hit, not an out
+ * you got lucky on.
+ *
+ * ⚠️ 85 → 76 ON 2026-09-12, AND IT IS A CONSEQUENCE OF SAC_FLY_MIN_ANGLE RATHER
+ * THAN A LOOSENING. This number was carrying two jobs: "is it a fly ball" and
+ * "is it a DEEP fly ball". The angle gate below took the first one off it, so
+ * the bar it sets can go back to being only about depth — and at 85 it was set
+ * for a population that included line drives.
+ *
+ * Measured at 300 games a step: 85 gave 0.05 sacrifice flies a team a game, 76
+ * gives 0.09 and 68 gives 0.10 against a real 0.25. It plateaus because the
+ * binding constraint is not this number at all — it is how often a man is
+ * standing on third with an out to spare and somebody hits a fly, which is an
+ * upstream property of the run environment and not something the sacrifice fly
+ * rule should fake. 76 takes the free half of the gap; going further buys
+ * almost nothing and starts scoring men on balls nobody could tag on. Runs per
+ * team moved 4.24 → 4.30 against a real 4.4.
  *
  * ⚠️ THIS NUMBER USED TO BE THE INFIELD FLY RULE AS WELL, AND IT COULD NOT BE.
  * The note here read "a popup (65 × 0.95) does not qualify", which is true of a
@@ -431,7 +446,28 @@ const FLY_OUTS: ReadonlySet<Outcome> = new Set<Outcome>(['line_out']);
  * doing the one job it is good at, which is separating a deep fly from a lazy
  * one among balls that actually reached the outfield.
  */
-export const SAC_FLY_MIN_EV = 85;
+export const SAC_FLY_MIN_EV = 76;
+
+/**
+ * HOW STEEPLY IT HAS TO LEAVE THE BAT before it is a fly ball at all.
+ *
+ * ⚠️ EXIT VELOCITY ALONE COULD NOT TELL A FLY BALL FROM A LINE DRIVE, and once
+ * LAUNCH_ANGLE widened `line_out` to [10, 38]° it had to. That one outcome now
+ * covers the screamer caught at the shortstop's shoulder AND the lazy fly to
+ * right — see the note in hit.ts — and SAC_FLY_MIN_EV was the only gate on it.
+ * A line drive is by definition hit HARD, so a 100mph rope straight at the
+ * second baseman cleared an 85mph bar comfortably and scored a man from third.
+ * Nobody tags on a line drive to the infield. It is the same failure the popup
+ * had before FLY_OUTS was narrowed: a velocity test standing in for a question
+ * about the SHAPE of the ball.
+ *
+ * 20° is the real line, near enough — under it the ball is still climbing when
+ * it reaches somebody, over it a fielder has to camp under it. It is also the
+ * bar defense.ts reads to decide whether a man on first can be doubled off,
+ * which is the same distinction seen from the other side, so the two plays
+ * cannot both be true of one ball.
+ */
+export const SAC_FLY_MIN_ANGLE = 20;
 
 /**
  * Can this out score the man from third?
@@ -445,10 +481,110 @@ export function isSacrificeFly(
   exitVelocity: number,
   outs: number,
   bases: Bases,
+  launchAngle?: number,
+): boolean {
+  return isDeepFly(outcome, exitVelocity, outs, launchAngle) && bases[2] !== null;
+}
+
+/**
+ * A caught fly deep enough for ANYBODY to tag on, with an out to spare.
+ *
+ * ⚠️ SPLIT OUT OF isSacrificeFly() WHEN THE MAN ON SECOND LEARNED TO RUN. That
+ * predicate asks two questions at once — "is this ball deep enough" and "is
+ * there a man on third" — and the tag from second needs the first without the
+ * second. Two runners can tag on one fly ball, so the depth test cannot keep
+ * living inside a question about one particular bag.
+ */
+export function isDeepFly(
+  outcome: Outcome,
+  exitVelocity: number,
+  outs: number,
+  /**
+   * Off the bat, in degrees. Omitted passes — which is exactly the old
+   * behaviour, and what the CLI and the roguelike get: neither carries an angle
+   * this far and neither has ever had a line drive to tell apart from a fly.
+   */
+  launchAngle: number = SAC_FLY_MIN_ANGLE,
 ): boolean {
   return (
-    outs < 2 && bases[2] !== null && FLY_OUTS.has(outcome) && exitVelocity >= SAC_FLY_MIN_EV
+    outs < 2 &&
+    FLY_OUTS.has(outcome) &&
+    exitVelocity >= SAC_FLY_MIN_EV &&
+    launchAngle >= SAC_FLY_MIN_ANGLE
   );
+}
+
+/**
+ * HOW OFTEN A MAN ON SECOND TAGS AND TAKES THIRD on a deep fly.
+ *
+ * ⚠️ LOWER THAN THE MAN ON THIRD GOING HOME, and it is not the same decision.
+ * Scoring is worth a run and third base is worth a base, so the man on third
+ * goes on almost anything he can; the man on second is trading a bag for the
+ * chance of being doubled off, and the throw behind him goes to the bag he
+ * left. 0.55 × his legs puts a burner near the top of the range and a catcher
+ * nowhere near it.
+ *
+ * ponytail: no second throw at the tagging runner. The arm gets ONE chance per
+ * play and it spends it on the man going home — see tagUp() — because that is
+ * the run. The man taking third goes or he holds.
+ */
+export const TAG_UP_RATE = 0.55;
+
+/**
+ * THE TAG-UP. Everyone who can advance on a caught fly does, and the arm gets
+ * its one throw at the man who is scoring.
+ *
+ * Lead runner first, same as every other advance in this file: whether second
+ * can go depends on whether third just emptied.
+ *
+ * `scored` is what the play has already counted, and is untouched here — it is
+ * taken only so the caller's arithmetic stays the single authority on runs.
+ */
+function tagUp(
+  bases: Bases,
+  _scored: number,
+  rolls?: readonly [number, number, number],
+  /**
+   * THE THROW HOME, pre-rolled — the same `extraBase` die rollFielding() puts
+   * on every ball in play.
+   *
+   * ⚠️ IT IS A DIE NOBODY WAS USING. `extraBase` is only ever read by advance(),
+   * which a caught fly never reaches, so on every fly ball in the game that
+   * roll was drawn and thrown away. Spending it here costs no draw, shifts no
+   * seeded season, and buys the one thing a sacrifice fly was missing.
+   */
+  arm?: { odds: number; roll: number },
+): { bases: Bases; runs: number; thrownOut: ThrownOut | null } {
+  const next: [Runner | null, Runner | null, Runner | null] = [...bases];
+  let runs = 0;
+  let thrownOut: ThrownOut | null = null;
+
+  // The man on third goes. That is the sacrifice fly, and on a ball this deep
+  // he goes unconditionally — see SAC_FLY_MIN_EV. What is NOT unconditional any
+  // more is that he gets there: see TAG_THROW.
+  const third = next[2];
+  if (third) {
+    next[2] = null;
+    if (arm && gunDown(arm.odds * TAG_THROW, arm.roll, third.speed)) {
+      thrownOut = { runner: third, at: 4, batter: false };
+    } else {
+      runs++;
+    }
+  }
+
+  // ...and the man on second takes the bag he just vacated, if he goes. He is
+  // not thrown at whether or not the man in front of him was: there is one ball
+  // and it went to the plate.
+  const second = next[1];
+  if (second && next[2] === null) {
+    const goes = rolls ? rolls[1]! < odds(second.speed, TAG_UP_RATE) : false;
+    if (goes) {
+      next[2] = second;
+      next[1] = null;
+    }
+  }
+
+  return { bases: next, runs, thrownOut };
 }
 
 /** A walk pushes only the runners it has to. Bases loaded forces in a run. */
@@ -485,14 +621,36 @@ export function removeRunner(bases: Bases, from: number): Bases {
 }
 
 /**
- * The double play, applied. The batter is out at first and the runner forced
- * at second is erased; anyone else holds, same as any other out.
+ * THE DOUBLE PLAY, APPLIED — the man forced at `at` is erased and the batter is
+ * out at first.
  *
- * ponytail: always 6-4-3. No 5-4-3 round the horn, no 4-6-3, no lead runner
- * taken at third, and no strike-him-out-throw-him-out. One shape, two outs.
+ * ⚠️ IT WAS `removeRunner(bases, 0)` AND NOTHING ELSE, WHICH IS TWO BUGS IN ONE
+ * LINE. It always took the man on FIRST, whatever the bases looked like — so a
+ * grounder with the bases loaded and the infield drawn in went 6-4-3 and let
+ * the run walk home, when the whole reason a manager plays the infield in is
+ * that the ball goes to the plate. And it FROZE EVERYBODY ELSE: the runner on
+ * third stood still on every double play ever turned here, so the routine
+ * run-scoring 6-4-3 — a real, ordinary, several-times-a-week play — scored
+ * nothing, ever.
+ *
+ * ⚠️ IT IS fieldersChoice() WITH NOBODY REACHING, and writing it that way is the
+ * point rather than a shortcut. A double play IS a fielder's choice plus the
+ * throw to first: the same bag, the same men running behind it, the same rule
+ * about the man on third. Two implementations of "who is forced and who
+ * gambles" would disagree eventually, and the one that disagreed would be the
+ * one under the picture the player is watching.
+ *
+ * ⚠️ THE CALLER GATES THE RUNS ON `outs === 0`, NOT THIS FUNCTION. When the
+ * double play is the second and third outs of the half, no run scores on it —
+ * the third out was a force. See applyAtBat().
  */
-function turnTwo(bases: Bases): Bases {
-  return removeRunner(bases, 0);
+function turnTwo(
+  bases: Bases,
+  at: ForceBag,
+  rolls?: readonly [number, number, number],
+  infieldIn = false,
+): { bases: Bases; runs: number } {
+  return fieldersChoice(bases, null, at, rolls, infieldIn);
 }
 
 /**
@@ -521,10 +679,10 @@ export const GROUND_SEND_UP = 0.35;
  *   when every bag behind him is occupied.
  *   EVERYONE ELSE rolls — see the two rates above.
  *
- * ponytail: the batter is always out at first. The FIELDER'S CHOICE — lead man
- * erased at second, batter safe — is a different out with the same shape, and
- * it needs the scorer to pick a bag before it is worth having. Add it when the
- * play-by-play starts caring who was retired.
+ * ✅ The FIELDER'S CHOICE — lead man erased at a bag, batter safe — landed as
+ * fieldersChoice() below, which is this function plus one substitution. The
+ * double play is the same thing again with nobody reaching. This one is now
+ * only the case where the batter really is retired at first.
  */
 function groundOut(
   bases: Bases,
@@ -597,7 +755,8 @@ function groundOut(
  */
 function fieldersChoice(
   bases: Bases,
-  batter: Runner,
+  /** Null when he did NOT reach — which is the double play. See turnTwo(). */
+  batter: Runner | null,
   /** 2, 3 or 4 — the bag the throw went to. See LEAD_FORCE in fielding.ts. */
   at: ForceBag,
   rolls?: readonly [number, number, number],
@@ -782,16 +941,60 @@ export function applyAtBat(
           bases = [null, bases[0], bases[1]];
           if (lead) runs++;
           outs++;
-        } else if (fielding.doublePlay) {
+        } else if (fielding.triplePlay) {
+          // ⚠️ THREE OUTS AND NOTHING SCORES, AND THAT IS A RULE RATHER THAN A
+          // SIMPLIFICATION. Every out on a triple play is a force or the play at
+          // first, and no run counts on a play whose third out is either — so
+          // even the man on third, forced home with the bases loaded, gets
+          // nothing. The half is over, so the bases are wiped for the picture's
+          // sake and for nothing else. See TRIPLE_PLAY in fielding.ts.
+          outs += 3;
+          bases = EMPTY_BASES;
+        } else if (fielding.doubledOff) {
+          // THE LINE DRIVE. Caught on the fly, and the man on first never got
+          // back — the only out in this file recorded with a TAG. Nobody else
+          // moves: they are all diving back to the bag they left.
           outs += 2;
-          bases = turnTwo(bases);
+          bases = removeRunner(bases, 0);
+        } else if (fielding.doublePlay) {
+          // ⚠️ THE RUNS ARE GATED ON THE OUTS THAT WERE ALREADY THERE. With
+          // nobody out the double play is the first and second, and the man on
+          // third scores ahead of it — the ordinary RBI ground ball. With ONE
+          // out it is the second and third, the third of them a force, and no
+          // run can cross on it.
+          const t = turnTwo(bases, fielding.forceAt ?? 2, fielding.advanceRolls, defense.infieldIn);
+          bases = t.bases;
+          if (outs === 0) runs += t.runs;
+          outs += 2;
         } else {
           // THE SACRIFICE FLY — checked BEFORE the out is recorded, because
           // "fewer than two outs" is a question about the count when the ball
           // was hit, not after the catch.
-          if (isSacrificeFly(outcome, result.hit.exitVelocity, outs, bases)) {
-            bases = removeRunner(bases, 2);
-            runs++;
+          if (isDeepFly(outcome, result.hit.exitVelocity, outs, result.hit.launchAngle)) {
+            // ⚠️ THE TAG-UP, AND IT IS TWO RUNNERS RATHER THAN ONE. The
+            // sacrifice fly has been here since 2026-08-16 and only ever moved
+            // the man on THIRD; the man on SECOND stood still on every fly ball
+            // ever caught in this game, which is the other half of the same
+            // play and about as common. inning.ts's own test said so in a
+            // comment — "no runner advancing from second on a sac fly. He can
+            // tag on a deep one in real ball."
+            //
+            // LEAD RUNNER FIRST, for the reason every advance in this file does
+            // it: the man on second is only going if third is CLEAR, and
+            // whether it is clear depends on whether the man who was standing
+            // there just scored.
+            //
+            // ⚠️ AND THE ARM GETS ITS THROW. The man from third is not home
+            // until the ball is not — see TAG_THROW. When it beats him the
+            // sacrifice fly is two outs and no run, which is the play the whole
+            // outfield-arm rating existed to make possible.
+            const tag = tagUp(bases, runs, fielding.advanceRolls, fielding.extraBase);
+            bases = tag.bases;
+            runs += tag.runs;
+            if (tag.thrownOut) {
+              outs++;
+              thrownOut = tag.thrownOut;
+            }
           } else if (outcome === 'ground_out') {
             // ⚠️ WHICH MAN IS OUT is the defence's call, not this file's: with a
             // force at second they mostly take the lead runner and the batter

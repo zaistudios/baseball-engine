@@ -31,7 +31,7 @@ src/core/
   hitTables.ts   outcome probability tables, ported from the prototype
   hit.ts         resolveSwing() — stat, power-swing and location modifiers
   atBat.ts       the count — balls, strikes, walks, fouls, whiff ≠ strikeout
-  inning.ts      outs, bases, runs, the sac fly and the extra base
+  inning.ts      outs, bases, runs, the sac fly, the double play and the extra base
   pitcher.ts     5 pitch types, 9 arms, and the PLAN each one pitches to
   run.ts         the roguelike layer — 9 encounters, money, shop, power-ups
   opponent.ts    the other team's runs, rolled not played — the scoreboard
@@ -1461,6 +1461,139 @@ world that is; there are no wall heights, no altitude, and no weather.
 The roguelike layer (`run.ts`, `division.ts`, `opponent.ts`) is untouched and
 still builds — this sits beside it, not on top of it.
 
+### Double plays, triple plays, and nobody had ever recorded a putout — 2026-09-12, fourth pass
+
+Zane: *"lets finish up the fielding with double plays now. The fielders choice
+works, but there needs to be double and triple plays, along with sac flys that
+make sense. Also putouts are another necessity."*
+
+**1. The double play was one line, and that line held two bugs.** `turnTwo()`
+was `removeRunner(bases, 0)` — and had been since the double play shipped. So it
+**always erased the man on first**, whatever the bases looked like, which meant
+the one double play a manager actually plays for — the 2-3 home-to-first with the
+infield in and the bases loaded — could not happen. It also **froze everybody
+else**, so the ordinary run-scoring 6-4-3 scored nothing, ever, in the history of
+this league.
+
+`forceAt` now rides on the double play the same way it rides on a plain force,
+and `turnTwo()` is `fieldersChoice()` with nobody reaching. Writing it that way
+is the point rather than a shortcut: a double play *is* a fielder's choice plus
+the throw to first, and two implementations of "who is forced and who gambles"
+would disagree eventually — under the picture the player is watching. The runs
+are gated on `outs === 0`, because when the double play is the second and third
+outs the third one is a force and nothing counts.
+
+**11% of double plays are now taken somewhere other than second.**
+
+**2. The triple play.** `TRIPLE_PLAY` (0.05) on a double-play ball with nobody
+out and two men forced. The rate was measured rather than guessed — set to 1 the
+qualifying ball comes up once every **nine** games, so 0.05 lands one roughly
+**every 190 games**: about sixteen times commoner than the real thing and still a
+freak event, the same order of distortion `DOUBLE_PLAY_RATE` and `ERROR_RATE`
+already carry. It is the only caption in the game outside a walk-off that gets a
+`huge` beat.
+
+**3. The sacrifice fly could be a line drive, and was free.** Two separate
+faults, both consequences of `LAUNCH_ANGLE` widening `line_out` to [10, 38]°
+earlier the same day — one outcome now covers the rope at the shortstop and the
+lazy fly to right.
+
+- `SAC_FLY_MIN_EV` was the only gate, and a line drive is by definition hit
+  *hard*, so a 100mph screamer at the second baseman cleared an 85mph bar
+  comfortably and **scored a man from third**. `SAC_FLY_MIN_ANGLE` (20°) is the
+  missing half. This is the same failure the popup had before `FLY_OUTS` was
+  narrowed: a velocity test standing in for a question about the *shape* of the
+  ball.
+- **The man on third scored on every qualifying ball, with no throw.** It was the
+  last free base in the game — the extra base has `gunDown()`, the stretch has
+  `STRETCH_THROW`, the steal has the catcher's arm, and a cannon in centre field
+  was worth exactly nothing on the play an outfield arm is most famous for.
+  `TAG_THROW` spends the `extraBase` die that a caught fly **had been drawing and
+  throwing away on every fly ball in the game** — no new draw, no shifted season.
+  6% of sends are now cut down, and the sacrifice fly can be two outs and no run.
+
+With the angle gate doing the "is it a fly ball" half, `SAC_FLY_MIN_EV` goes
+85 → **76**: it only has to separate a deep fly from a lazy one now, and 85 was
+set for a population that included liners.
+
+⚠️ **And the sacrifice fly is RARE, not common — the open question below had it
+backwards.** 0.09 per team per game against a real 0.25. Measured at 300 games a
+step, the gate plateaus: 85 gives 0.05, 76 gives 0.09, 68 gives 0.10. The binding
+constraint is not this number at all — it is how often a man stands on third with
+an out to spare and somebody hits a fly, which is an upstream property of the run
+environment and **not something the sacrifice fly rule should fake**. The old
+note measured it as a share of plate appearances off a bot hitting .500; that
+sample was flattering and the conclusion was wrong.
+
+**4. Putouts — two halves, and the first is the plays that make them.** Every out
+in this game was the batter, a force, or a catch. Nothing ever *tagged* anybody
+on a batted ball. `DOUBLE_OFF` (0.33) adds the line drive caught on the fly with
+the man on first doubled off — the only out on the field recorded with a tag
+rather than somebody stepping on something. Population measured the same way: set
+to 1 the qualifying ball comes up 0.24 a team a game, so a third of them lands on
+the real **0.08**.
+
+⚠️ **The first cut gated it on an infielder catching it and the population
+collapsed to 0.04, which no rate can turn into 0.08.** One rate across the whole
+band instead. The honest ceiling — named in the constant — is that an outfield
+liner doubles a man off slightly too often; split the constant in two when that
+is what reads wrong.
+
+**5. Putouts — and nobody in this league had ever recorded one.** `placement.ts`
+has written `6-4-3` on the screen since the scorecard shipped, and its own header
+said what was missing: *"the moment somebody wants a per-fielder total, the
+numbers are already here to add up."* Nothing added them up. Meanwhile
+`gloveOf()` decides who plays shortstop and how often a ball is booted — so a
+player could build a defence, watch it cost him a game, and find no record that
+anybody had fielded anything.
+
+`FieldLine` (PO / A / E) is the third book, folded at the same choke point as the
+other two, and it shows up as a **FIELDING** panel per club in the box score and
+a **GLOVES** panel for your own club over the season, with TC and FPCT.
+
+⚠️ **`creditsFor()` is deliberately not a parser over `scorecard()`'s string.**
+That was the first cut and it is the wrong kind of lazy: `L6-3` credits 6 with a
+putout *and* an assist, `6-4-3` credits only 3 with the putout, and `K` credits a
+man whose number is not in the string at all. Two short functions off one
+`PlayShape`, with the one invariant a box score is actually checked against — the
+putouts add up to the outs — asserted for every shape.
+
+**Three real bugs fell out of writing that test, and none of them could have been
+found any other way.**
+
+- **`recordAtBat()` was throwing the whole fielding book away on every at-bat.**
+  It built a fresh object out of exactly `bat` and `arm`, so the moment a third
+  book existed it reset to whatever the last play credited. One game came out
+  with **one putout in it**. The fix is `...book` first.
+- **Every fielder's choice in the game has been scored `6-3`.** `describePlay()`
+  handed `scorecard()` a `FieldingResult`, whose bag field is `forceAt` — and
+  `scorecard()` reads `force`. So the one line of the book that says *who was
+  retired* named the batter, who is the one man who was **not** out. TypeScript
+  cannot catch it: excess properties are only checked on object literals, and
+  this was a variable.
+- **The pitcher is not in the alignment.** `assignPositions()` fills eight spots
+  out of the nine-man batting order and leaves `P` null, which is what makes this
+  a DH league — so a comebacker is `1-3` and number 1 had to be read off the
+  mound instead.
+
+**6. The screen, because a green suite says nothing about it.** The relay was
+hard-wired to second on every double play, so a 2-3 drew a ball flying past the
+catcher out to second base under a caption saying the run had been cut down at
+home. And `force` in `raceTiming()` means *"the play ends at the bag"* — checked
+before the double play — so handing a double play its new bag would have erased
+the throw to first and drawn a 6-4-3 as a 6-4. Both named where they are.
+
+New captions: **THREE / A TRIPLE PLAY**, **TWO / LINED INTO IT — DOUBLED OFF**,
+**TWO, AND THE RUN IS OUT** for the 2-3, **SACRIFICE FLY**, and **HE IS OUT AT
+THE PLATE** for the throw that beat the tag — which is the one the arm rating
+existed for and had never once been seen.
+
+**⚠️ What this cost on the scoreboard: nothing.** 800 games, **4.36 runs per
+team** against 4.4 real and 4.34 before this pass. Double plays 0.72 (real 0.75),
+doubled off 0.08 (real ~0.08), hits 8.38, K rate 22.3%. The new outs and the new
+runs cancel, which is the same pairing `inning.ts` has been balancing since the
+double play first shipped.
+
 ## Play it
 
 ```bash
@@ -2105,7 +2238,7 @@ The prototype inverted this and graded every early swing as late. Do not restate
 - ✅ **`isPowerSwing` is wired.** Closed 2026-08-16 — it is the `P` key and the *sit on it* button, paired with the automatic two-strike protective swing. See "The hitter has two approaches" above. It sat unreachable in the middle of the engine for months.
 - ✅ **Which way count leverage runs — the question dissolved.** The design note's §3 rules stated it backwards from the Hample bullets quoted three lines above them in the same section, and `pitcher.ts` implemented the source direction. The pitching plan replaced the two-branch leverage rule with six named approaches, and *both* readings are now in it and not in conflict: behind, he has to `attack`; ahead, he `waste`s and then goes to the `putaway` off the plate. Nothing left to flip.
 - 🟡 **Is `around` too generous to a big lineup?** It self-limits — it needs first base *open*, so the walk it produces switches it off for the next hitter — and headless simulation put walks at 5–8% of plate appearances across all nine arms, under the real 8.5%. But it has not been played. If it reads as the game refusing to let you swing, the first knob is `DANGEROUS_POWER` (1.2), not the approach.
-- 🟡 **Sacrifice flies measured a little high** — 1.5–2.7% of plate appearances against a real ~1% — on a bot hitting .500 that puts men on third constantly, so the sample is flattering. Re-measure after a human run before touching `SAC_FLY_MIN_EV`.
+- ✅ **Sacrifice flies were measured the wrong way round — SETTLED 2026-09-12, and the old note had it backwards.** It said "a little high, 1.5–2.7% of plate appearances against a real ~1%", off a bot hitting .500 that puts men on third constantly. Counted per team per game against the number a box score actually prints, they are **RARE**: 0.09 against a real 0.25. `SAC_FLY_MIN_EV` went 85 → 76 on the back of it, and the gate plateaus above that — the binding constraint is how often a man stands on third with an out to spare and somebody hits a fly, which is a property of the run environment and not something this rule should fake. `scripts/balance.ts` counts them from here on.
 - 🟡 **The fail state now escalates — unplaytested.** `completeMatch()` in `run.ts` tracks `patience`: starts at 3, `patience === 0` ends the run early with `fired: true`. That much was always built. What was missing is that it never threatened — cap 5 with +1 per win let a decent player bank enough rope to coast, and a loss cost the same one point in the Foundry as in the Holdouts, so the last league was no scarier than the first.
 
   **Changed 2026-08-15:** cap is now 4 (one above the start, not two), and a loss costs `lossCost(leagueIndex)` — **1 in the Holdouts, 2 in the Splice, 3 in the Foundry**. A win still buys back exactly one, anywhere. The asymmetry is the point: you cannot win your way out of a late collapse at the rate it costs you, and the fourth dot is something the early leagues buy you the right to spend later. The HUD shows the dots *and* the current stake, and goes amber when the next loss in this league would end the run.

@@ -216,9 +216,12 @@ import {
 } from './difficulty.ts';
 import {
   avg,
+  chances,
   clubArms,
   clubBatting,
+  clubGloves,
   era,
+  fpct,
   ip,
   leaders,
   ops,
@@ -226,9 +229,16 @@ import {
   whip,
   type ArmLine,
   type BatLine,
+  type FieldLine,
   type StatBook,
 } from './stats.ts';
-import { forcedRunners, heldRunners, runnerMoves, scorersFrom } from '../core/inning.ts';
+import {
+  forcedRunners,
+  heldRunners,
+  isSacrificeFly,
+  runnerMoves,
+  scorersFrom,
+} from '../core/inning.ts';
 import {
   CLEAN_THROW,
   THROW_AT_MS,
@@ -1921,7 +1931,30 @@ function completePlay(
           runs: log.runs,
           error: !!fielding?.error,
           doublePlay: !!fielding?.doublePlay,
-          forceAt: forceBag(result, fielding),
+          triplePlay: !!fielding?.triplePlay,
+          doubledOff: !!fielding?.doubledOff,
+          // ⚠️ ASKED OF THE STATE HE WALKED INTO, not of the one he left. The
+          // rule is "deep enough, with an out to spare, and a man on third" and
+          // all three of those are facts about BEFORE the catch — recordPlay
+          // has already taken the out and moved the runner.
+          sacFly: isSacrificeFly(
+            result.hit.outcome,
+            result.hit.exitVelocity,
+            spotHeWalkedInto.outs,
+            spotHeWalkedInto.bases,
+            result.hit.launchAngle,
+          ),
+          ...(log.thrownOut ? { thrownOutAt: log.thrownOut.at } : {}),
+          // ⚠️ THE DOUBLE PLAY'S BAG HAS TO GET HERE TOO, and `forceBag()` alone
+          // will not bring it: that helper is the predicate for "the batter
+          // REACHED", so it answers undefined on a double play by design. The
+          // caption for the 2-3 — the one play the infield-in call exists to
+          // produce — could therefore never fire, and the screen said TWO /
+          // TURNED, AND THE INNING IS OVER over a picture of a run being cut
+          // down at the plate. Caught by driving it, not by the suite; the
+          // ordering in sceneFor() is what makes this safe, because the double
+          // play returns long before the plain-force branch reads the same field.
+          forceAt: forceBag(result, fielding) ?? fielding?.forceAt,
           exitVelocity: result.hit.exitVelocity,
           before: spotHeWalkedInto,
           gameOver: game.over,
@@ -1968,8 +2001,20 @@ function completePlay(
           wallFt: wallAt(result.hit.direction, game.home.park),
           // The beat this play earned. A routine grounder adds nothing.
           holdMs: scene?.hold ?? 0,
-          doublePlay: !!fielding?.doublePlay,
-          forceAt: forceBag(result, fielding),
+          // ⚠️ THE TRIPLE PLAY IS DRAWN AS THE DOUBLE PLAY IT CONTAINS. The
+          // relay to second and the throw on to first are both real and both
+          // already drawn; the third out is the one the fielder made standing on
+          // his own bag before he threw, which is over before the picture starts.
+          //
+          // ponytail: no third leg. The caption says THREE and the scorecard
+          // says 5-4-3, so nothing is claiming two outs — add the leg if the
+          // once-a-season play ever looks short.
+          doublePlay: !!fielding?.doublePlay || !!fielding?.triplePlay,
+          doubledOff: !!fielding?.doubledOff,
+          // ⚠️ THE BAG, ON A DOUBLE PLAY TOO. forceBag() deliberately answers
+          // `undefined` for one — it is the predicate for "the batter reached" —
+          // so the relay's bag has to come straight off the roll.
+          forceAt: forceBag(result, fielding) ?? fielding?.forceAt,
           error: !!fielding?.error,
           // Only a foul out sets this, and only because nobody stands in foul
           // ground for nearestFielder() to find. See raceFor().
@@ -2226,15 +2271,37 @@ const forceBag = (
 
 function describe(
   result: AtBatState['result'],
-  fielding?: { error: boolean; doublePlay: boolean; forceAt?: ForceBag },
+  fielding?: {
+    error: boolean;
+    doublePlay: boolean;
+    triplePlay?: boolean;
+    doubledOff?: boolean;
+    forceAt?: ForceBag;
+  },
   placed?: string,
   fielderNum?: number,
 ): string {
   if (!result) return '';
 
+  // ⚠️ `forceAt` HAD TO BE RENAMED TO `force` ON THE WAY IN, and it was not.
+  // scorecard() takes a PlayShape whose bag field is called `force`, so passing
+  // the FieldingResult straight through handed it `forceAt` — a property it
+  // does not read — and every fielder's choice in the game has been scored
+  // `6-3`, the notation for a batter retired at first, since the lead force
+  // shipped. The one line of the book that says WHO was retired said the wrong
+  // man. TypeScript could not catch it: excess properties are only checked on
+  // object literals, and this was a variable.
+  const shape = fielding && {
+    error: fielding.error,
+    doublePlay: fielding.doublePlay,
+    triplePlay: fielding.triplePlay,
+    doubledOff: fielding.doubledOff,
+    force: fielding.forceAt,
+  };
+
   const mark = (words: string, outcome: Outcome): string => {
     if (fielderNum === undefined) return words;
-    const card = scorecard(outcome, fielderNum, fielding);
+    const card = scorecard(outcome, fielderNum, shape);
     return card ? `${words}, ${card}` : words;
   };
 
@@ -2245,7 +2312,16 @@ function describe(
     case 'in_play': {
       const outcome = result.hit.outcome;
       if (fielding?.error) return mark('reached on an error', outcome);
-      if (fielding?.doublePlay) return mark('grounded into a double play', outcome);
+      if (fielding?.triplePlay) return mark('grounded into a TRIPLE PLAY', outcome);
+      if (fielding?.doubledOff) return mark('lined into a double play, doubled off first', outcome);
+      if (fielding?.doublePlay) {
+        return mark(
+          fielding.forceAt === 4
+            ? 'grounded into a double play, home to first'
+            : 'grounded into a double play',
+          outcome,
+        );
+      }
       // ⚠️ "GROUNDED OUT TO SHORT" IS THE WRONG SENTENCE FOR A FORCE PLAY in
       // two ways: he did not ground out — he is standing on first — and the man
       // who is out never left the bag he started on. See FORCE_AT_SECOND.
@@ -2775,12 +2851,23 @@ if (import.meta.env.DEV) {
         game.home.park,
       ),
       verdict: null,
-      runs: outcome === 'home_run' ? 1 : 0,
+      runs: (extra as { runs?: number }).runs ?? (outcome === 'home_run' ? 1 : 0),
       // The hook has to be able to show a force play, or the one caption that
       // needs frame-level tuning is the one it cannot put on the screen.
       forceAt: extra.forceAt,
-      error: false,
-      doublePlay: false,
+      //
+      // ⚠️ AND THE SAME NOW GOES FOR THE FOUR MULTI-OUT PLAYS. `doublePlay` was
+      // hardcoded false here, so the hook could draw the relay and then put
+      // GROUND OUT over it — the exact failure the note above describes, in the
+      // tool built to catch it. A triple play happens once every 190 games and
+      // a throw home on a sacrifice fly is rarer than that; neither is a thing
+      // anybody can wait for while tuning the frame it lands on.
+      error: !!extra.error,
+      doublePlay: !!extra.doublePlay,
+      triplePlay: !!(extra as { triplePlay?: boolean }).triplePlay,
+      doubledOff: !!extra.doubledOff,
+      sacFly: !!(extra as { sacFly?: boolean }).sacFly,
+      thrownOutAt: extra.thrownOut?.at,
       exitVelocity,
       before: situationOf(game, battingSide(game)),
       gameOver: false,
@@ -5349,12 +5436,40 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
       })
       .join('');
 
+  /**
+   * THE GLOVES — the third table, and the one nobody in this league had.
+   *
+   * ⚠️ THE NUMBERS EXISTED AND NOTHING ADDED THEM UP. placement.ts has printed
+   * "6-4-3" beside every out since the scorecard shipped, and its own header
+   * said what was missing: "the moment somebody wants a per-fielder total, the
+   * numbers are already here to add up." Meanwhile gloveOf() decides who plays
+   * shortstop and how often a ball gets booted, so a player could build a
+   * defence, watch it cost him a game, and find no record that anybody had
+   * fielded anything. See FieldLine in stats.ts.
+   *
+   * Same split as the other two: counting columns are the night's, the rate
+   * column is the year's.
+   */
+  const fieldRows = (rows: { name: string; line: FieldLine }[], rates?: StatBook): string =>
+    rows
+      .map((r) => {
+        const year = rates?.field?.[r.name] ?? r.line;
+        return (
+          `<tr><td class="team">${r.name}</td>` +
+          `<td>${chances(r.line)}</td><td>${r.line.po}</td><td>${r.line.a}</td>` +
+          `<td>${r.line.e}</td>` +
+          `<td class="tot">${rate(fpct(year))}</td></tr>`
+        );
+      })
+      .join('');
+
   const panel = (title: string, table: string): string =>
     `<div class="panel"><div class="dim penhead">${title}</div>` +
     `<div style="overflow-x:auto"><table class="line">${table}</table></div></div>`;
 
   const BAT = ['AB', 'H', '2B', '3B', 'HR', 'RBI', 'BB', 'K', 'AVG', 'OPS'];
   const ARM = ['IP', 'H', 'R', 'ER', 'BB', 'K', 'ERA', 'WHIP'];
+  const FLD = ['TC', 'PO', 'A', 'E', 'FPCT'];
 
   // ---- last night, if there is a last night. Both clubs, one panel each,
   // in the order they batted: the visitors hit first and their line goes first.
@@ -5374,13 +5489,26 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
           const arms = Object.entries(box.arm)
             .filter(([, l]) => l.tm === abbr)
             .map(([name, line]) => ({ name, line }));
+          // ⚠️ THE GLOVES ARE THE OTHER CLUB'S. A club's batting line is its
+          // own half of the innings; its FIELDING line is the half it spent on
+          // the grass, which is stamped with its own abbreviation by
+          // recordPlay() — so this filter is right and reads wrong, and that is
+          // worth a sentence rather than a second lookup.
+          const gloves = Object.entries(box.field ?? {})
+            .filter(([, l]) => l.tm === abbr)
+            .sort((a, b) => chances(b[1]) - chances(a[1]))
+            .map(([name, line]) => ({ name, line }));
           return (
             panel(
               `${named(abbr).toUpperCase()} — BATTING`,
               // The rates are the season's, not the night's. See batRows().
               // Without a season they are the night's, which is all there is.
               head(BAT) + `<tbody>${batRows(bats, s?.stats)}</tbody>`,
-            ) + panel(`${abbr} — PITCHING`, head(ARM) + `<tbody>${armRows(arms, false, s?.stats)}</tbody>`)
+            ) +
+            panel(`${abbr} — PITCHING`, head(ARM) + `<tbody>${armRows(arms, false, s?.stats)}</tbody>`) +
+            (gloves.length
+              ? panel(`${abbr} — FIELDING`, head(FLD) + `<tbody>${fieldRows(gloves, s?.stats)}</tbody>`)
+              : '')
           );
         })
         .join('')
@@ -5446,6 +5574,14 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
             clubArms(book, [...you.rotation, ...you.bullpen].map((p) => p.name)),
             true,
           )}</tbody>`,
+      ) +
+      // ⚠️ IN THE ORDER THEY BAT, same as the hitters above, and for the same
+      // reason: this is the list where you decide who to move. A man with six
+      // errors is a man you can sit, and until this table existed the only way
+      // to notice him was to watch every ball he booted.
+      panel(
+        `${you.abbr} — GLOVES`,
+        head(FLD) + `<tbody>${fieldRows(clubGloves(book, you.lineup.map((p) => p.name)))}</tbody>`,
       )
       : '<div class="panel dim">No games played yet.</div>';
 

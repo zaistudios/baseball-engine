@@ -8,6 +8,9 @@ import {
   stretch,
   withPlacement,
   describePlay,
+  scorecard,
+  creditsFor,
+  type PlayShape,
   GAP_FT,
   AT_HIM_FT,
   TRIPLE_GAP_FT,
@@ -400,5 +403,85 @@ describe('the home run rate is the design doc\'s number', () => {
     const outs = t.strikeout + t.popup + t.ground_out + t.line_out;
     expect(outs).toBeCloseTo(0.2, 6);
     expect(t.foul).toBeCloseTo(0.05, 6);
+  });
+});
+
+/**
+ * ⚠️ THE SCORECARD LINE AND THE FIELDING LINE ARE TWO FUNCTIONS OFF ONE SHAPE,
+ * and this is the test that stops them drifting apart. creditsFor() is
+ * deliberately not a parser over scorecard()'s string — see its header — so the
+ * one thing that has to hold is the thing a box score is checked with: THE
+ * PUTOUTS ADD UP TO THE OUTS. A play that records two outs and credits one
+ * putout is a box score that does not balance, and nothing else would catch it.
+ */
+describe('the scorer credits exactly the outs that were made', () => {
+  const OUTS: { name: string; outs: number; outcome: Outcome; num: number; shape: PlayShape }[] = [
+    { name: '6-3', outs: 1, outcome: 'ground_out', num: 6, shape: {} },
+    { name: '3U', outs: 1, outcome: 'ground_out', num: 3, shape: {} },
+    { name: '6-4 force', outs: 1, outcome: 'ground_out', num: 6, shape: { force: 2 } },
+    { name: '5U force at third', outs: 1, outcome: 'ground_out', num: 5, shape: { force: 3 } },
+    { name: '1-2 force at the plate', outs: 1, outcome: 'ground_out', num: 1, shape: { force: 4 } },
+    { name: '6-4-3', outs: 2, outcome: 'ground_out', num: 6, shape: { doublePlay: true, force: 2 } },
+    { name: '2-3', outs: 2, outcome: 'ground_out', num: 2, shape: { doublePlay: true, force: 4 } },
+    { name: '5-4-3 triple', outs: 3, outcome: 'ground_out', num: 5, shape: { triplePlay: true } },
+    { name: 'L6-3', outs: 2, outcome: 'line_out', num: 6, shape: { doubledOff: true } },
+    { name: 'F8', outs: 1, outcome: 'line_out', num: 8, shape: {} },
+    { name: 'P4', outs: 1, outcome: 'popup', num: 4, shape: {} },
+    { name: 'P2 foul', outs: 1, outcome: 'foul_out', num: 2, shape: {} },
+    { name: 'K', outs: 1, outcome: 'strikeout', num: 2, shape: {} },
+  ];
+
+  for (const c of OUTS) {
+    it(`${c.name} credits ${c.outs}`, () => {
+      const credits = creditsFor(c.outcome, c.num, c.shape);
+      expect(credits.po).toHaveLength(c.outs);
+      expect(credits.e).toHaveLength(0);
+      // Everybody credited is a real position. A 0 or a 10 in this list is a
+      // man who does not exist, and game.ts would drop him silently.
+      for (const n of [...credits.po, ...credits.a]) {
+        expect(n).toBeGreaterThanOrEqual(1);
+        expect(n).toBeLessThanOrEqual(9);
+      }
+      // The notation and the credits describe the same play: every man who got
+      // an assist threw the ball, so he is in the line.
+      const line = scorecard(c.outcome, c.num, c.shape);
+      if (c.outcome !== 'strikeout') {
+        for (const n of credits.a) expect(line).toContain(String(n));
+      }
+    });
+  }
+
+  it('charges an error to the man who booted it and retires nobody', () => {
+    const credits = creditsFor('ground_out', 6, { error: true });
+    expect(credits.e).toEqual([6]);
+    expect(credits.po).toHaveLength(0);
+    expect(credits.a).toHaveLength(0);
+    expect(scorecard('ground_out', 6, { error: true })).toBe('E6');
+  });
+
+  it('records nothing at all on a base hit', () => {
+    const credits = creditsFor('single', 7);
+    expect(credits.po).toHaveLength(0);
+    expect(credits.a).toHaveLength(0);
+    expect(credits.e).toHaveLength(0);
+  });
+
+  /**
+   * ⚠️ THE ONE THAT WAS ACTUALLY WRONG ON SCREEN. describePlay() handed
+   * scorecard() a FieldingResult, whose bag field is `forceAt` and not `force`,
+   * so every fielder's choice in the game was scored `6-3` — the notation for a
+   * batter retired at first, which is the one man who was NOT out.
+   */
+  it('writes a force at the bag, not at first', () => {
+    expect(scorecard('ground_out', 6, { force: 2 })).toBe('6-4');
+    expect(scorecard('ground_out', 4, { force: 2 })).toBe('4-6');
+    expect(scorecard('ground_out', 6, {})).toBe('6-3');
+  });
+
+  it('relays a double play through whichever middle infielder did not field it', () => {
+    expect(scorecard('ground_out', 6, { doublePlay: true, force: 2 })).toBe('6-4-3');
+    expect(scorecard('ground_out', 4, { doublePlay: true, force: 2 })).toBe('4-6-3');
+    // The catcher forces at the plate and throws to first. Two outs, no run.
+    expect(scorecard('ground_out', 2, { doublePlay: true, force: 4 })).toBe('2-3');
   });
 });

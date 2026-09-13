@@ -38,9 +38,18 @@ import {
   recordPitch,
   type Staff,
 } from './bullpen.ts';
-import { assignPositions, type Alignment } from './defense.ts';
+import { assignPositions, type Alignment, type Position } from './defense.ts';
 import type { Shift } from './shift.ts';
-import { EMPTY_BOOK, recordAtBat, recordDecision, recordFieldingOut, type StatBook } from './stats.ts';
+import {
+  EMPTY_BOOK,
+  recordAtBat,
+  recordDecision,
+  recordField,
+  recordFieldingOut,
+  type StatBook,
+} from './stats.ts';
+import { creditsFor } from './placement.ts';
+import { POSITION_BY_NUMBER, NUMBER_BY_POSITION } from './defense.ts';
 
 export type Half = 'top' | 'bottom';
 export type Side = 'home' | 'away';
@@ -399,7 +408,14 @@ export interface PlayLog {
 export function recordPlay(
   g: GameState,
   result: AtBatResult,
-  fielding: FieldingResult = CLEAN,
+  /**
+   * `by` rides along when the caller used fieldBall() — it is the scorer's
+   * position, and without it nobody can be credited with the putout. Every
+   * caller that has a real defence behind it passes a DefensivePlay, which
+   * carries it; the ones that do not (tests, the CLI) simply get no fielding
+   * line, which is honest — they had no fielders.
+   */
+  fielding: FieldingResult & { by?: Position } = CLEAN,
   /**
    * The alignment the DEFENCE was in. Only the infield-in case reaches the
    * rules — it holds the man on third — and the rest is geometry that
@@ -435,16 +451,22 @@ export function recordPlay(
     // engine ends up — see stats.ts. The outs are clamped because a double
     // play with two down finishes the half at three, not at four, and innings
     // pitched must not be able to run ahead of the innings played.
-    stats: recordAtBat(g.stats, {
-      batter: batter.name,
-      batterTeam: teamOf(g, side).abbr,
-      pitcher: currentPitcher(g).name,
-      pitcherTeam: teamOf(g, defSide).abbr,
+    stats: recordGloves(
+      recordAtBat(g.stats, {
+        batter: batter.name,
+        batterTeam: teamOf(g, side).abbr,
+        pitcher: currentPitcher(g).name,
+        pitcherTeam: teamOf(g, defSide).abbr,
+        result,
+        error: !!fielding.error,
+        runs: play.runs,
+        outs: Math.min(3, play.outs) - g.outs,
+      }),
+      g,
       result,
-      error: !!fielding.error,
-      runs: play.runs,
-      outs: Math.min(3, play.outs) - g.outs,
-    }),
+      fielding,
+      teamOf(g, defSide).abbr,
+    ),
     [side === 'home' ? 'homeState' : 'awayState']: {
       ...team,
       runs: team.runs + play.runs,
@@ -475,6 +497,61 @@ export function recordPlay(
 
   next = rollHalf(next);
   return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.batterTo) };
+}
+
+/**
+ * CREDIT THE GLOVES — the third book, folded at the same choke point as the
+ * other two.
+ *
+ * ⚠️ IT TURNS SCORER'S NUMBERS INTO NAMES, AND THAT IS THE WHOLE REASON IT LIVES
+ * HERE RATHER THAN IN stats.ts. creditsFor() in placement.ts knows the play and
+ * answers in numbers — 6 made the putout — because it is a file about geometry
+ * and has no rosters in it. stats.ts is keyed by name. This is the one place
+ * that holds both ends: the GameState knows which nine are on the field.
+ *
+ * A strikeout credits the catcher, which is why this does not bail out on
+ * plays with no `by`: only a ball in play needs a fielder named.
+ */
+function recordGloves(
+  book: StatBook,
+  g: GameState,
+  result: AtBatResult,
+  fielding: FieldingResult & { by?: Position },
+  tm: string,
+): StatBook {
+  if (result.kind === 'walk' || result.kind === 'hit_by_pitch') return book;
+  // No defence behind the call — a test or the CLI. Nothing to credit, and
+  // inventing a fielder would be worse than the blank.
+  if (result.kind === 'in_play' && !fielding.by) return book;
+
+  const credits =
+    result.kind === 'strikeout'
+      ? creditsFor('strikeout', 2)
+      : creditsFor(result.hit.outcome, NUMBER_BY_POSITION[fielding.by!], {
+          error: fielding.error,
+          doublePlay: fielding.doublePlay,
+          triplePlay: fielding.triplePlay,
+          doubledOff: fielding.doubledOff,
+          force: fielding.forceAt,
+        });
+
+  const align = fieldingAlignment(g);
+  // ⚠️ NUMBER 1 IS NOT IN THE ALIGNMENT. assignPositions() fills the eight
+  // spots out of the nine-man batting order and leaves P null — the pitcher
+  // comes off the staff, which is what makes this a DH league. A comebacker is
+  // 1-3 and the man who fielded it has to be the one on the mound.
+  const arm = currentPitcher(g).name;
+  const named = (nums: readonly number[]): string[] =>
+    nums
+      .map((n) => (n === 1 ? arm : align[POSITION_BY_NUMBER[n] ?? 'P']?.name))
+      .filter((n): n is string => !!n);
+
+  return recordField(book, {
+    po: named(credits.po),
+    a: named(credits.a),
+    e: named(credits.e),
+    tm,
+  });
 }
 
 const log = (

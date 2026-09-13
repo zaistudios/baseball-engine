@@ -141,13 +141,117 @@ describe('the sacrifice fly', () => {
     expect(s.runs).toBe(0);
   });
 
-  it('leaves the men on first and second where they were', () => {
-    // ponytail: no runner advancing from second on a sac fly. He can tag on a
-    // deep one in real ball; here only the man on third moves.
+  it('leaves the men on first and second alone when nobody rolled a die', () => {
+    // ⚠️ THIS USED TO BE THE RULE AND IS NOW THE FALLBACK. The note here read
+    // "no runner advancing from second on a sac fly. He can tag on a deep one
+    // in real ball; here only the man on third moves" — and that is exactly
+    // what tagUp() fixed. A caller with no advanceRolls (CLEAN, the CLI, every
+    // test written before this) still gets the old frozen behaviour, which is
+    // what this now guards. See the tag-up block below for the real rule.
     const loaded = play(newMatch(), BB, BB, BB);
     const s = recordAtBat(loaded, inPlay('line_out', 120));
     expect(s.runs).toBe(1);
     expect(occupied(s.bases)).toEqual([true, true, false]);
+  });
+});
+
+/**
+ * THE TAG-UP — the other half of the sacrifice fly.
+ *
+ * The man on third has scored on a deep fly since 2026-08-16. The man on SECOND
+ * stood still on every fly ball ever caught in this game, which is the same
+ * play and about as common: measured 0.75 chances a game before it existed.
+ */
+describe('tagging up from second', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  const deep = (a: number, b: number, c: number) =>
+    ({ error: false, doublePlay: false, advanceRolls: [a, b, c] }) as const;
+
+  it('takes third on a deep fly when he goes', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [null, man('b'), null] },
+      inPlay('line_out', SAC_FLY_MIN_EV),
+      ANON,
+      deep(0, 0, 0),
+    );
+    expect(p.outs).toBe(1);
+    expect(occupied(p.bases)).toEqual([false, false, true]);
+    expect(p.bases[2]?.name).toBe('b');
+    expect(p.runs).toBe(0);
+  });
+
+  it('holds him when the roll says hold', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [null, man('b'), null] },
+      inPlay('line_out', SAC_FLY_MIN_EV),
+      ANON,
+      deep(0.99, 0.99, 0.99),
+    );
+    expect(occupied(p.bases)).toEqual([false, true, false]);
+  });
+
+  it('will not let him tag on a ball that was not deep enough', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [null, man('b'), null] },
+      inPlay('line_out', SAC_FLY_MIN_EV - 1),
+      ANON,
+      deep(0, 0, 0),
+    );
+    expect(occupied(p.bases)).toEqual([false, true, false]);
+  });
+
+  it('will not let him tag on an infield popup, however hard it was hit', () => {
+    // Same rule the sacrifice fly learned the hard way: nobody has ever tagged
+    // up on a ball hit straight up over the second baseman.
+    for (const ev of [SAC_FLY_MIN_EV, 100, 122]) {
+      const p = applyAtBat(
+        { outs: 0, bases: [null, man('b'), null] },
+        inPlay('popup', ev),
+        ANON,
+        deep(0, 0, 0),
+      );
+      expect(occupied(p.bases), `popup at ${ev}`).toEqual([false, true, false]);
+    }
+  });
+
+  /**
+   * ⚠️ TWO RUNNERS ON ONE FLY BALL, which is the case the lead-first ordering
+   * exists for: second can only have third because third just emptied.
+   */
+  it('scores the man from third and moves the man from second up behind him', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), man('c')] },
+      inPlay('line_out', SAC_FLY_MIN_EV),
+      ANON,
+      deep(0, 0, 0),
+    );
+    expect(p.runs).toBe(1);
+    expect(p.outs).toBe(1);
+    // 'c' scored, 'b' took third, 'a' never moves on a fly ball.
+    expect(occupied(p.bases)).toEqual([true, false, true]);
+    expect(p.bases[2]?.name).toBe('b');
+    expect(p.bases[0]?.name).toBe('a');
+  });
+
+  it('never moves the man on first — he cannot tag on a fly', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), null, null] },
+      inPlay('line_out', 120),
+      ANON,
+      deep(0, 0, 0),
+    );
+    expect(occupied(p.bases)).toEqual([true, false, false]);
+  });
+
+  it('freezes everybody with two down — there is no tagging on the third out', () => {
+    const p = applyAtBat(
+      { outs: 2, bases: [null, man('b'), man('c')] },
+      inPlay('line_out', 120),
+      ANON,
+      deep(0, 0, 0),
+    );
+    expect(p.outs).toBe(3);
+    expect(p.runs).toBe(0);
   });
 });
 
@@ -866,5 +970,175 @@ describe('the batter stretches', () => {
     );
     expect(occupied(p.bases)).toEqual([true, true, false]);
     expect(p.batterTo).toBe(1);
+  });
+});
+
+/**
+ * ⚠️ THE DOUBLE PLAY WAS ONE LINE — `removeRunner(bases, 0)` — AND IT HELD TWO
+ * BUGS. It always erased the man on FIRST whatever the bases looked like, so
+ * the 2-3 an infield comes in to get could not happen; and it FROZE everybody
+ * else, so the ordinary run-scoring 6-4-3 scored nothing, ever. See turnTwo().
+ */
+describe('the double play, by the bag it was turned at', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  /** The roll as fielding.ts now returns it: two outs, and where the lead one was. */
+  const two = (at: ForceBag, a = 0, b = 0, c = 0) =>
+    ({ error: false, doublePlay: true, forceAt: at, advanceRolls: [a, b, c] }) as const;
+
+  it('scores the man from third on a 6-4-3 with nobody out', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), null, man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      two(2),
+    );
+    expect(p.outs).toBe(2);
+    expect(p.runs).toBe(1);
+    // The batter never reached and the man forced at second is erased.
+    expect(occupied(p.bases)).toEqual([false, false, false]);
+  });
+
+  it('scores NOBODY when the double play is the second and third outs', () => {
+    // The third out is a force. No run counts on it, however far anyone got.
+    const p = applyAtBat(
+      { outs: 1, bases: [man('a'), null, man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      two(2),
+    );
+    expect(p.outs).toBe(3);
+    expect(p.runs).toBe(0);
+  });
+
+  it('cuts the run down at the plate on a 2-3 with the bases loaded', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      two(4),
+    );
+    expect(p.outs).toBe(2);
+    // THE WHOLE POINT OF THE ALIGNMENT: the man from third is out at the plate
+    // instead of scoring, and the two behind him still moved up.
+    expect(p.runs).toBe(0);
+    expect(occupied(p.bases)).toEqual([false, true, true]);
+  });
+
+  it('erases the man forced at THIRD and leaves the one behind him on second', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), null] },
+      inPlay('ground_out'),
+      man('batter'),
+      two(3),
+    );
+    expect(p.outs).toBe(2);
+    expect(p.runs).toBe(0);
+    // 'b' was forced to third and the ball beat him; 'a' is safe at second.
+    expect(p.bases[1]?.name).toBe('a');
+    expect(p.bases[2]).toBeNull();
+  });
+});
+
+describe('the triple play', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+
+  it('takes three outs, scores nobody and clears the bases', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), man('c')] },
+      inPlay('ground_out'),
+      man('batter'),
+      { error: false, doublePlay: false, triplePlay: true, forceAt: 2 },
+    );
+    expect(p.outs).toBe(3);
+    // Every out on it is a force or the play at first, so even the man forced
+    // home with the bases loaded gets nothing.
+    expect(p.runs).toBe(0);
+    expect(occupied(p.bases)).toEqual([false, false, false]);
+  });
+});
+
+/**
+ * The line drive caught on the fly — the only out in this file recorded with a
+ * TAG rather than somebody stepping on something. See DOUBLE_OFF.
+ */
+describe('doubled off first', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  const off = { error: false, doublePlay: false, doubledOff: true } as const;
+
+  it('takes the catch and the man on first, and moves nobody else', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), man('b'), null] },
+      inPlay('line_out', 120),
+      man('batter'),
+      off,
+    );
+    expect(p.outs).toBe(2);
+    expect(p.runs).toBe(0);
+    // 'b' was diving back too. Nobody advances on a line drive.
+    expect(p.bases[0]).toBeNull();
+    expect(p.bases[1]?.name).toBe('b');
+  });
+
+  it('does not also tag anybody up — it is not a fly ball', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [man('a'), null, man('c')] },
+      inPlay('line_out', 120),
+      man('batter'),
+      off,
+    );
+    expect(p.runs).toBe(0);
+    expect(p.bases[2]?.name).toBe('c');
+  });
+});
+
+/**
+ * ⚠️ THE SACRIFICE FLY WAS FREE AND IT WAS THE LAST FREE BASE IN THE GAME. The
+ * man on third scored on every qualifying ball, so a cannon in centre field was
+ * worth nothing on the one play an outfield arm is famous for. See TAG_THROW.
+ */
+describe('the throw home on a sacrifice fly', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  const fly = (armRoll: number) =>
+    ({
+      error: false,
+      doublePlay: false,
+      // THROW_RATE's odds, as rollFielding() hands them over.
+      extraBase: { odds: 0.28, roll: armRoll },
+      advanceRolls: [0.99, 0.99, 0.99] as const,
+    }) as const;
+
+  const deepFly = () => inPlay('line_out', SAC_FLY_MIN_EV);
+
+  it('scores him when the throw is late', () => {
+    const p = applyAtBat({ outs: 0, bases: [null, null, man('c')] }, deepFly(), ANON, fly(0.99));
+    expect(p.outs).toBe(1);
+    expect(p.runs).toBe(1);
+    expect(p.thrownOut).toBeNull();
+  });
+
+  it('cuts him down at the plate when it beats him — two outs, no run', () => {
+    const p = applyAtBat({ outs: 0, bases: [null, null, man('c')] }, deepFly(), ANON, fly(0));
+    expect(p.outs).toBe(2);
+    expect(p.runs).toBe(0);
+    expect(p.thrownOut?.runner.name).toBe('c');
+    expect(p.thrownOut?.at).toBe(4);
+    expect(p.thrownOut?.batter).toBe(false);
+  });
+
+  /**
+   * ⚠️ NOBODY TAGS ON A LINE DRIVE, and exit velocity alone could not say so.
+   * Once LAUNCH_ANGLE widened `line_out` to [10, 38]° a 100mph rope at the
+   * second baseman cleared SAC_FLY_MIN_EV comfortably and scored a man from
+   * third. See SAC_FLY_MIN_ANGLE.
+   */
+  it('does not score anybody on a hard line drive', () => {
+    const rope: AtBatResult = {
+      kind: 'in_play',
+      hit: { ...hit('line_out', 105), launchAngle: 12 },
+    };
+    const p = applyAtBat({ outs: 0, bases: [null, null, man('c')] }, rope, ANON, fly(0.99));
+    expect(p.outs).toBe(1);
+    expect(p.runs).toBe(0);
+    expect(p.bases[2]?.name).toBe('c');
   });
 });

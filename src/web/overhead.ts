@@ -107,8 +107,22 @@ export interface Replay {
   speed: number;
   /** Did he reach first. Rigged from the outcome, never from the geometry. */
   safe: boolean;
-  /** 6-4-3. The relay stops at second and the forced man is erased there. */
+  /**
+   * 6-4-3. The relay stops at a bag, the forced man is erased there, and the
+   * throw goes on to first.
+   *
+   * ⚠️ READ `forceAt` WITH IT. The relay used to be hard-wired to second on
+   * every double play — see drawRace() — so a 2-3 with the bases loaded drew a
+   * ball flying past the catcher out to second base while the caption said the
+   * run did not score.
+   */
   doublePlay: boolean;
+  /**
+   * A LINE DRIVE CAUGHT AND THE MAN ON FIRST DOUBLED OFF. Drawn as the catch
+   * plus one throw to first, which is the whole play: there is no bag anybody
+   * was forced to.
+   */
+  doubledOff?: boolean;
   /**
    * THE BAG A FORCE WAS TAKEN AT — 2, 3 or 4, or undefined for no force.
    * Same numbering runnerPoint() counts in, so the throw, the runner and the
@@ -206,6 +220,7 @@ export function newReplay(o: {
   speed: number;
   safe: boolean;
   doublePlay?: boolean;
+  doubledOff?: boolean;
   forceAt?: ForceBag;
   error?: boolean;
   moves?: RunnerMove[];
@@ -243,6 +258,7 @@ export function newReplay(o: {
     speed: o.speed,
     safe: o.safe,
     doublePlay: !!o.doublePlay,
+    ...(o.doubledOff ? { doubledOff: true } : {}),
     ...(o.forceAt === undefined ? {} : { forceAt: o.forceAt }),
     error: !!o.error,
     moves: o.moves ?? [],
@@ -336,7 +352,12 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
       play: !isFoul(r) && (hasPlayAtFirst(r.plot, chaser) || r.doublePlay),
       fieldedAt,
       doublePlay: r.doublePlay,
-      force: r.forceAt !== undefined,
+      // ⚠️ `force` MEANS "THE PLAY ENDS AT THE BAG", not "a force was taken" —
+      // raceTiming() checks it BEFORE the double play and returns no throw to
+      // first at all. Now that a double play carries the bag it was turned at,
+      // the bare `r.forceAt !== undefined` it used to read would erase the
+      // relay's second leg and leave a 6-4-3 drawn as a 6-4.
+      force: r.forceAt !== undefined && !r.doublePlay,
     }),
   };
 }
@@ -1038,7 +1059,12 @@ function drawRace(
    * ⚠️ ONE VARIABLE FOR THE THROW, THE RUNNER AND THE CALL. Three separate
    * `second`s is how the ball ends up at one bag and the OUT at another.
    */
-  const forceAt: ForceBag = r.doublePlay ? 2 : (r.forceAt ?? 2);
+  // ⚠️ THE DOUBLE PLAY HAS A BAG OF ITS OWN NOW, and `r.doublePlay ? 2` was
+  // throwing it away. core/fielding.ts picks second, third or the plate for the
+  // lead out on a double play exactly as it does on a plain force — so the 2-3
+  // the infield comes in to get was drawn as a ball thrown out to second base,
+  // under a caption saying the run had been cut down at home.
+  const forceAt: ForceBag = r.forceAt ?? 2;
   const forceBag = bagAt(cam, forceAt - 1);
   const race = raceFor(r);
   const { fieldedAt, runMs, throwMs, relayMs } = race;
@@ -1248,6 +1274,22 @@ function drawRace(
   if (caught) {
     // Out in the air, so it is called where the catch happened.
     if (t > fieldedAt) call('OUT', landing, false, 0);
+
+    // ⚠️ ...AND THEN THE THROW BACK IN. A line drive caught with a man on first
+    // is two outs, and the second of them is a man who is not in `moves`, not
+    // in `held` and not the batter — he is erased by the fact of the play, the
+    // same way the forced man is below. Without this the screen showed one out
+    // on a play the book scored as two. See DOUBLE_OFF in core/fielding.ts.
+    if (r.doubledOff) {
+      const back = fieldedAt + 420;
+      throwLeg(landing, first, fieldedAt, back);
+      // He broke on contact and is diving back the way he came. Drawn on the
+      // first-to-second leg, his lead collapsing to nothing — a man who never
+      // got past his secondary and still did not make it.
+      const backK = Math.max(0, Math.min(1, (t - fieldedAt) / 420));
+      drawRunnerDot(ctx, runnerPoint(cam, 1, 2, leadOff(fieldedAt) * (1 - backK)), t > back);
+      if (t > back) call('OUT', first, false);
+    }
     return;
   }
 

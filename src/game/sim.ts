@@ -51,7 +51,7 @@ import { fieldBall, reachOf } from './defense.ts';
 import type { ForceBag } from '../core/fielding.ts';
 
 import { isHit } from '../core/hitTables.ts';
-import { BASES_GAINED, forcedRunners } from '../core/inning.ts';
+import { BASES_GAINED, forcedRunners, isSacrificeFly } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement } from './placement.ts';
 import { pickShift } from './shift.ts';
@@ -106,6 +106,20 @@ export interface AtBatLog {
    * the only thing that says whether the gamble is worth taking.
    */
   stretched?: 'safe' | 'out';
+  /**
+   * WHAT THE DEFENCE TURNED ON THE BALL, all four of the multi-out plays, and
+   * counted for exactly the reason `forceAt` is: each one is a rule with a knob
+   * on it — DOUBLE_PLAY_RATE, TRIPLE_PLAY, DOUBLE_OFF, TAG_THROW — and a
+   * balance run that cannot see them cannot say whether any knob is set right.
+   */
+  doublePlay?: boolean;
+  /** The bag the double play's lead out was taken at. 4 is the run cut down. */
+  dpAt?: ForceBag;
+  triplePlay?: boolean;
+  doubledOff?: boolean;
+  /** A caught fly that moved a man home — and whether the throw beat him. */
+  sacFly?: boolean;
+  sacFlyOut?: boolean;
 }
 
 /**
@@ -264,6 +278,19 @@ export function playAiAtBat(
   let charged = g;
   for (let i = 0; i < pitches; i++) charged = countPitch(charged);
 
+  // THE SACRIFICE FLY, ASKED BEFORE THE PLAY IS APPLIED. Hoisted above
+  // recordPlay() because every clause of it — an out to spare, a man on third —
+  // is a fact about the state the ball was caught in, and recordPlay is about
+  // to take the out and move the runner.
+  const sacFly =
+    result.kind === 'in_play' &&
+    isSacrificeFly(
+      result.hit.outcome,
+      result.hit.exitVelocity,
+      g.outs,
+      g.bases,
+      result.hit.launchAngle,
+    );
   const played = recordPlay(charged, result, fielding, shift);
   return {
     ...played,
@@ -280,6 +307,20 @@ export function playAiAtBat(
         result.kind === 'in_play' && result.hit.outcome === 'ground_out'
           ? fielding?.forceAt
           : undefined,
+      doublePlay: fielding?.doublePlay,
+      dpAt: fielding?.doublePlay ? (fielding.forceAt ?? 2) : undefined,
+      triplePlay: fielding?.triplePlay,
+      doubledOff: fielding?.doubledOff,
+      // ⚠️ ASKED OF THE STATE BEFORE THE PLAY, which is why `g` and not the
+      // state recordPlay just returned: "an out to spare, and a man on third"
+      // are facts about the moment the ball was caught.
+      sacFly,
+      // ⚠️ GATED ON `sacFly`, AND THE FIRST CUT WAS NOT. A man gunned down at
+      // the plate is `thrownOut.at === 4` whether he was tagging on a fly or
+      // running on a base hit, and the second is far commoner — so the bare
+      // test counted six times as many "sacrifice flies cut down" as there were
+      // sacrifice flies, and reported 86% of the sends being thrown out.
+      sacFlyOut: sacFly && played.log.thrownOut?.at === 4,
       stretched: played.log.thrownOut?.batter
         ? 'out'
         : result.kind === 'in_play' &&
@@ -401,6 +442,24 @@ export interface SimResult {
   forceOuts: number;
   /** Of those, the ones taken at THIRD or the PLATE rather than at second. */
   leadForces: number;
+  /**
+   * Double plays turned, both sides — and of those, the ones taken somewhere
+   * other than second.
+   *
+   * ⚠️ COUNTED FOR THE SAME REASON leadForces IS. Every double play in this
+   * game was a 6-4-3 until the bag became a roll, so a balance run that only
+   * knows HOW MANY were turned cannot say whether the 2-3 with the bases loaded
+   * — the whole point of the infield-in call — ever happens.
+   */
+  doublePlays: number;
+  leadDoublePlays: number;
+  /** Triple plays. See TRIPLE_PLAY: about one a season is the target. */
+  triplePlays: number;
+  /** Line drives that doubled a man off first. See DOUBLE_OFF. */
+  doubledOff: number;
+  /** Sacrifice flies, and the men the arm cut down at the plate on one. */
+  sacFlies: number;
+  sacFlyOuts: number;
   /** Batters who went for one more bag than the hit was worth, and made it. */
   stretchSafe: number;
   /** ...and the ones the arm got. See STRETCH_THROW. */
@@ -457,6 +516,12 @@ export function simulateGame(
   let foulOuts = 0;
   let forceOuts = 0;
   let leadForces = 0;
+  let doublePlays = 0;
+  let leadDoublePlays = 0;
+  let triplePlays = 0;
+  let doubledOff = 0;
+  let sacFlies = 0;
+  let sacFlyOuts = 0;
   let stretchSafe = 0;
   let stretchOut = 0;
   let lastHalf = `${g.inning}${g.half}`;
@@ -493,6 +558,14 @@ export function simulateGame(
       forceOuts++;
       if (out.atBat.forceAt > 2) leadForces++;
     }
+    if (out.atBat.doublePlay) {
+      doublePlays++;
+      if ((out.atBat.dpAt ?? 2) > 2) leadDoublePlays++;
+    }
+    if (out.atBat.triplePlay) triplePlays++;
+    if (out.atBat.doubledOff) doubledOff++;
+    if (out.atBat.sacFly) sacFlies++;
+    if (out.atBat.sacFlyOut) sacFlyOuts++;
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -503,7 +576,11 @@ export function simulateGame(
     }
   }
 
-  return { game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces, stretchSafe, stretchOut };
+  return {
+    game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
+    doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
+    stretchSafe, stretchOut,
+  };
 }
 
 /** A one-line box score, for the CLI and for eyeballing a sim run. */

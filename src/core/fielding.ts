@@ -124,6 +124,94 @@ export const LEAD_FORCE = 0.5;
  */
 export const LEAD_FORCE_INFIELD_IN = 0.85;
 
+/**
+ * THE TRIPLE PLAY — the share of double-play balls that become three outs.
+ *
+ * ⚠️ IT IS GATED ON THE SITUATION, NOT ON THE RATE, and that is what keeps it
+ * honest. A triple play needs NOBODY OUT and at least TWO forced runners; every
+ * real one in the sport is that ball. Those two conditions do most of the
+ * rarity on their own — the situation comes up a few times a game at most, and
+ * only the fraction of it that was already turning two is even eligible.
+ *
+ * ⚠️ THE MEASURED NUMBER IS UNUSABLE AND THIS FILE HAS SAID SO TWICE. Real ball
+ * turns roughly ONE TRIPLE PLAY EVERY THREE THOUSAND GAMES. At that rate a
+ * player who finishes ten seasons of this league has a coin-flip chance of ever
+ * seeing one, which is the same argument DOUBLE_PLAY_RATE and ERROR_RATE both
+ * make above: a rule nobody can observe is not a rule, it is a comment.
+ *
+ * MEASURED, not guessed. The qualifying ball — nobody out, two men forced, and
+ * the relay already turning two — comes up about once every NINE games: set to
+ * 1 it fired 1 per 8 over 400 games and set to 0.5 it fired 1 per 19 over 400.
+ * So 0.05 lands a triple play roughly ONCE EVERY 190 GAMES, which is about
+ * sixteen times commoner than the real thing and still a freak event — the same
+ * order of distortion DOUBLE_PLAY_RATE and ERROR_RATE already carry. Re-measure
+ * with scripts/balance.ts, which counts them; over any single run the count is
+ * small enough that the noise is the size of the number.
+ *
+ * ponytail: one shape. The ball is fielded, the lead force is taken, the trail
+ * force is taken, the batter is out at first — 5-4-3 and its cousins. No line
+ * drive caught and doubled off twice, no runner wandering into a tag. Those are
+ * the OTHER two ways to turn three and they are each rarer than this one.
+ */
+export const TRIPLE_PLAY = 0.05;
+
+/**
+ * THE OTHER DOUBLE PLAY — a LINE DRIVE caught on the fly and the man on first
+ * doubled off before he can get back.
+ *
+ * ⚠️ IT IS THE ONLY OUT IN THE GAME RECORDED WITH A TAG, which is why it is
+ * worth having at all. Every other out this engine has ever made is a batter
+ * retired at first, a man forced at a bag, or a ball caught in the air — all of
+ * them somebody stepping on something. A runner who was not forced anywhere and
+ * is put out anyway is a different play, and the file that draws the picture has
+ * a word for it already: `tag` in overhead.ts's steal.
+ *
+ * ⚠️ A LINE DRIVE, NOT A FLY BALL, and the distinction is the whole play. Since
+ * LAUNCH_ANGLE widened `line_out` to [10, 38]° that one outcome covers both the
+ * screamer at the shortstop and the lazy fly to right — see the note in hit.ts.
+ * Nobody has ever been doubled off on the lazy one; he is standing on the bag
+ * watching it the whole way. The caller answers "was this hit on a line" — see
+ * the `lineDrive` option on rollFielding() — and this never fires without it.
+ *
+ * ⚠️ 0.33 IS HIGH BECAUSE THE POPULATION IS SMALL, and both halves were
+ * measured rather than argued. Real ball turns about 0.08 line-drive double
+ * plays per team per game. With this set to 1 the qualifying ball — caught on a
+ * line, man on first, an out to spare — comes up 0.24 times a team a game, so
+ * a third of them is the rate that lands on the real number.
+ *
+ * ponytail: ONE rate across the whole band rather than one for the infield and
+ * a lower one for the outfield. A rope to the shortstop really does double a
+ * man off more often than a sinking liner to left, and defense.ts knows which
+ * it was — the first cut gated on exactly that and the population collapsed to
+ * 0.04, which no rate can turn into 0.08. The honest ceiling is that an outfield
+ * liner doubles a man off slightly too often; split the constant in two when
+ * that is what reads wrong.
+ */
+export const DOUBLE_OFF = 0.33;
+
+/**
+ * WHAT SHARE OF AN ORDINARY THROW'S ODDS a man TAGGING FROM THIRD faces.
+ *
+ * ⚠️ THE SACRIFICE FLY USED TO BE FREE, and it was the last free base left in
+ * the game. Every other advance in this engine is now a bet with a price — the
+ * extra base has gunDown(), the batter's stretch has STRETCH_THROW, the steal
+ * has the catcher's arm — and the run from third on a caught fly simply
+ * happened, on every qualifying ball, forever. So a cannon in centre field was
+ * worth exactly nothing on the one play an outfield arm is most famous for.
+ *
+ * ⚠️ AND IT IS THE LOWEST OF THE THREE ON PURPOSE. He is not running on a read
+ * like the man going first-to-third, and he is not guessing like the batter
+ * stretching: he is standing on the bag, watching the catch, and leaving with a
+ * running start on a ball SAC_FLY_MIN_EV already ruled deep. 0.3 of THROW_RATE
+ * puts an average runner against an average arm near 8%, against a real rate
+ * nearer 3% — high, deliberately, for the same reason every other number in
+ * this file is: a throw home that never beats anybody is a throw nobody watches.
+ *
+ * Tune this before SAC_FLY_MIN_EV. This one decides whether the send is a
+ * gamble; that one decides how often there is a send at all.
+ */
+export const TAG_THROW = 0.3;
+
 // ---------------------------------------------------------- the stretch
 
 /**
@@ -278,11 +366,57 @@ export const isClosePlay = (
 /** Only these can be booted. A popup is caught or it is not, and a strikeout has no fielder. */
 const BOOTABLE: ReadonlySet<Outcome> = new Set<Outcome>(['ground_out', 'line_out']);
 
+/**
+ * HOW MUCH EASIER A BALL IN THE AIR IS TO HANDLE than one on the ground.
+ *
+ * ⚠️ ERRORS ARE AN INFIELD EVENT AND THE FLAT RATE DID NOT KNOW THAT. Both
+ * bootable outcomes paid the same ERROR_RATE, which was defensible while
+ * `line_out` meant a line drive — a ball hit hard at somebody is a genuinely
+ * hard play. It means a fly ball to the outfield now (see LAUNCH_ANGLE in
+ * hit.ts), and a dropped fly is one of the rarer things in baseball: real
+ * fielding percentage is about .983 for infielders and .992 for outfielders,
+ * and an outfielder's chances are mostly balls he has time to get under.
+ *
+ * It was also the arithmetic problem. Giving mistimed swings real fly balls
+ * roughly doubled the `line_out` population, and at the flat rate that alone
+ * pushed errors from 1.46 to 1.65 a game against a real 1.1 — the defence got
+ * worse because the hitters started hitting it in the air, which is backwards.
+ *
+ * ponytail: one multiplier on the outcome, not a per-position error model.
+ * POSITION_DIFFICULTY in game/defense.ts already varies by who is standing
+ * there; this is about what KIND of play it is, which is the axis that was
+ * missing.
+ */
+export const AIR_ERROR_MULT = 0.45;
+
 export interface FieldingResult {
   /** The batter reaches, and nobody is out. */
   error: boolean;
-  /** The batter and the forced runner are both out. */
+  /**
+   * The batter and the forced runner are both out.
+   *
+   * ⚠️ READ `forceAt` WITH IT — it is set on a double play now, and it decides
+   * WHICH man was erased. A 6-4-3 and a 2-3 with the bases loaded are both two
+   * outs and only one of them saved a run.
+   */
   doublePlay: boolean;
+  /**
+   * THREE OUTS ON ONE BALL. `forceAt` carries the lead bag, same as a double
+   * play; the trail force and the play at first are implied, because there is
+   * only one shape — see TRIPLE_PLAY.
+   *
+   * Absent is false, so every caller written before this keeps its behaviour.
+   */
+  triplePlay?: boolean;
+  /**
+   * A LINE DRIVE CAUGHT ON THE FLY AND THE MAN ON FIRST DOUBLED OFF — two outs,
+   * the second of them a TAG rather than a bag. See DOUBLE_OFF.
+   *
+   * It is deliberately NOT `doublePlay`: that flag means the ground-ball force,
+   * which erases a man who was made to run and reads `forceAt` to say where.
+   * Nobody made this man run and there is no bag in it.
+   */
+  doubledOff?: boolean;
   /**
    * THE FIELDER'S CHOICE: a forced man is out AT THIS BAG and the BATTER IS
    * SAFE at first. One out, like the play at first it replaces, and a bag worse
@@ -291,6 +425,12 @@ export interface FieldingResult {
    * 2, 3 or 4 for second, third and the plate — see LEAD_FORCE for which. Only
    * ever set on a ground ball with a man on first; absent means the ordinary
    * play, with the batter retired at first.
+   *
+   * ⚠️ IT ALSO RIDES ON `doublePlay` AND `triplePlay` NOW, where it means the
+   * bag the LEAD out was taken at before the throw went on to first. It used to
+   * be second on every double play in the game, so a grounder with the bases
+   * loaded and the infield in went 6-4-3 and let the run score instead of 2-3,
+   * which is the one double play a manager actually plays for.
    */
   forceAt?: ForceBag;
   /**
@@ -432,6 +572,15 @@ export function rollFielding(
      * Defaults to 1 — the roguelike has no fielders and is unchanged.
      */
     arm?: number;
+    /**
+     * THIS ONE WAS HIT ON A LINE, AT SOMEBODY IN THE INFIELD. The only thing it
+     * unlocks is the double-off — see DOUBLE_OFF, which explains why one
+     * `line_out` outcome now has to carry two completely different plays.
+     *
+     * Defaults to false, so the roguelike and the CLI — neither of which has a
+     * launch angle to hand this off — behave exactly as they always did.
+     */
+    lineDrive?: boolean;
   },
   rng: Rng,
 ): FieldingResult {
@@ -461,17 +610,32 @@ function rollOuts(
     forcedRunners?: number;
     infieldIn?: boolean;
     throwEffect?: ThrowEffect;
+    lineDrive?: boolean;
   },
   rng: Rng,
 ): FieldingResult {
   if (!BOOTABLE.has(outcome)) return CLEAN;
 
   const thrown = opts.throwEffect ?? CLEAN_THROW;
+  // A ball in the air is a much easier chance than one on the ground. See
+  // AIR_ERROR_MULT.
+  const air = outcome === 'line_out' ? AIR_ERROR_MULT : 1;
   const errorChance = Math.max(
     0,
-    Math.min(0.5, ERROR_RATE * (opts.errorMult ?? 1) * thrown.error),
+    Math.min(0.5, ERROR_RATE * (opts.errorMult ?? 1) * thrown.error * air),
   );
   if (rng.next() < errorChance) return { error: true, doublePlay: false };
+
+  // ⚠️ THE LINE DRIVE IS ITS OWN PLAY AND IT ENDS HERE. A ball caught on the fly
+  // cannot be forced at anything — the gate below is about a BATTER who had to
+  // run — so the only second out available on it is the man on first caught off
+  // the bag. See DOUBLE_OFF for why this needs `lineDrive` and not merely
+  // `line_out`.
+  if (outcome === 'line_out') {
+    return opts.lineDrive && opts.forceAtFirst && opts.outs < 2 && rng.next() < DOUBLE_OFF
+      ? { error: false, doublePlay: false, doubledOff: true }
+      : CLEAN;
+  }
 
   // ⚠️ THE FORCE AND THE DOUBLE PLAY NEED DIFFERENT GATES, and hanging both off
   // `canTurnTwo` hid a third of every force out in the game. Turning two needs
@@ -489,18 +653,52 @@ function rollOuts(
       0,
       Math.min(0.95, doublePlayChance(opts.speed) * (opts.dpMult ?? 1) * thrown.dp),
     );
-    if (rng.next() < dp) return { error: false, doublePlay: true };
+    if (rng.next() < dp) {
+      // ⚠️ THE DOUBLE PLAY HAS A BAG NOW, and it is the same question the plain
+      // force already asked — "the front end or the sure one". It was answered
+      // `second` unconditionally for every double play ever turned in this
+      // game, which is why a grounder with the bases loaded and the infield in
+      // could not be the 2-3 the alignment is drawn in to get.
+      const at = forceBag(opts, rng);
+      // ...and with NOBODY OUT and a second man forced behind the first, the
+      // same ball can be three. See TRIPLE_PLAY.
+      const eligible = opts.outs === 0 && Math.max(1, opts.forcedRunners ?? 1) >= 2;
+      if (eligible && rng.next() < TRIPLE_PLAY) {
+        // ⚠️ THE THIRD OUT IS THE ONE HE MAKES BEFORE HE THROWS, and that is why
+        // the bag comes back as SECOND rather than as whatever the lead force
+        // rolled. The shape is 5-4-3: he fields it standing on a bag, retires
+        // the lead man himself, and the relay behind him is the ordinary one to
+        // second and on to first. Going to the lead bag FIRST and then to first
+        // is only ever two outs, which is the double play above.
+        return { error: false, doublePlay: false, triplePlay: true, forceAt: 2 };
+      }
+      return { error: false, doublePlay: true, forceAt: at };
+    }
   }
 
   // He did not turn two, and the throw still mostly goes to a bag rather than
   // to first. See FORCE_AT_SECOND.
   if (rng.next() >= FORCE_AT_SECOND) return { error: false, doublePlay: false };
 
-  // WHICH bag. The lead force is one past the last man who has to run — two
-  // forced runners means third, three means the plate. See LEAD_FORCE.
+  return { error: false, doublePlay: false, forceAt: forceBag(opts, rng) };
+}
+
+/**
+ * WHICH BAG THE FORCE IS TAKEN AT. The lead force is one past the last man who
+ * has to run — two forced runners means third, three means the plate — and the
+ * defence takes it or takes the sure one at second. See LEAD_FORCE.
+ *
+ * ⚠️ IT DRAWS NO DIE WHEN THERE IS NOTHING TO DECIDE. With one man forced the
+ * lead bag IS second and the short-circuit skips the roll, which is what the
+ * inline version did and what keeps a seeded season replaying: every draw taken
+ * here shifts every draw behind it.
+ */
+function forceBag(
+  opts: { forcedRunners?: number; infieldIn?: boolean },
+  rng: Rng,
+): ForceBag {
   const lead = Math.min(4, 1 + Math.max(1, opts.forcedRunners ?? 1)) as ForceBag;
   const goesForLead =
     lead > 2 && rng.next() < (opts.infieldIn ? LEAD_FORCE_INFIELD_IN : LEAD_FORCE);
-
-  return { error: false, doublePlay: false, forceAt: goesForLead ? lead : 2 };
+  return goesForLead ? lead : 2;
 }
