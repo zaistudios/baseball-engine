@@ -49,6 +49,9 @@ import type { Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
 import type { BatterStats } from '../core/hit.ts';
 import { IDENTITIES, type Identity } from './identity.ts';
+// Type-only, so it erases and there is no cycle with look.ts's `import type
+// { Team }` going the other way.
+import type { Uniform } from './look.ts';
 import { loadCustomLeague } from './league.ts';
 import { TALENT_SPREAD } from './tuning.ts';
 import { fillRoster } from './depth.ts';
@@ -2463,6 +2466,19 @@ export interface Team {
    * rank a club by the fences it happens to own.
    */
   park?: Park;
+  /**
+   * WHAT THE CLUB WEARS — see look.ts.
+   *
+   * ⚠️ OPTIONAL, AND ABSENT IS THE ORDINARY CASE. `uniformFor()` hands a club
+   * with no kit one of sixteen by hash of its abbr, so all thirty are dressed
+   * distinctly before anybody authors one and a franchise saved before this
+   * existed keeps loading — the same rule `identity` and `park` follow.
+   *
+   * ⚠️ THE CLUB OWNS THE KIT AND THE PLAYER OWNS ONLY HOW HE DIFFERS. Thirty
+   * uniforms clothe 780 men; putting colours on the player would mean editing
+   * 780 records to change a jersey.
+   */
+  uniform?: Uniform;
 }
 
 /**

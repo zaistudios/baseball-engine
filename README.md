@@ -1,39 +1,87 @@
-# Baseball Engine
+# Basedball
 
-Two things share one core, both TypeScript, both offline-playable single files.
+**An interactive, customizable baseball sim, set in a future the machines are
+taking over.** You play the game — every pitch of your half on the mound, every
+swing of your half at the plate — and you can rewrite the league it is played
+in without touching this repo. TypeScript, one offline-playable html file, no
+install.
 
-- **The baseball game** (`src/game/`, `game.html`) — a whole nine-inning game
-  against the computer, franchise seasons, playoffs. **This is the live work.**
-- **The roguelike** (`src/core/`, `src/web/`, `index.html`) — a retro NES-style
-  batting run: nine encounters, three leagues, you are only ever the batter.
-  On the backburner.
+That is the whole objective. Everything in here is judged against it, and the
+standard orders as **accessible > playable > customizable**.
 
 Personal project. An AI agent team does the engineering, the human does assets
 and direction. Design notes live outside this repo.
 
+## The setting
+
+Baseball has been robotized, and it is still being robotized. Every player is
+**human**, **augmented** or **machine** — `Build` in `src/core/roster.ts` — and
+that spine runs through the clubs (the Albany Holdouts, the Detroit Foundry),
+through how a man fields, and through how he is drawn. **It is not flavour text
+and it is not up for revision.**
+
+⚠️ One thing the setting has lost and has not replaced: in the roguelike, *how
+automated the league is* escalated across a run. The run is gone, so the
+escalation needs a new shape in a thirty-club franchise — rising across seasons,
+or clubs sitting at fixed points while the league drifts. **Undecided on
+purpose. Do not settle it by accident.**
+
+> ⚠️ **THE ROGUELIKE STRUCTURE IS REVOKED — 2026-09-15.** This started as a
+> retro batting roguelike. **The run is over** — no nine encounters, no three
+> leagues, no shop, no money, no power-ups, no chemistry between batting-order
+> slots. It is not on the backburner; it is finished. What survives of it
+> survives as *engine* — `src/core/` — and as the setting above.
+>
+> ⚠️ **`Build` stays. It is the lore, not a remnant** — but it is doing two jobs
+> at once, because `defense.ts:111` also reads it as the **glove**, the only
+> fielding-hands number in the game. **Split them:** keep `build` as the
+> fiction, add a real `glove` rating to `Player`, point `gloveOf()` at that.
+>
+> Not everything is unwired yet. `src/game/` imports `swing.ts`, `overhead.ts`
+> and `plot.ts` out of `src/web/`, so those **move** rather than delete. Until
+> that lands, treat anything naming a division, an encounter, a shop or a
+> power-up as history.
+
 ## Status
 
-**Both are playable end to end, and the baseball game is where the work is.**
+**Playable end to end, and a full 162-game season has been played to a champion.**
 
-- **Basedball** — nine innings against the computer, both halves; a franchise
-  season of a length you set, with a bracket and a champion at the end of it;
-  thirty clubs in thirty ballparks, 26 men to a club, and an editor that lets
-  you rewrite any of it without touching the repo. Shipped as one html file:
-  [the latest release](https://github.com/zaistudios/baseball-engine/releases/latest).
+Nine innings against the computer, both halves; a franchise season of a length
+you set, with a schedule, a trade deadline, a bracket and a champion at the end
+of it; thirty clubs in thirty ballparks, 26 men to a club, and an editor that
+lets you rewrite any of it — club, park, lineup, and every rating and pitch on
+every player. Shipped as one html file:
+[the latest release](https://github.com/zaistudios/baseball-engine/releases/latest).
 
-  **Where the current work is: making a play look like a play.** Three graded
-  presses — the pitch out of the hand, the swing, and the throw on the one play
-  worth stopping the game for — and everything a ball in play can now be: the
-  force, the fielder's choice, the double and triple play, the tag, the relay,
-  the man doubled off, the sacrifice fly and the throw that beats it. Over the
-  top of it, a broadcast that says what just happened: a caption on every ball
-  in play, a card when a big spot arrives, and a **score recap between halves**
-  so the innings stop running together.
-- **The roguelike** — a full nine-encounter run in the browser, or a single
-  encounter in the terminal. Still builds, still passes, not being extended.
+**Where the current work is: making a play look like a play.** Three graded
+presses — the pitch out of the hand, the swing, and the throw on the one play
+worth stopping the game for — and everything a ball in play can now be: the
+force, the fielder's choice, the double and triple play, the tag, the relay,
+the man doubled off, the sacrifice fly and the throw that beats it. Over the
+top of it, a broadcast that says what just happened: a caption on every ball
+in play, a card when a big spot arrives, and a **score recap between halves**
+so the innings stop running together.
+
+🔴 **The top job, found by playing a season on 2026-09-15: there is nobody on
+screen.** `src/game/main.ts` draws a strike zone, a plate, a base widget, the
+ball and a timing bar — and **no batter, no pitcher, no catcher, no bat**. The
+figures went to `src/web/` (the roguelike) along with `drawBatter()` and the
+sprite layer. The engine is more correct than the picture, and the picture is
+what gets judged. Shapes in the at-bat view first; art on top of them second.
+
+⚠️ **`scripts/scenes.ts` cannot see what it is measuring.** Line 180 hardcodes
+`doublePlay: false, error: false, walkOff: false` and `sceneForTake()` is never
+called, so the double play, the error, the walk-off, the strikeout and the walk
+— about a third of all plate appearances, and most of what shipped on 09-12 and
+09-13 — are invisible to it. **Fix the instrument before tuning a caption.** It
+is the fourth time a measurement here has read "fine" while sampling the wrong
+population; see "The rules this codebase is built on".
+
+`✂` marks a file the 09-15 reframe retires. `↗` marks one that **moves** into
+`src/game/` rather than going — `src/game/` imports it today.
 
 ```
-src/core/
+src/core/          the engine. Shared, and it stays.
   rng.ts         seeded RNG (mulberry32) — determinism is a hard requirement
   timing.ts      grade(offsetMs) — pure swing grading, no engine underneath
   delivery.ts    the same, for the mound — when you let go, and what it is worth
@@ -42,28 +90,34 @@ src/core/
   atBat.ts       the count — balls, strikes, walks, fouls, whiff ≠ strikeout
   inning.ts      outs, bases, runs, the sac fly, the double play and the extra base
   pitcher.ts     5 pitch types, 9 arms, and the PLAN each one pitches to
-  run.ts         the roguelike layer — 9 encounters, money, shop, power-ups
-  opponent.ts    the other team's runs, rolled not played — the scoreboard
   baserunning.ts steals — one decision, one stat, one resolution
-  division.ts    the three divisions — how automated the league is
-  roster.ts      players, builds, and chemistry between adjacent lineup slots
+  roster.ts      the player record. `Build` (human/augmented/machine) STAYS —
+                 it is the setting, and the spine the look system hangs on.
+                 ⚠️ defense.ts also reads it as the GLOVE; split that out into a
+                 real `glove` rating. `chemistry` leaves with the roguelike.
+✂ run.ts         9 encounters, money, shop, power-ups
+✂ opponent.ts    the other team's runs, rolled not played
+✂ division.ts    the three divisions — how automated the league is
 
-src/web/
-  main.ts        the at-bat screen on canvas; DOM/CSS for the HUD
-  swing.ts       the bat as a physical object — the level arc, and its geometry
-  sprites.ts     the asset layer: drop a PNG in assets/ and it replaces a shell
-  plot.ts        where a batted ball lands, for the overhead replay
-  overhead.ts    the replay itself — the cut, the nine, the race to first
-  scorecard.ts   the scorer's line and what the booth says
-  save.ts        resuming a run — validated, and refuses a bad blob
-src/cli/
-  play.ts        the same core, played in a terminal
+src/web/           the roguelike's screen. Retired, except where marked.
+✂ main.ts        the roguelike at-bat screen
+↗ swing.ts       the bat as a physical object — the level arc, and its geometry
+↗ plot.ts        where a batted ball lands, for the overhead replay
+↗ overhead.ts    the replay itself — the cut, the nine, the race to first
+↗ sprites.ts     the asset layer. ⚠️ build-time `import.meta.glob`, which does
+                 not survive a league you can edit. It becomes a RUNTIME store
+                 (IndexedDB) holding the PART library — see "The customization
+                 engine" below. Everything below `sprite()` is correct and
+                 stays; only the source of the image changes.
+✂ scorecard.ts   the scorer's line and what the booth says
+✂ save.ts        resuming a run
+✂ src/cli/play.ts   one encounter, played in a terminal
 ```
 
-## The full baseball game (`src/game/`)
+## The game (`src/game/`)
 
-**A whole nine-inning game, both halves played, you against the computer.** No
-roguelike: no run, no shop, no money, no divisions. The engine foundation.
+**A whole nine-inning game, both halves played, you against the computer, in a
+league you can rewrite.** This is the project.
 
 ```
 src/game/
@@ -94,6 +148,10 @@ src/game/
                  break card between halves
   difficulty.ts  how hard the swing is, how fast the ball comes, and how honest
                  the clock is
+  look.ts        how a man LOOKS — six numbers, the named part sets each build
+                 draws from, the club's kit, and the shells until art arrives
+  art.ts         the part library: IndexedDB, and the tint that makes one
+                 drawing serve all thirty clubs. Knows nothing about parts
   tuning.ts      the knobs somebody will actually want to turn
 ```
 
@@ -124,6 +182,90 @@ game in a single 336 kB file with nothing external in it. Double-click it, put i
 on a USB stick, email it to yourself. It is a classic script at the end of
 `<body>` rather than a module, because browsers refuse to fetch ES modules
 across a `file://` origin and opening by double-click is the entire point.
+
+## The customization engine — `src/game/look.ts`, `src/game/art.ts`
+
+**A player's look is DATA, not an asset.** He does not have a picture; he has six
+small numbers that say how to assemble one. That is the whole design, and every
+other decision falls out of it.
+
+```ts
+// on Team — thirty of these dress 780 men. Absent means one of sixteen by hash.
+interface Uniform { primary: string; secondary: string; trim: string }
+
+// on Player — ~30 bytes, so the whole league is ~25 kB and rides the league JSON
+interface Look {
+  frame: number;   // silhouette — biased by power and speed
+  head: number;
+  crest: number;   // hair, helmet, visor, antenna, vent stack
+  tone: number;    // skin for a human, alloy for a machine
+  number: number;  // back number, 1-99
+  wear: number;    // 0..1 — dirt on a human, oxide on a machine
+}
+```
+
+```
+CUSTOMIZE -> a club -> a man      six dropdowns and a live preview, by part NAME
+CUSTOMIZE -> a club               the kit: three native colour inputs
+CUSTOMIZE -> THE ART PACK         import drawings; they replace shells per part
+```
+
+Four rules, and none of them is optional:
+
+1. **`build` picks the part SET, and is not a field on `Look`.** `{ frame: 2 }`
+   means a body on a Holdout and a chassis on a Foundry man. New content for
+   *"the machines are taking over"* is **parts added to the machine set** — no
+   schema change, no new code.
+2. **Colour is a tint, not a drawing.** Parts are drawn once in greyscale and
+   tinted to the club's uniform at composite time, so **one cap serves thirty
+   clubs**. The league needs ~50 small drawings, not 780, and zero on day one —
+   `sprites.ts`'s *null means draw the shell* fallback applies **per part**.
+3. ⚠️ **`frame` is derived FROM power. Power is never derived from `frame`.**
+   A look is presentation and nothing in it may reach a rating, a roll, or a
+   save the sim replays from. This is rule 3 of this codebase, and *"the big guy
+   should hit harder"* is exactly the change somebody makes later without
+   noticing what it costs.
+4. **`lookFor(player, team)` rolls a default from `mulberry32(hash(player.id))`.**
+   Stable, reproducible, and it dresses the entire league with **nothing stored**.
+   A saved `look` overrides the roll; absent means roll.
+
+**Storage splits in two:** `look` records live in the **league JSON** (tiny, and
+they travel when you hand somebody a league), and the **part library lives in
+IndexedDB** — that is the half that grows, it outlives every franchise, and
+localStorage's ~5 MB is already two-thirds spent on the league and a season.
+Nothing look-related goes in the season save; `loadSeason()` refuses what it
+cannot validate, and a bad image must never cost somebody a franchise.
+
+**Naming a drawing.** `<build>-<part>-<part name>.png`, e.g.
+`machine-crest-vent-stack.png`. Matched on the part's NAME and not its index,
+because an index is a thing nobody drawing a vent stack should have to look up.
+`frame`, `head` and `crest` can carry art; **`tone` cannot** — skin and alloy
+are the colour the other three are tinted against. `artSlots()` prints every
+filename the library accepts, and it is one button on the screen.
+
+⚠️ **An index is a promise.** Saved looks point into the lists in `PARTS`, so
+entries may be **appended and renamed** freely and must never be **reordered or
+removed** — that silently redresses everybody pointing at the old position, in
+every league anybody has exported. `checkLeague()` deliberately does *not*
+range-check a look for the same reason: an older build must still open a league
+exported after a new chassis landed. `safeLook()` clamps at the draw instead.
+
+⚠️ **Art does not travel with an exported league**, and that is a known
+limitation rather than an oversight. The league document is JSON in a textarea;
+fifty images are not. A league you hand somebody carries the **looks** and lands
+on their shells until they import the same pack.
+
+⚠️ **Tints are cached, because the draw path runs at 60 Hz.** Re-tinting eleven
+figures a frame is eleven offscreen canvases a frame, and the GDD's own
+acceptance criterion is *sprite assembly under 0.1s*. `tinted()` keys on part
+and colour; a club changing its jersey misses once.
+
+**Still shells, and known:** `Pitcher` carries no `id` and no `build`, so an
+arm's face is rolled from his name and his club (`lookForArm()`) and there is
+nowhere to store a choice — the look block in the editor is hitters only until
+`Pitcher` grows those two fields. And `build` is still doing double duty as the
+**glove** at `defense.ts:111`; splitting a real `glove` rating out is its own
+commit.
 
 ## Getting it onto another machine
 
@@ -1660,7 +1802,15 @@ likelier ways to arrive at that spot.
 never left the floor and the whole thing played as a faint flicker. They scale
 with the card now. A green suite says nothing about a card you cannot see.
 
-## Play it
+## ✂ The roguelike, as history
+
+> **Everything from here to "Art: drop a PNG in a folder" describes the revoked
+> roguelike.** It is kept, not deleted, because the swing geometry and bat-speed
+> sections below document `src/web/swing.ts`, which `src/game/main.ts` still
+> imports and which the at-bat figures will be built on. Read it as a record of
+> how the swing works, not as a description of the game.
+>
+> To play the actual game: **`npm run game`**, and `npm run export` to ship it.
 
 ```bash
 npm run dev     # then open http://localhost:5173
@@ -2282,6 +2432,17 @@ Same seed plus same inputs gives the same at-bat. Agent-written tests are only v
 **4. Every grade the grader can return has a table behind it.**
 
 `TimingGrade` includes `'miss'`, and the outcome tables are a `Record` over that union. Omitting a row is a compile error. In the prototype it was a runtime crash that shipped.
+
+**5. Before you tune anything, check the instrument can see the population you changed.**
+
+This one did not come from the autopsy. It came from being wrong four times in three weeks, always the same way: a measurement that read "fine" while sampling a population nobody plays.
+
+- **`scripts/sensitivity.ts`, 08-25** — never converged; two runs disagreed about the biggest lever in the game, and three of the seven weights in `value.ts` had been tuned against it.
+- **`GAP_FT`, 08-28** — measured over all hits and applied to triples, which is why the game had **zero** triples in 16,479 plate appearances. The league walk rate was correct while no individual's was.
+- **The test suite, 09-03** — 996 green tests, and not one of them could ask whether a person could *reach* the club editor. A suite that passes and a feature that is reachable are independent facts.
+- **`scripts/scenes.ts`, 09-15** — hardcodes `doublePlay: false, error: false, walkOff: false` at line 180 and never calls `sceneForTake()`, so the double play, the error, the walk-off, the strikeout and the walk are invisible to the one instrument that exists to answer "does this caption ever fire". Its own header says *"a tier nothing ever reaches is a tier that does not exist. Read the FIRES column."*
+
+**An aggregate that matches reality is not evidence**, because a broken distribution and a correct one have the same mean. The check is cheap and it is always the same: name the population the change touches, then confirm the instrument samples it.
 
 ### The sign convention, stated once
 

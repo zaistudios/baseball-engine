@@ -336,6 +336,23 @@
         border-top: 1px solid var(--line); padding-top: 6px; margin-top: 2px;
       }
       #start .edmix > span { flex: 1 1 100%; font-size: 9px; letter-spacing: 1px; color: var(--dim); }
+      #start .edmix > span .edtiny { margin-left: 8px; }
+      /* The look preview. It sits beside the part selects rather than above
+         them, because the whole point is watching the figure change as the
+         dropdown next to it moves. */
+      /* ⚠️ THE SIZE IS PINNED IN CSS AS WELL AS ON THE ELEMENT. .edform is a
+         flex row, so a bare canvas stretches to whatever is going spare — the
+         first cut drew a 120x150 figure blown up to fill half the screen. The
+         attributes are the drawing surface; these are the box. */
+      #start canvas.edlook {
+        flex: 0 0 auto; width: 120px; height: 150px;
+        border: 1px solid var(--line); background: #101a12;
+        image-rendering: pixelated; align-self: flex-start;
+      }
+      #start input[type="color"] {
+        width: 44px; height: 26px; padding: 1px; cursor: pointer;
+        background: #0a0f0c; border: 1px solid var(--line);
+      }
       #start .edbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
 
       #start .keys { width: 100%; max-width: 820px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }

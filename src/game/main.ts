@@ -166,9 +166,12 @@ import {
   HITTER_FIELDS,
   IDENTITY_FIELDS,
   PARK_FIELDS,
+  UNIFORM_FIELDS,
   addPerson,
   coerce,
   groupOf,
+  lookFields,
+  lookOf,
   movePerson,
   removePerson,
   replaceClub,
@@ -177,8 +180,12 @@ import {
   withClubField,
   withIdentity,
   withIdentityField,
+  withLookField,
   withParkField,
   withPersonField,
+  withRandomLook,
+  withUniformField,
+  withoutUniform,
   workingCopy,
   type Field,
   type Group,
@@ -250,7 +257,26 @@ import {
   type ForceBag,
   type ThrowEffect,
 } from '../core/fielding.ts';
-import { travelMs, canCheck, batSpeedLabel, CHECK_PULL_MS } from '../web/swing.ts';
+import {
+  travelMs,
+  canCheck,
+  batSpeedLabel,
+  poseAt,
+  isSwinging,
+  REST_POSE,
+  CHECK_PULL_MS,
+} from '../web/swing.ts';
+import {
+  artSlots,
+  clubBuild,
+  drawFigure,
+  idForFilename,
+  lookFor,
+  lookForArm,
+  uniformFor,
+} from './look.ts';
+import { MAX_ART_BYTES, clearArt, hasArt, loadArt, putArt } from './art.ts';
+import type { Build } from '../core/roster.ts';
 import {
   makeCam,
   newReplay,
@@ -2956,6 +2982,47 @@ if (import.meta.env.DEV) {
 const PLATE_Y = 250;
 const ZONE = { x: 160, y: 118, w: 100, h: 108 };
 
+/**
+ * WHERE THE PEOPLE STAND — 2026-09-15, and until this there were none.
+ *
+ * ⚠️ THIS IS THE DEFECT A PLAYED SEASON FOUND, and it was not a bug anywhere in
+ * the engine. drawField() drew a zone, a plate, a base widget, a ball and a
+ * bar, and nothing else: a correct game of baseball with nobody in it. Every
+ * line of the 09-12 playtest file — "does not play like baseball", "scripted,
+ * not fluid", "takes away immersion" — is that, and the engine was right all
+ * along. The picture had gone to the roguelike, which has had a batter, a
+ * sprite layer and a real swing arc for a month.
+ *
+ * ⚠️ EVERY FIGURE IS ASSEMBLED FROM `look.ts` RATHER THAN DRAWN. Building them
+ * as one drawing and retrofitting customization later costs the same today and
+ * loses the seam, so the batter you can see and the batter you can edit arrived
+ * in one commit on purpose.
+ *
+ * Geometry on the 420x340 canvas, which is tight and mostly decided for us:
+ * the zone owns x 160-260, the bar owns y 296+ out to x 276, and the base
+ * widget owns the bottom right from x 315. What is left is a column either side
+ * of the plate and the mound above it.
+ */
+const BATTER_H = 96;
+/** Clear of the zone's left edge at 160, so he never stands in the strike zone. */
+const BATTER_X = 134;
+const BATTER_Y = PLATE_Y + 14;
+const ARM_XY = { x: 210, y: 78, h: 42 };
+/**
+ * ⚠️ THE CATCHER IS TUCKED INTO A 26-PIXEL GAP, and that is the whole of what
+ * this canvas has left. The plate's point reaches y 270 and the delivery bar
+ * starts at y 296, so a foreground catcher — which is how this camera angle is
+ * framed everywhere else in baseball — has nowhere to be. The first cut put him
+ * at h 52 and he stood on top of home plate.
+ *
+ * So he is a head and a pair of shoulders, cropped by the frame the way the
+ * nearest thing to a camera is. ponytail: the honest ceiling is that this view
+ * is 420x340 and carries two instruments across its bottom edge. A real
+ * foreground catcher needs the bar moved or the canvas grown, and both are
+ * bigger decisions than a catcher.
+ */
+const CATCHER_XY = { x: 210, y: 296, h: 30 };
+
 function drawField(now: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -2981,6 +3048,10 @@ function drawField(now: number): void {
     ctx.stroke();
   }
 
+  // THE MAN ON THE MOUND. Before the plate and before the ball, because he is
+  // the furthest thing away and the pitch has to come out over him.
+  drawArm(now);
+
   // Home plate.
   ctx.fillStyle = '#cfd6c4';
   ctx.beginPath();
@@ -2991,6 +3062,9 @@ function drawField(now: number): void {
   ctx.lineTo(180, PLATE_Y + 10);
   ctx.closePath();
   ctx.fill();
+
+  // The hitter and the man behind him, over the plate and under the ball.
+  drawHitter(now);
 
   drawBases();
 
@@ -3190,6 +3264,92 @@ function spotXY(location: PitchLocation, inZone: boolean): [number, number] {
   const off = inZone ? 0.22 : 0.78;
   const { dx, dy } = locationOffset(location);
   return [cx + dx * ZONE.w * off, cy + dy * ZONE.h * off];
+}
+
+/**
+ * THE PITCHER, and the catcher's opposite number in the fiction: both of them
+ * wear the FIELDING club's kit, so your half and their half look different from
+ * each other without anybody being told which is which.
+ *
+ * ⚠️ HIS BUILD COMES FROM HIS CLUB, not from himself. `Pitcher` carries no
+ * `build` — see lookForArm() — so an Albany arm is a holdout and a Detroit arm
+ * is a machine because of who he plays for. It is a hole in the data and the
+ * editor closes it.
+ */
+function drawArm(now: number): void {
+  if (game.over) return;
+  const club = clubInGame(game, fieldingSide(game));
+  const arm = currentPitcher(game);
+  const kit = uniformFor(club);
+
+  // The delivery is the only motion he has: he turns into it as the bar runs,
+  // and he is square again the moment the ball is gone. One number off state
+  // the mound mechanic already keeps, rather than a second animation clock.
+  let turn = 0;
+  if (phase === 'winding') {
+    const sweep = deliveryOf(deliveryPitch).sweepMs;
+    turn = Math.min(1, Math.max(0, (now - deliveryAt) / sweep)) * -0.22;
+  }
+
+  drawFigure(ctx, {
+    look: lookForArm(arm, club),
+    uniform: kit,
+    build: clubBuild(club),
+    x: ARM_XY.x,
+    y: ARM_XY.y,
+    h: ARM_XY.h,
+    stance: 'pitch',
+    turn,
+  });
+}
+
+/**
+ * THE MAN AT THE PLATE, and the man crouched behind him.
+ *
+ * ⚠️ THE BODY TURNS OFF THE SAME POSE TABLE THE BAT DOES. `poseAt()` is
+ * swing.ts's, it is what the roguelike's batter has always used, and reusing it
+ * means the body cannot drift out of step with the barrel — there is one swing
+ * in this codebase and now two things read it.
+ *
+ * ⚠️ A LEFT-HANDER IS THE SAME MAN, MIRRORED, standing on the other side. Two
+ * fields, no second figure, and nothing to keep in step.
+ */
+function drawHitter(now: number): void {
+  if (game.over) return;
+  const batting = clubInGame(game, battingSide(game));
+  const fielding = clubInGame(game, fieldingSide(game));
+  const man = currentBatter(game);
+
+  // The catcher is scenery and has no record anywhere in the engine, so he is
+  // rolled off his club's abbr and wears its kit. ponytail: a nameless man in
+  // the right colours beats inventing a catcher entity nothing else would read.
+  drawFigure(ctx, {
+    look: lookForArm({ ...currentPitcher(game), name: `${fielding.abbr}-catcher` }, fielding),
+    uniform: uniformFor(fielding),
+    build: clubBuild(fielding),
+    x: CATCHER_XY.x,
+    y: CATCHER_XY.y,
+    h: CATCHER_XY.h,
+    stance: 'crouch',
+  });
+
+  const since = swingStartedAt === null ? -1 : now - swingStartedAt;
+  const pose = isSwinging(since, swingTravel) ? poseAt(since, swingTravel) : REST_POSE;
+  const lefty = man.bats === 'L';
+
+  drawFigure(ctx, {
+    look: lookFor(man),
+    uniform: uniformFor(batting),
+    build: man.build,
+    // Mirrored about the plate, so he stands on the other side of it and faces
+    // back in. 2 * 210 is the plate's own centre line.
+    x: lefty ? 420 - BATTER_X : BATTER_X,
+    y: BATTER_Y,
+    h: BATTER_H,
+    stance: 'bat',
+    turn: lefty ? -pose.turn : pose.turn,
+    flip: lefty,
+  });
 }
 
 function drawBall(now: number): void {
@@ -6328,6 +6488,88 @@ function pregame(): void {
    * hangs off. No router, no breadcrumb, no dirty flag — leaving without saving
    * drops the working copy, which is what a cancel is.
    */
+  /**
+   * Fill in every look preview on the screen.
+   *
+   * ⚠️ IT RUNS AFTER innerHTML AND ON EVERY EDIT, and it has to be both. The
+   * canvas is created by the same string that creates the selects, so it cannot
+   * be painted before it exists; and the whole reason it is there is to answer
+   * the change somebody just made, which the input handler deliberately does
+   * NOT redraw the form for — see the note on that listener.
+   *
+   * ponytail: query the canvases and paint them. No component, no observer, no
+   * per-preview state. There are at most a handful open at once, because only
+   * the open man has a form under him.
+   */
+  const paintLookPreviews = (): void => {
+    if (editing === null || editClub === null) return;
+    const club = editing[editClub]!;
+    const kit = uniformFor(club);
+    for (const el2 of grid.querySelectorAll<HTMLCanvasElement>('canvas.edlook')) {
+      const group = el2.dataset['lookGroup'] as Group | undefined;
+      const index = Number(el2.dataset['lookIndex']);
+      if (!group || !Number.isInteger(index)) continue;
+      const who = ((club[group] ?? []) as readonly Player[])[index];
+      const c2 = el2.getContext('2d');
+      if (!who || !c2) continue;
+      c2.clearRect(0, 0, el2.width, el2.height);
+      c2.fillStyle = '#101a12';
+      c2.fillRect(0, 0, el2.width, el2.height);
+      drawFigure(c2, {
+        look: lookOf(who),
+        uniform: kit,
+        build: who.build,
+        x: el2.width / 2,
+        y: el2.height - 12,
+        h: 108,
+        stance: 'bat',
+      });
+    }
+  };
+
+  /** What the last import did, so the screen can say so. Cleared on leaving. */
+  let artSays: readonly string[] = [];
+
+  /**
+   * THE ART PACK — where drawings come in, and the one screen that reports what
+   * did not land.
+   *
+   * ⚠️ IT IS ON THE LEAGUE SCREEN AND NOT INSIDE A PLAYER, because a part is
+   * GLOBAL. `machine/crest/1` is the vent stack every machine in the league
+   * wears; importing it from inside Rustbelt Rhonda's form would say it belonged
+   * to her, and the next person would import it twenty-five more times.
+   *
+   * ⚠️ AN UNMATCHED FILE IS NAMED, NOT DROPPED. That is the 09-03 lesson: a
+   * control that appears to do nothing because the thing it did had no way to
+   * report itself. Somebody who names a file wrong has to be told which name
+   * the game wanted, so the list of every slot is one click away.
+   */
+  const artPanel = (): string => {
+    const slots = artSlots();
+    const have = slots.filter((s) => hasArt(s.id)).length;
+    return (
+      `<div class="edgroup" style="grid-column:1/-1">` +
+      `<div class="edhead">THE ART PACK <i>${have} of ${slots.length}</i></div>` +
+      `<div class="dim" style="line-height:1.7;padding:2px 0 8px">` +
+      'Drawings replace the shells one part at a time, and everything is optional — ' +
+      'a part with no file keeps the shape it already draws. ' +
+      '<b>Draw them in greyscale</b>: each one is tinted to the club that wears it, ' +
+      'so one cap serves all thirty. Name a file after the part it holds — ' +
+      `<i>machine-crest-vent-stack.png</i>. They live on this machine, not in the league ` +
+      'document, so a league you hand somebody lands on their own parts.</div>' +
+      `<div class="edmix"><span>` +
+      `<label class="edtiny" style="cursor:pointer">IMPORT DRAWINGS` +
+      `<input type="file" id="artin" accept="image/*" multiple hidden></label>` +
+      `<button class="edtiny" data-ed-go="artnames">WHAT TO CALL THEM</button>` +
+      `<button class="edtiny" data-ed-go="artclear"${have ? '' : ' disabled'}>REMOVE ALL</button>` +
+      `</span></div>` +
+      (artSays.length
+        ? `<div class="says">${artSays.map((p) => `<div>${escapeText(p)}</div>`).join('')}</div>`
+        : '') +
+      '</div>'
+    );
+  };
+
   const drawEditor = (): void => {
     const league = editing!;
 
@@ -6348,6 +6590,26 @@ function pregame(): void {
             .join('') +
           '</select>'
         );
+      }
+      // ⚠️ THE OPTION'S VALUE IS THE INDEX AND ITS TEXT IS THE PART'S NAME.
+      // That is the whole of Field.kind 'part': a person picks "vent stack" and
+      // the league document stores 1.
+      if (f.kind === 'part') {
+        const at2 = Number(valueOf(on, f));
+        return (
+          `<select ${id}>` +
+          (f.choices ?? [])
+            .map(
+              (c, n) =>
+                `<option value="${n}"${n === at2 ? ' selected' : ''}>${escapeText(c)}</option>`,
+            )
+            .join('') +
+          '</select>'
+        );
+      }
+      // Native, offline, and it hands back exactly the #rrggbb canvas wants.
+      if (f.kind === 'colour') {
+        return `<input type="color" ${id} value="${v || '#888888'}">`;
       }
       if (f.kind === 'number') {
         return (
@@ -6391,6 +6653,7 @@ function pregame(): void {
               `${escapeText(c.name)}</button>`,
           )
           .join('') +
+        artPanel() +
         `<div class="edbar" style="grid-column:1/-1">` +
         `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
         `</button>` +
@@ -6433,7 +6696,34 @@ function pregame(): void {
                 ) +
                 '</div>'
               : '';
-          return `${head}<div class="edform">${rows(fields, who, at)}${mix}</div>`;
+          /**
+           * ⚠️ THE LOOK BLOCK IS HITTERS ONLY, AND THAT IS THE DATA'S FAULT
+           * RATHER THAN A DECISION. `Pitcher` carries no id and no build, so an
+           * arm's face is rolled off his name and his club — lookForArm() — and
+           * there is nowhere on the record to store a choice. Give Pitcher its
+           * own `build` and `look` and this block moves down to cover him.
+           *
+           * ⚠️ THE PREVIEW IS THE POINT. Picking "crest 3" out of a dropdown
+           * with nothing to look at is not customization, it is data entry —
+           * and the parts only mean anything assembled. The canvas is filled in
+           * after this HTML lands; see paintLookPreviews().
+           */
+          const look =
+            g.of === 'hitter'
+              ? `<div class="edmix"><span>how he looks — ` +
+                `${escapeText((who['build'] as string) ?? 'human')} parts, his club's kit` +
+                `<button class="edtiny" data-ed-go="roll" data-group="${g.key}" ` +
+                `data-index="${i}">RANDOMIZE</button></span>` +
+                `<canvas class="edlook" width="120" height="150" ` +
+                `data-look-group="${g.key}" data-look-index="${i}"></canvas>` +
+                rows(
+                  lookFields(((who['build'] as Build) ?? 'human')),
+                  lookOf(who as unknown as Player) as unknown as Record<string, unknown>,
+                  `data-ed="look" data-group="${g.key}" data-index="${i}"`,
+                ) +
+                '</div>'
+              : '';
+          return `${head}<div class="edform">${rows(fields, who, at)}${mix}${look}</div>`;
         })
         .join('');
       return (
@@ -6487,6 +6777,21 @@ function pregame(): void {
         PARK_FIELDS,
         (club.park ?? {}) as unknown as Record<string, unknown>,
         'data-ed="park"',
+      ) +
+      /**
+       * ⚠️ THE KIT DRESSES ALL 26 MEN AND IS THE CHEAPEST EDIT IN HERE. One
+       * club, three colours, and every figure on the screen changes — which is
+       * the whole reason the uniform lives on the club and not on the player.
+       * A club that has never been touched is already wearing one of sixteen
+       * hashed kits, so this block opens on what it is actually wearing.
+       */
+      `<div class="edmix"><span>the kit — three colours, worn by all 26. ` +
+      `a club you have not dressed wears one of sixteen by default` +
+      `<button class="edtiny" data-ed-go="kitclear">RESET</button></span></div>` +
+      rows(
+        UNIFORM_FIELDS,
+        uniformFor(club) as unknown as Record<string, unknown>,
+        'data-ed="uniform"',
       ) +
       '</div></div>' +
       GROUPS.map(list).join('') +
@@ -6620,8 +6925,11 @@ function pregame(): void {
     if (mode === 'league') {
       // The editor is a room off the league screen rather than a mode of its
       // own: you get to it from there and BACK puts you back on it.
-      if (editing) drawEditor();
-      else drawLeague();
+      if (editing) {
+        drawEditor();
+        // The canvases exist only now, and drawEditor() writes innerHTML.
+        paintLookPreviews();
+      } else drawLeague();
       return;
     }
     // The questions you only get to answer once. See the header.
@@ -6732,6 +7040,19 @@ function pregame(): void {
       }
       return;
     }
+    if (kind === 'uniform') {
+      const f = UNIFORM_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withUniformField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+        // Every man on the club just changed colour.
+        paintLookPreviews();
+      }
+      return;
+    }
 
     const group = el2.dataset['group'] as Group | undefined;
     const index = Number(el2.dataset['index']);
@@ -6745,6 +7066,20 @@ function pregame(): void {
       ) as Team[];
       return;
     }
+    if (kind === 'look') {
+      const who = ((club[group] ?? []) as readonly Player[])[index];
+      if (!who) return;
+      const f = lookFields(who.build).find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withLookField(club, group, index, key, coerce(f, el2.value)),
+        ) as Team[];
+        paintLookPreviews();
+      }
+      return;
+    }
     if (kind === 'person') {
       const fields = groupOf(group).of === 'hitter' ? HITTER_FIELDS : ARM_FIELDS;
       const f = fields.find((x) => x.key === key);
@@ -6754,8 +7089,60 @@ function pregame(): void {
           editClub,
           withPersonField(club, group, index, key, coerce(f, el2.value)),
         ) as Team[];
+        // ⚠️ CHANGING HIS BUILD CHANGES WHICH PARTS HIS LOOK MEANS, so the
+        // dropdowns under him are now offering the wrong vocabulary — a human
+        // being shown vent stacks. This is the one person field that has to
+        // redraw the form rather than only the preview.
+        if (key === 'build') drawn();
+        else paintLookPreviews();
       }
     }
+  });
+
+  /**
+   * IMPORTING DRAWINGS.
+   *
+   * ⚠️ EVERY FILE GETS A LINE, INCLUDING THE ONES THAT FAILED. Three things can
+   * go wrong and all three are silent by nature — a name that matches no part,
+   * a file too big, and something that is not an image at all — so each one is
+   * reported by name. A bulk import that quietly took four of seven files is
+   * indistinguishable from a broken button.
+   *
+   * ⚠️ `<input type="file">` AND NOTHING ELSE. Native, offline, multi-select,
+   * no dependency, and it works from a `file://` page — which is the whole
+   * distribution story. The file never leaves the machine.
+   */
+  grid.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    if (input.id !== 'artin' || !input.files) return;
+    const files = [...input.files];
+    input.value = '';
+    void (async () => {
+      const said: string[] = [];
+      let ok = 0;
+      for (const file of files) {
+        const id = idForFilename(file.name);
+        if (!id) {
+          said.push(`${file.name} — no part is called that. See WHAT TO CALL THEM.`);
+          continue;
+        }
+        if (file.size > MAX_ART_BYTES) {
+          said.push(`${file.name} — ${Math.round(file.size / 1024)} kB is too big for a sprite.`);
+          continue;
+        }
+        try {
+          await putArt(id, file);
+          ok++;
+        } catch {
+          said.push(`${file.name} — could not be read as an image.`);
+        }
+      }
+      artSays = [
+        `${ok} drawing${ok === 1 ? '' : 's'} in.`,
+        ...said,
+      ];
+      drawn();
+    })();
   });
 
   grid.addEventListener('click', (e) => {
@@ -6922,6 +7309,28 @@ function pregame(): void {
             : group
               ? { group, index }
               : null;
+      } else if (ed === 'artnames') {
+        artSays = ['Name a file after the part it holds:', ...artSlots().map((s) => s.file)];
+      } else if (ed === 'artclear') {
+        void clearArt().then(() => {
+          artSays = ['Every drawing removed. The shells are back.'];
+          drawn();
+        });
+      } else if (ed === 'kitclear' && at !== null) {
+        // Back to the kit the abbr hashes to, which is what a club that has
+        // never been dressed is already wearing.
+        editing = replaceClub(editing, at, withoutUniform(editing[at]!)) as Team[];
+      } else if (ed === 'roll' && at !== null && group) {
+        editing = replaceClub(
+          editing,
+          at,
+          // ⚠️ Math.random, and it is the one place in this codebase that is
+          // allowed one. Rule 3 bans it from anything the engine replays; this
+          // rolls a FACE, which nothing replays and nothing reads back. Seeding
+          // it would also defeat the button — a deterministic re-roll hands
+          // back the same man every press.
+          withRandomLook(editing[at]!, group, index, Math.random),
+        ) as Team[];
       } else if (at !== null && group) {
         const club = editing[at]!;
         if (ed === 'add') {
@@ -7015,3 +7424,15 @@ function pregame(): void {
 }
 
 pregame();
+
+/**
+ * Bring the part library up.
+ *
+ * ⚠️ IT IS FIRE-AND-FORGET, AND THE GAME DOES NOT WAIT FOR IT. Reading
+ * IndexedDB is async and the title screen is already on. Until it lands every
+ * lookup misses and the shells draw, which is the shipped state and is what an
+ * empty library looks like anyway — so the only visible effect of the delay is
+ * that art appears a frame or two late on the very first screen. Blocking the
+ * boot on a database nobody is required to have would be the worse trade.
+ */
+void loadArt();

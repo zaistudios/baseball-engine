@@ -30,10 +30,11 @@
  */
 
 import type { Team } from './teams.ts';
-import type { Player } from '../core/roster.ts';
+import type { Build, Look, Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
 import type { Identity } from './identity.ts';
 import { ALL_PITCH_TYPES } from '../core/hitTables.ts';
+import { PART_KEYS, lookFor, partNames, safeLook, uniformFor } from './look.ts';
 import {
   BUILDS,
   TRAITS,
@@ -63,8 +64,18 @@ import {
 export interface Field {
   key: string;
   label: string;
-  kind: 'text' | 'line' | 'number' | 'choice';
-  /** For 'choice'. Always a list league.ts will accept. */
+  /**
+   * ⚠️ 'part' IS A CHOICE WHOSE VALUE IS AN INDEX. The screen shows the part's
+   * NAME and the object stores its position, because that is what keeps a look
+   * thirty bytes and what survives somebody renaming "vent stack". It is its
+   * own kind rather than a flag on 'choice' so coerce() cannot forget to turn
+   * the string back into a number — which would write `frame: "2"` into a
+   * league document and fail nowhere until it was drawn.
+   *
+   * 'colour' is a native `<input type="color">`. No picker library.
+   */
+  kind: 'text' | 'line' | 'number' | 'choice' | 'part' | 'colour';
+  /** For 'choice'. Always a list league.ts will accept. For 'part', the names. */
   choices?: readonly string[];
   /** For 'number'. A sane band for the control — NOT a validation rule. */
   min?: number;
@@ -186,6 +197,51 @@ export const ARM_FIELDS: readonly Field[] = [
  * "fastball 6, slider 3, curveball 1" is a legal and readable way to write a
  * mix — and a screen that helpfully rescaled them would fight whoever typed it.
  */
+/**
+ * THE KIT — three colours, and every man on the club wears them.
+ *
+ * ⚠️ IT IS ON THE CLUB AND NOT ON THE PLAYER, which is the whole economy of the
+ * thing: thirty uniforms dress 780 men, and a jersey change is one edit instead
+ * of 780. See look.ts.
+ *
+ * ⚠️ NATIVE COLOUR INPUTS, and no picker library. `<input type="color">` is in
+ * every browser this runs in, works offline, and hands back exactly the
+ * `#rrggbb` the canvas wants.
+ */
+export const UNIFORM_FIELDS: readonly Field[] = [
+  { key: 'primary', label: 'Jersey', kind: 'colour' },
+  { key: 'secondary', label: 'Trousers', kind: 'colour' },
+  { key: 'trim', label: 'Trim', kind: 'colour' },
+];
+
+/**
+ * WHAT A MAN LOOKS LIKE — the four picked parts, his number and his wear.
+ *
+ * ⚠️ IT IS A FUNCTION OF `build`, WHICH IS WHY IT IS NOT A CONSTANT TABLE like
+ * every other block in this file. A human picks from hair and caps and a
+ * machine picks from vent stacks and antennae; one shared list would offer a
+ * holdout a sensor rail. The setting decides the parts — see look.ts.
+ *
+ * ⚠️ CHANGING A MAN'S BUILD CHANGES WHAT THESE MEAN. The indices are read
+ * against the new set, safeLook() clamps anything out of range, and nothing
+ * breaks — he is simply a different-looking man, which is the honest result of
+ * turning a person into a machine.
+ */
+export function lookFields(build: Build): readonly Field[] {
+  return [
+    ...PART_KEYS.map(
+      (k): Field => ({
+        key: k,
+        label: k === 'tone' ? 'skin / alloy' : k,
+        kind: 'part',
+        choices: partNames(build, k),
+      }),
+    ),
+    { key: 'number', label: 'Number', kind: 'number', min: 0, max: 99, step: 1 },
+    { key: 'wear', label: 'Dirt / rust', kind: 'number', min: 0, max: 1, step: 0.05 },
+  ];
+}
+
 export const ARSENAL_FIELDS: readonly Field[] = ALL_PITCH_TYPES.map((p) => ({
   key: p,
   label: p,
@@ -253,8 +309,24 @@ export function coerce(f: Field, raw: string): unknown {
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   }
+  // A part select carries the index in its value and the name in its label, so
+  // what comes back is "2" and what the look stores is 2. See Field.kind.
+  if (f.kind === 'part') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
   return raw;
 }
+
+/**
+ * What the screen should show in a part select — the index, as a string.
+ *
+ * ⚠️ A MAN WITH NO STORED LOOK STILL HAS ONE, and this is where that shows up.
+ * lookFor() rolls him a stable face off his id, so opening the editor on an
+ * untouched player shows the face he has actually been wearing all along rather
+ * than a form full of zeroes that would redress him the moment it was saved.
+ */
+export const lookOf = (who: Player): Look => safeLook(lookFor(who), who.build);
 
 // ------------------------------------------------------------ the setters
 
@@ -329,6 +401,81 @@ export function withPersonField(
   const who = list[index];
   if (!who) return club;
   list[index] = put(who, key, value);
+  return put(club, group, list);
+}
+
+/**
+ * One uniform field — same create-and-drop shape as identity and park.
+ *
+ * ⚠️ IT SEEDS FROM uniformFor(), NOT FROM BLANK. A club with no `uniform` is
+ * already wearing one of the sixteen hashed kits on screen, so opening the
+ * block on three black swatches and forcing somebody to rebuild the kit they
+ * can already see would be a lie about the current state. Touching one colour
+ * materialises the kit it was already wearing, plus that change.
+ */
+export function withUniformField(club: Team, key: string, value: unknown): Team {
+  const next = put({ ...uniformFor(club) }, key, value);
+  return put(club, 'uniform', next);
+}
+
+/** Drop the block, so the club goes back to the kit its abbr hashes to. */
+export const withoutUniform = (club: Team): Team => put(club, 'uniform', undefined);
+
+/**
+ * One field of one man's look.
+ *
+ * ⚠️ THE FIRST EDIT MATERIALISES THE WHOLE RECORD. Writing only the changed key
+ * would leave `{ crest: 3 }` on the player, and lookFor() returns a stored look
+ * WHOLE — so the other five fields would read as undefined, clamp to zero, and
+ * the one part somebody picked would arrive attached to a man they had never
+ * seen. Seeding from lookOf() means the edit is a change to the face he already
+ * had, which is what it looks like on screen.
+ */
+export function withLookField(
+  club: Team,
+  group: Group,
+  index: number,
+  key: string,
+  value: unknown,
+): Team {
+  const list = [...((club[group] ?? []) as readonly Player[])];
+  const who = list[index];
+  if (!who) return club;
+  const next = put(lookOf(who), key, value);
+  list[index] = { ...who, look: safeLook(next, who.build) };
+  return put(club, group, list);
+}
+
+/**
+ * Give him a face nobody chose. The GDD asked for Randomize on the character
+ * screen and it is the cheapest way to see what the part sets actually hold.
+ *
+ * ⚠️ IT ROLLS FROM A THROWAWAY SEED, not from his id — lookFor()'s roll is
+ * deterministic by design, so re-rolling off the id would hand back the same
+ * face every time and read as a dead button.
+ */
+export function withRandomLook(
+  club: Team,
+  group: Group,
+  index: number,
+  roll: () => number,
+): Team {
+  const list = [...((club[group] ?? []) as readonly Player[])];
+  const who = list[index];
+  if (!who) return club;
+  const pick = (n: number): number => Math.min(n - 1, Math.floor(roll() * n));
+  const counts = PART_KEYS.map((k) => partNames(who.build, k).length);
+  list[index] = {
+    ...who,
+    look: {
+      frame: pick(counts[0]!),
+      head: pick(counts[1]!),
+      crest: pick(counts[2]!),
+      tone: pick(counts[3]!),
+      number: 1 + pick(99),
+      wear: roll(),
+    },
+  };
   return put(club, group, list);
 }
 

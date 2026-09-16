@@ -1,9 +1,9 @@
 {
   "name": "baseball-engine",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "private": true,
   "type": "module",
-  "description": "Baseball engine + retro batting roguelike. Personal project.",
+  "description": "Basedball — an interactive, customizable baseball sim. Personal project.",
   "scripts": {
     "play": "node src/cli/play.ts",
     "typecheck": "tsc --noEmit",

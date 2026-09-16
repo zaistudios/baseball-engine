@@ -80,6 +80,19 @@ export interface Player {
    * bug. Swap in a generator if these should differ run to run.
    */
   bio: string;
+  /**
+   * WHAT HE LOOKS LIKE. Optional, and absent is the ordinary case — see
+   * `lookFor()` in game/look.ts, which rolls a stable one off `id` so the whole
+   * league is dressed with nothing stored.
+   *
+   * ⚠️ IT LIVES ON THE PLAYER RECORD ON PURPOSE. That is what makes a look ride
+   * the league document somebody exports, and what makes a traded man keep his
+   * face for free — the record is the thing that moves.
+   *
+   * ⚠️ PRESENTATION ONLY. Nothing here may be read by a rating, a roll, a stat,
+   * or a save the simulation replays from. game/look.ts states the rule in full.
+   */
+  look?: Look;
 }
 
 /** A batter with chemistry already applied. */
@@ -90,6 +103,32 @@ export interface LineupSlot {
   chemistry: string[];
   /** The one item this player carries, if any. */
   item?: { id: string; name: string; synergised: boolean };
+}
+
+/**
+ * Six numbers that say how to assemble a picture of somebody. The indices are
+ * read against the part set his `build` selects, so the same record means
+ * different things on a human and on a machine.
+ *
+ * ⚠️ THE SHAPE LIVES HERE, WITH THE PLAYER RECORD; THE PARTS AND THE DRAWING
+ * LIVE IN game/look.ts. Putting the interface in `game/` would mean `core/`
+ * importing upward to describe its own record, which is the backwards import
+ * the roguelike left behind in src/web and which this project is unwinding
+ * rather than adding to.
+ */
+export interface Look {
+  /** Body silhouette. Defaults biased by power and speed — never the reverse. */
+  frame: number;
+  /** Head, face, or optic array. */
+  head: number;
+  /** Hair, helmet, visor, antenna, vent stack — whatever the build allows. */
+  crest: number;
+  /** Palette index: skin on a human, alloy on a machine. */
+  tone: number;
+  /** Back number, 1–99. */
+  number: number;
+  /** 0..1 — dirt on a human, oxide on a machine. */
+  wear: number;
 }
 
 /**

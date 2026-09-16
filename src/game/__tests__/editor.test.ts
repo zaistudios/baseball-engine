@@ -31,9 +31,16 @@ import {
   withIdentity,
   withIdentityField,
   withPersonField,
+  withLookField,
+  withRandomLook,
+  withUniformField,
+  withoutUniform,
+  lookFields,
+  lookOf,
   workingCopy,
 } from '../editor.ts';
 import { checkLeague } from '../league.ts';
+import { PART_KEYS, partNames, uniformFor } from '../look.ts';
 import { IDENTITIES } from '../identity.ts';
 import { LEAGUE_SOURCE } from '../teams.ts';
 import type { Team } from '../teams.ts';
@@ -315,5 +322,137 @@ describe('the group table', () => {
   it('scopes a fresh id to the club it is on', () => {
     const club = league()[0]!;
     expect(freeId(league(), club).startsWith(`${club.abbr.toLowerCase()}-new`)).toBe(true);
+  });
+});
+
+/**
+ * THE LOOK AND THE KIT — the customization engine's half of this screen.
+ *
+ * Same standard as everything above: an edit is only good if the league still
+ * loads afterwards. These end at checkLeague() for the same reason, and the two
+ * they are really guarding are the pair a person can produce in three clicks —
+ * a colour input that hands back something canvas cannot use, and a part edit
+ * that writes one key onto a man who had no look at all.
+ */
+describe('the kit', () => {
+  it('materialises the hashed kit it was already wearing, plus the change', () => {
+    let l = league();
+    const before = uniformFor(l[0]!);
+    l = replaceClub(l, 0, withUniformField(l[0]!, 'primary', '#a8342c')) as Team[];
+    const after = l[0]!.uniform!;
+    expect(after.primary).toBe('#a8342c');
+    // ⚠️ THE OTHER TWO SURVIVED. Seeding from blank would have reset them, and
+    // the club would silently change trousers when somebody picked a jersey.
+    expect(after.secondary).toBe(before.secondary);
+    expect(after.trim).toBe(before.trim);
+    stillLoads(l);
+  });
+
+  it('drops back to the default when it is cleared', () => {
+    let l = league();
+    l = replaceClub(l, 0, withUniformField(l[0]!, 'trim', '#123456')) as Team[];
+    expect(l[0]!.uniform).toBeDefined();
+    l = replaceClub(l, 0, withoutUniform(l[0]!)) as Team[];
+    expect(l[0]!.uniform).toBeUndefined();
+    stillLoads(l);
+  });
+
+  it('refuses a colour the canvas cannot use', () => {
+    const l = league();
+    const bad = replaceClub(l, 0, {
+      ...l[0]!,
+      uniform: { primary: 'reddish', secondary: '#d8dce0', trim: '#d8b44a' },
+    } as Team) as Team[];
+    expect(said(bad)).toMatch(/uniform primary must be a colour/);
+  });
+});
+
+describe('editing a look', () => {
+  it('writes the WHOLE record on the first touch, not one key', () => {
+    let l = league();
+    const man = l[0]!.lineup[0]!;
+    expect(man.look).toBeUndefined();
+    l = replaceClub(l, 0, withLookField(l[0]!, 'lineup', 0, 'crest', 1)) as Team[];
+    const look = l[0]!.lineup[0]!.look!;
+    expect(look.crest).toBe(1);
+    // ⚠️ THE FAILURE THIS CATCHES: a partial `{ crest: 1 }` would leave the
+    // other five undefined, clamp them to zero at the draw, and hand back a man
+    // nobody chose. Every field has to be a number.
+    for (const k of ['frame', 'head', 'tone', 'number', 'wear'] as const) {
+      expect(typeof look[k], k).toBe('number');
+    }
+    stillLoads(l);
+  });
+
+  it('keeps the face he already had, apart from the part that moved', () => {
+    let l = league();
+    const was = lookOf(l[0]!.lineup[0]!);
+    l = replaceClub(l, 0, withLookField(l[0]!, 'lineup', 0, 'number', 21)) as Team[];
+    expect(l[0]!.lineup[0]!.look).toEqual({ ...was, number: 21 });
+  });
+
+  it('clamps a part his build does not have', () => {
+    let l = league();
+    l = replaceClub(l, 0, withLookField(l[0]!, 'lineup', 0, 'crest', 99)) as Team[];
+    const man = l[0]!.lineup[0]!;
+    expect(man.look!.crest).toBeLessThan(partNames(man.build, 'crest').length);
+    stillLoads(l);
+  });
+
+  it('randomizes inside the build’s own parts', () => {
+    let l = league();
+    // Both ends of the range, so an off-by-one at either edge shows up.
+    for (const roll of [() => 0, () => 0.999999]) {
+      l = replaceClub(l, 0, withRandomLook(l[0]!, 'lineup', 0, roll)) as Team[];
+      const man = l[0]!.lineup[0]!;
+      for (const k of PART_KEYS) {
+        expect(man.look![k], k).toBeLessThan(partNames(man.build, k).length);
+        expect(man.look![k], k).toBeGreaterThanOrEqual(0);
+      }
+      expect(man.look!.number).toBeGreaterThanOrEqual(1);
+      expect(man.look!.number).toBeLessThanOrEqual(99);
+      stillLoads(l);
+    }
+  });
+
+  it('refuses a look that would poison the arithmetic', () => {
+    const l = league();
+    const bad = replaceClub(l, 0, {
+      ...l[0]!,
+      lineup: [
+        { ...l[0]!.lineup[0]!, look: { frame: Number.NaN, head: 0, crest: 0, tone: 0, number: 1, wear: 0 } },
+        ...l[0]!.lineup.slice(1),
+      ],
+    } as Team) as Team[];
+    expect(said(bad)).toMatch(/look frame must be a number/);
+  });
+
+  it('survives the document, which is how a face travels', () => {
+    let l = league();
+    l = replaceClub(l, 0, withLookField(l[0]!, 'lineup', 0, 'tone', 2)) as Team[];
+    l = replaceClub(l, 0, withUniformField(l[0]!, 'primary', '#2f4f8a')) as Team[];
+    const back = JSON.parse(JSON.stringify(l)) as Team[];
+    expect(back[0]!.lineup[0]!.look!.tone).toBe(2);
+    expect(back[0]!.uniform!.primary).toBe('#2f4f8a');
+    stillLoads(back);
+  });
+});
+
+describe('every part on offer is one the build actually has', () => {
+  it('holds for all three builds', () => {
+    for (const build of ['human', 'augmented', 'machine'] as const) {
+      for (const f of lookFields(build)) {
+        if (f.kind !== 'part') continue;
+        expect(f.choices, f.key).toEqual(partNames(build, f.key as (typeof PART_KEYS)[number]));
+        expect(f.choices!.length, f.key).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('coerces a part select back to the index it offered', () => {
+    const f = lookFields('machine').find((x) => x.kind === 'part')!;
+    expect(coerce(f, '2')).toBe(2);
+    // A select cannot hand back nonsense, but a hand-edited DOM can.
+    expect(coerce(f, '')).toBe(0);
   });
 });

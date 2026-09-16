@@ -177,6 +177,49 @@ function checkHitter(raw: unknown, where: string, r: Report): void {
   for (const k of BAT_RATINGS) {
     if (!isRating(p[k])) r.add(where, `${k} must be a number, zero or above.`);
   }
+  if (p['look'] !== undefined) checkLook(p['look'], where, r);
+}
+
+/**
+ * HOW HE LOOKS — six numbers, all optional as a block.
+ *
+ * ⚠️ THE INDICES ARE NOT RANGE-CHECKED HERE, ON PURPOSE. A look points into the
+ * part sets in look.ts, and those GROW — a league exported after a new chassis
+ * lands would be refused by an older build if this checked an upper bound, and
+ * refusing to load somebody's league over a hat is not a trade worth making.
+ * safeLook() clamps at the draw instead, so an unknown part is the wrong
+ * picture for one man rather than a league that will not open.
+ *
+ * What IS refused is the thing that breaks arithmetic: a NaN, an Infinity or a
+ * negative, which is the same rule and the same reasoning as isRating().
+ */
+function checkLook(raw: unknown, where: string, r: Report): void {
+  const l = bag(raw);
+  if (!l) {
+    r.add(where, 'look is not an object — leave it off entirely and one is rolled from his id.');
+    return;
+  }
+  for (const k of ['frame', 'head', 'crest', 'tone', 'number', 'wear']) {
+    if (!isRating(l[k])) r.add(where, `look ${k} must be a number, zero or above.`);
+  }
+}
+
+/**
+ * THE KIT. Present means complete, the same rule a park keeps — every figure on
+ * the screen reads all three, and a jersey with no trousers is a man drawn in
+ * `undefined`, which canvas renders as transparent black and nobody can debug.
+ */
+const isColour = (v: unknown): boolean => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+
+function checkUniform(raw: unknown, where: string, r: Report): void {
+  const u = bag(raw);
+  if (!u) {
+    r.add(where, 'uniform is not an object — leave it off entirely and the club wears a default.');
+    return;
+  }
+  for (const k of ['primary', 'secondary', 'trim']) {
+    if (!isColour(u[k])) r.add(where, `uniform ${k} must be a colour like #1f6b44.`);
+  }
 }
 
 function checkArm(raw: unknown, where: string, r: Report): void {
@@ -362,6 +405,7 @@ function checkClub(raw: unknown, index: number, r: Report): void {
 
   if (t['identity'] !== undefined) checkIdentity(t['identity'], where, r);
   if (t['park'] !== undefined) checkPark(t['park'], where, r);
+  if (t['uniform'] !== undefined) checkUniform(t['uniform'], where, r);
 }
 
 // ------------------------------------------------------------ the whole thing
