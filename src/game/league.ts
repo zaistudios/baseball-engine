@@ -69,6 +69,16 @@ export const TELLS = ['pre_pitch', 'release', 'none'] as const;
 /** Every rating a hitter must carry. Same six as BatterStats, same order. */
 export const BAT_RATINGS = ['power', 'contact', 'vision', 'clutch', 'bunt', 'speed'] as const;
 
+/**
+ * A hitter's ratings that may be left off.
+ *
+ * ⚠️ `glove` IS OPTIONAL SO THAT EVERY LEAGUE EVER EXPORTED STILL LOADS. Absent
+ * is not a hole — gloveOf() in defense.ts derives the same number it did before
+ * the field existed, so an old document plays identically and a new one can say
+ * who can actually field. Required would have refused every save on disk.
+ */
+export const BAT_OPTIONAL = ['glove'] as const;
+
 /** An arm's ratings that may be left off. Each defaults to 1.0 at its read site. */
 export const ARM_OPTIONAL = ['speedBonus', 'break', 'clutch', 'stamina'] as const;
 
@@ -176,6 +186,11 @@ function checkHitter(raw: unknown, where: string, r: Report): void {
   if (!oneOf(p['bats'], HANDS)) r.add(where, "bats must be 'L' or 'R'.");
   for (const k of BAT_RATINGS) {
     if (!isRating(p[k])) r.add(where, `${k} must be a number, zero or above.`);
+  }
+  for (const k of BAT_OPTIONAL) {
+    if (p[k] !== undefined && !isRating(p[k])) {
+      r.add(where, `${k} must be a number, zero or above, or left off entirely.`);
+    }
   }
   if (p['look'] !== undefined) checkLook(p['look'], where, r);
 }

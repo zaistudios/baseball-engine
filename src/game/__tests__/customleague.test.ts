@@ -139,6 +139,24 @@ describe('a rating', () => {
     expect(problemsOf(clubs)).toEqual([]);
   });
 
+  /**
+   * ⚠️ THE CLAIM `glove` WAS MADE OPTIONAL FOR. Every league already exported
+   * is a document with no glove in it, and the field is worth nothing if adding
+   * it refuses them — so "absent is legal" is the load-bearing half, and
+   * "present is checked" is what stops a typo reaching gloveOf().
+   */
+  it('lets a hitter leave off his glove, and checks it when he has one', () => {
+    const clubs = copy();
+    expect(clubs[0]!.lineup[0]!.glove, 'the shipped league authors none').toBeUndefined();
+    expect(problemsOf(clubs)).toEqual([]);
+
+    clubs[0]!.lineup[0]!.glove = 1.4;
+    expect(problemsOf(clubs)).toEqual([]);
+
+    clubs[0]!.lineup[0]!.glove = -1;
+    expect(said(clubs)).toMatch(/glove must be a number/);
+  });
+
   it('lets an arm leave off the ratings that default to one', () => {
     const clubs = copy();
     const arm = clubs[0]!.rotation[0]!;

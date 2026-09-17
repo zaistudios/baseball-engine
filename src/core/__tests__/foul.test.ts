@@ -23,7 +23,7 @@ import {
 import { ALL_OUTCOMES, OUTCOME_TABLES, isOut, isHit, type Outcome } from '../hitTables.ts';
 import { swingAt, isOver } from '../atBat.ts';
 import { makeRng } from '../rng.ts';
-import { plotBatted, FOUL_MAX_FT } from '../../web/plot.ts';
+import { plotBatted, FOUL_MAX_FT } from '../../game/plot.ts';
 
 const FOUL_LINE = 45;
 

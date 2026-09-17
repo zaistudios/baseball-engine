@@ -451,14 +451,23 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   ctx.save();
   ctx.translate(o.x, o.y);
   if (o.flip) ctx.scale(-1, 1);
-  if (o.turn) ctx.rotate(o.turn);
 
   // A crouch folds the legs away and drops everything. One number, applied to
   // the two heights that matter, rather than a second set of proportions.
   const crouch = o.stance === 'crouch';
   const legTop = crouch ? -h * 0.18 : -h * 0.46;
   const torsoTop = crouch ? -h * 0.62 : -h * 0.80;
-  const headR = h * 0.115;
+  // ⚠️ THE HEAD IS DAMPED AGAINST THE FRAME, NOT SCALED WITH IT. At a flat
+  // h * 0.115 the head was 77% of the shoulder width — a bobblehead — and worse,
+  // it ignored `f.w` entirely, so `enormous` widened the body and left the head
+  // alone. Two faults with one cause: the one dimension that says "big man" was
+  // the only one the frame could not reach.
+  //
+  // 0.6 + 0.4 * f.w grows the head by 12% across the frame list while the
+  // shoulders grow by 55%, so a slugger reads as heavy rather than as the same
+  // man drawn wider. Full `f.w` here would put `enormous` back above the old
+  // flat number and undo the fix.
+  const headR = h * 0.095 * (0.6 + 0.4 * f.w);
   // Lifted clear of the shoulders rather than resting on them, so the dark
   // backstop shows through as a neck and the head stops reading as the top of
   // the torso. On a machine under a vent stack it was one unbroken column.
@@ -511,24 +520,53 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   box(-w * 0.44, legTop, legW, -legTop, legFill);
   box(w * 0.1, legTop, legW, -legTop, legFill);
 
+  // ---- ⚠️ THE TURN STARTS HERE, AT THE BELT, AND NOT AT THE FEET.
+  //
+  // `rotate` used to sit up with the translate, which pivoted the whole man
+  // about his shoes. At the pose table's 24° finish that is a 96px lever: he
+  // leaned bodily out of the batter's box like a felled tree instead of turning
+  // on himself, and the taller the figure the worse it got.
+  //
+  // A swing is hips and shoulders over planted feet, so the legs and the shadow
+  // are drawn BEFORE this and stay where they are. Everything above — torso,
+  // number, arms, mitt, bat, head, crest — turns about the belt, which is the
+  // same lever a real one has and about half the travel at the head.
+  if (o.turn) {
+    ctx.translate(0, legTop);
+    ctx.rotate(o.turn);
+    ctx.translate(0, -legTop);
+  }
+
   // ---- torso. Square on a machine, shouldered on a person. A `frame` drawing
   // replaces the whole body — it is the part that carries the jersey, so it is
   // tinted to the club's primary.
   const torsoH = legTop - torsoTop;
-  const drawnFrame = art('frame', look.frame, 0, legTop, w * 1.12, u.primary);
+  /**
+   * ⚠️ THE JERSEY HANGS PAST THE BELT BY EXACTLY WHAT THE TURN OPENS UP. Now
+   * that the body pivots at legTop, the torso's bottom corner swings ABOVE the
+   * legs and a wedge of backstop shows through at the waist — a seam that grows
+   * with the swing and is worst at the pose the eye stops on.
+   *
+   * (w / 2) * sin(turn) is how far that corner lifts, so this is the gap and not
+   * a guess at it. It is zero at rest, which is why it costs the standing figure
+   * nothing: `torsoH` is still measured to the belt, so the number, the arms and
+   * the chassis seam do not move either.
+   */
+  const hem = legTop + (w / 2) * Math.sin(Math.abs(o.turn ?? 0));
+  const drawnFrame = art('frame', look.frame, 0, hem, w * 1.12, u.primary);
   if (drawnFrame) {
     // nothing: the drawing is the torso.
   } else if (machine) {
-    box(-w / 2, torsoTop, w, torsoH, u.primary);
+    box(-w / 2, torsoTop, w, hem - torsoTop, u.primary);
     // The chassis seam — one line, and it is most of what says "not a person".
     box(-w / 2, torsoTop + torsoH * 0.42, w, Math.max(1, h * 0.02), u.trim);
   } else {
     ctx.fillStyle = u.primary;
     ctx.beginPath();
-    ctx.moveTo(-w / 2, legTop);
+    ctx.moveTo(-w / 2, hem);
     ctx.lineTo(-w * 0.44, torsoTop + torsoH * 0.16);
     ctx.quadraticCurveTo(0, torsoTop - torsoH * 0.04, w * 0.44, torsoTop + torsoH * 0.16);
-    ctx.lineTo(w / 2, legTop);
+    ctx.lineTo(w / 2, hem);
     ctx.closePath();
     ctx.fill();
   }
@@ -542,9 +580,24 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   // ---- the number, on the back. ⚠️ ONLY ON A FIGURE BIG ENOUGH TO READ IT.
   // The gate was 40, which let the 42px pitcher through, and two digits across
   // a twelve-pixel chest is noise that looks like a glyph bug.
-  if (h > 60 && look.number > 0) {
+  //
+  // ⚠️ IT GATES ON THE GLYPH SIZE, WHICH IS WHAT LEGIBILITY ACTUALLY IS. The
+  // old `h > 60` was this measurement in disguise and its threshold landed in
+  // the middle of the mound figure's own range: `h` carries the frame's height
+  // multiplier, so at the mound's 58 a `spire` arm is 66 tall and was let
+  // through while a `service chassis` beside him was not — the same pitcher's
+  // number appearing or vanishing on a roll nobody can see.
+  //
+  // 14px is clear of every batter (the leanest draws at 16) and clear of every
+  // arm (the tallest draws at 11), so no frame multiplier can reach across the
+  // gap. Gating on `w` instead does not work, and the reason is worth keeping:
+  // the number's width and the chest's width are both linear in `h`, so their
+  // ratio is the frame's and a wide pitcher passes any width test a wide batter
+  // does.
+  const numFont = Math.round(h * 0.17);
+  if (numFont >= 14 && look.number > 0) {
     ctx.fillStyle = u.trim;
-    ctx.font = `${Math.round(h * 0.17)}px monospace`;
+    ctx.font = `${numFont}px monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.save();
@@ -614,10 +667,24 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
       ctx.fill();
     }
   } else {
+    // ⚠️ `look.head` USED TO DO NOTHING HERE. Only the machine branch above read
+    // it; every other build fell through to one circle, so the editor offered
+    // round / square / narrow and all three drew the same head. A third of the
+    // customization surface was a dropdown that moved no pixels — and the robots
+    // had more face than the people, which is the wrong way round.
     ctx.fillStyle = tone;
     ctx.beginPath();
-    ctx.arc(0, headY, headR, 0, Math.PI * 2);
+    if (look.head === 1) {
+      // Square: a jaw, not a machine's box. The corner radius is what keeps it
+      // on the human side of the line the chassis above already holds.
+      ctx.roundRect(-headR, headY - headR, headR * 2, headR * 2, headR * 0.34);
+    } else if (look.head === 2) {
+      ctx.ellipse(0, headY, headR * 0.76, headR * 1.1, 0, 0, Math.PI * 2);
+    } else {
+      ctx.ellipse(0, headY, headR, headR, 0, 0, Math.PI * 2);
+    }
     ctx.fill();
+    drawFace(ctx, headY, headR);
   }
 
   // ---- crest. The part that most says which league he belongs to, and the one
@@ -644,6 +711,37 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
 }
 
 /**
+ * AN EYE AND A MOUTH. The smallest thing that turns a tone-filled shape into a
+ * person, and the reason `head` was worth making mean something.
+ *
+ * ⚠️ ONE EYE, BECAUSE THE FIGURE IS IN PROFILE. The cap's brim points +x and so
+ * does the bat, the forward arm and the mitt — he is drawn side-on facing the
+ * mound. A second eye would sit on the side of his head the camera cannot see.
+ *
+ * ⚠️ IT SITS BELOW THE BRIM LINE ON PURPOSE. A cap's brim runs from headY-0.22r
+ * to headY+0.12r and is drawn AFTER this, so an eye any higher is painted over
+ * and half the league looks faceless again. Low is also simply where an eye is
+ * under a cap.
+ *
+ * ⚠️ MACHINES DO NOT COME HERE. Their optic is the face and it is drawn with the
+ * head, because on a chassis the lens IS the feature rather than a mark on one.
+ *
+ * Below headR 5 the eye would be a sub-pixel smudge, so it is dropped — the same
+ * gate the number and the wear marks already use, at the size a head needs.
+ */
+function drawFace(ctx: CanvasRenderingContext2D, headY: number, headR: number): void {
+  if (headR < 5) return;
+  ctx.fillStyle = 'rgba(28,22,18,0.82)';
+  ctx.beginPath();
+  // Well forward of centre. At 0.38 it sat near the middle of the head and read
+  // as a nostril; an eye in profile belongs close to the front of the face, and
+  // 0.45 is as far as `narrow` (rx 0.76r) will take it and still be on the head.
+  ctx.arc(headR * 0.45, headY + headR * 0.18, Math.max(1, headR * 0.18), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(headR * 0.26, headY + headR * 0.56, headR * 0.44, Math.max(1, headR * 0.12));
+}
+
+/**
  * Hair, helmet, visor, antenna, vent stack. Split out because it is the part
  * with the most entries and the most future — it is where an art pack will
  * show up first, and a fat switch inside drawFigure would bury the body.
@@ -667,23 +765,31 @@ function drawCrest(
     ctx.fillRect(0, headY - r * 0.22, r * 1.7, r * 0.34);
   };
 
+  // ⚠️ THE THIN DIMENSIONS ARE FLOORED AT A PIXEL. An antenna is 0.18r wide,
+  // which on the man on the mound is 0.99px — the browser draws that as a faint
+  // smear or as nothing, so the crest that says which club he pitches for was
+  // invisible on the one figure you stare at for a whole at-bat. Every other
+  // sub-pixel risk in this file is already floored the same way; these were the
+  // ones nobody had drawn small enough to notice.
+  const px = (v: number): number => Math.max(1, v);
+
   if (machine) {
     switch (crest) {
       case 0:
         ctx.fillStyle = u.primary;
-        ctx.fillRect(-r * 1.1, headY - r * 1.35, r * 2.2, r * 0.42);
+        ctx.fillRect(-r * 1.1, headY - r * 1.35, r * 2.2, px(r * 0.42));
         break;
       case 1: // vent stack
         ctx.fillStyle = u.trim;
-        for (let i = 0; i < 3; i++) ctx.fillRect(-r * 0.8 + i * r * 0.62, headY - r * 1.7, r * 0.3, r * 0.75);
+        for (let i = 0; i < 3; i++) ctx.fillRect(-r * 0.8 + i * r * 0.62, headY - r * 1.7, px(r * 0.3), r * 0.75);
         break;
       case 2: // antenna
         ctx.fillStyle = u.trim;
-        ctx.fillRect(-r * 0.09, headY - r * 2.2, r * 0.18, r * 1.2);
+        ctx.fillRect(-r * 0.09, headY - r * 2.2, px(r * 0.18), r * 1.2);
         break;
       default: // sensor rail
         ctx.fillStyle = u.primary;
-        ctx.fillRect(-r * 1.25, headY - r * 1.2, r * 2.5, r * 0.3);
+        ctx.fillRect(-r * 1.25, headY - r * 1.2, r * 2.5, px(r * 0.3));
         break;
     }
     return;
@@ -731,12 +837,16 @@ function drawCrest(
       ctx.beginPath();
       ctx.arc(0, headY, r * 1.12, Math.PI, 0);
       ctx.fill();
-      ctx.fillRect(-r * 1.12, headY, r * 2.24, r * 1.1);
+      // ⚠️ IT HANGS DOWN THE BACK, NOT ACROSS THE FACE. The full-width slab this
+      // replaces ran to +1.12r and buried the eye and the mouth under it, so one
+      // crest in five drew a man with his face painted out. He is in profile and
+      // his back is -x, which is the only side hair belongs on.
+      ctx.fillRect(-r * 1.12, headY, r * 0.72, r * 1.1);
       break;
     default: // batting helmet — the trim wraps it, which is what makes it read
       cap(u.primary);
       ctx.fillStyle = u.trim;
-      ctx.fillRect(-r * 1.06, headY - r * 0.14, r * 2.12, r * 0.16);
+      ctx.fillRect(-r * 1.06, headY - r * 0.14, r * 2.12, px(r * 0.16));
       break;
   }
 }

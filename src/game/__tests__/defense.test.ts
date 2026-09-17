@@ -76,6 +76,37 @@ describe('the alignment', () => {
     const slow = HOME.lineup.concat(AWAY.lineup).find((p) => p.build === 'augmented' && p.speed < 0.8);
     if (fast && slow) expect(gloveOf(fast)).toBeGreaterThan(gloveOf(slow));
   });
+
+  /**
+   * ⚠️ THE PROMISE `glove?` MAKES: adding the field changed nobody. Nothing in
+   * the shipped league authors one, so every man still gets the number the old
+   * derivation gave him — which is what makes this an additive stat rather than
+   * a re-rating of four hundred players and every league on somebody's disk.
+   */
+  it('leaves every authored man exactly where he was', () => {
+    const derived = (p: Player): number =>
+      (0.7 + p.speed * 0.3) * (p.build === 'machine' ? 1.12 : p.build === 'augmented' ? 0.92 : 1);
+    for (const p of HOME.lineup.concat(AWAY.lineup)) {
+      expect(p.glove, `${p.name} authors a glove`).toBeUndefined();
+      expect(gloveOf(p), p.name).toBeCloseTo(derived(p), 10);
+    }
+  });
+
+  /**
+   * ⚠️ AND THE POINT OF HAVING IT. A glove is a rating, not a look: it has to
+   * reach the sim, and the visible end of that is who stands at shortstop.
+   * Handing the worst pair of legs in the order the best glove has to move him
+   * there, or the field is decorative.
+   */
+  it('puts an authored glove at short, over the legs that used to decide it', () => {
+    const plain = assignPositions(HOME.lineup);
+    const slowest = [...HOME.lineup].sort((a, b) => a.speed - b.speed)[0]!;
+    expect(plain.SS!.id, 'the slowest man already plays short').not.toBe(slowest.id);
+
+    const withGlove = HOME.lineup.map((p) => (p.id === slowest.id ? { ...p, glove: 3 } : p));
+    expect(assignPositions(withGlove).SS!.id).toBe(slowest.id);
+    expect(gloveOf({ ...slowest, glove: 3 })).toBe(3);
+  });
 });
 
 describe('who the ball goes to', () => {

@@ -60,6 +60,25 @@ export interface Player {
   /** Legs. Steals, the extra base, the double play, and beating out a bunt. */
   speed: number;
   /**
+   * THE GLOVE. Range and hands as one multiplier around 1.0 — it decides which
+   * position he is put at, how often a ball he reaches gets booted, and what a
+   * runner risks going first to third on him. gloveOf() in game/defense.ts is
+   * the only read site.
+   *
+   * ⚠️ OPTIONAL, AND ABSENT IS THE ORDINARY CASE. Left off, gloveOf() derives
+   * the same number it always did — legs for range, build for hands — so the
+   * 780 authored men in teams.ts and every league anybody has exported keep
+   * playing EXACTLY as they do today. That is the whole reason this is a `?`
+   * and not a required field: a defensive rating is worth having, and it is not
+   * worth a four-hundred-literal migration to get one, nor worth silently
+   * re-rating somebody else's league on load.
+   *
+   * ⚠️ IT IS A REAL RATING AND IT REACHES THE SIM, unlike `look` above. Editing
+   * it changes who plays shortstop, the error rate behind your arm and the
+   * club's rank on the pre-game card. That is the point of it.
+   */
+  glove?: number;
+  /**
    * Which side he hits from. Feeds platoonContact() in hit.ts.
    *
    * ponytail: no switch hitters. A third value would need its own rule at

@@ -75,6 +75,27 @@ describe('lookup order — specific beats general, and _default catches all', ()
     expect(spriteKeys('ma2')).toEqual(['ma2', '_default']);
     expect(spriteKeys(undefined, 'The Gantry')).toEqual(['the-gantry', '_default']);
   });
+
+  /**
+   * ⚠️ THE OVERHEAD REPLAY IS WHY THERE IS A THIRD RANK. A fielder there is two
+   * things at once — somebody in particular, and whoever is playing short today
+   * — and the art pipeline has to serve both without making anyone draw nine
+   * men per club. `6.png` dresses the position, `hu1.png` beats it for the one
+   * man who has his own drawing, `_default.png` catches the rest.
+   *
+   * The ORDER is the contract. Putting `alt` ahead of the name would mean a
+   * player's own art was silently ignored the moment somebody added a file for
+   * his position, which is a bug with no error message.
+   */
+  it('puts the position between the man and the catch-all', () => {
+    expect(spriteKeys('hu1', 'Cap Mullaney', '6')).toEqual([
+      'hu1',
+      'cap-mullaney',
+      '6',
+      '_default',
+    ]);
+    expect(spriteKeys(undefined, undefined, 'runner')).toEqual(['runner', '_default']);
+  });
 });
 
 /**

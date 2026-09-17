@@ -17,12 +17,17 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
 /**
- * WHICH PAGE WAS BUILT. 'index' is the roguelike, 'game' is the baseball game.
+ * WHICH PAGE WAS BUILT. 'game' is Basedball. 'index' is the frozen roguelike.
  *
  * Passed as argv rather than inferred, because guessing wrong would ship a
  * confident, working, entirely different game.
+ *
+ * ⚠️ THE DEFAULT IS 'game' AND IT USED TO BE 'index'. Nothing builds index.html
+ * any more — src/web is excluded from the build, see tsconfig.json — so the old
+ * default sent a bare run looking for a directory that is never written, which
+ * reads as a broken script rather than as a retired page.
  */
-const page = process.argv[2] ?? 'index';
+const page = process.argv[2] ?? 'game';
 const NAMES = { index: 'basedball-roguelike', game: 'basedball' };
 const TITLES = { index: 'Basedball Roguelike', game: 'Basedball' };
 if (!NAMES[page]) {

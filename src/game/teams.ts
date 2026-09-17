@@ -2664,9 +2664,9 @@ export function wallAt(dirDeg: number, park: Park | undefined): number {
  * The fence a game with no park is played in front of.
  *
  * ⚠️ IT MUST STAY EQUAL TO WALL_FT IN plot.ts, and it is written here rather
- * than imported to keep game code out of the web layer's import graph — the
- * roguelike's plot.ts is a leaf and teams.ts is not. park.test.ts asserts the
- * two agree, which is the cheap half of the alternative.
+ * than imported to keep the league out of the geometry's import graph — plot.ts
+ * is a leaf and teams.ts is not. park.test.ts asserts the two agree, which is
+ * the cheap half of the alternative.
  */
 export const NEUTRAL_WALL_FT = 400;
 

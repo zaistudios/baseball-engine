@@ -71,7 +71,7 @@ export const SPRITE_SPECS: Record<SpriteKind, SpriteSpec> = {
   pitchers: { height: 46, anchor: 'feet' },
   ball: { height: 16, anchor: 'centre' },
   field: { height: 480, anchor: 'centre' },
-  fielders: { height: 14, anchor: 'feet' },
+  fielders: { height: 18, anchor: 'feet' },
 };
 
 /**
@@ -123,10 +123,16 @@ export function indexKey(kind: string, filename: string): string {
  * drop a single `assets/batters/_default.png` and every batter uses it until
  * a more specific file outranks it.
  */
-export function spriteKeys(id?: string, name?: string): string[] {
+export function spriteKeys(id?: string, name?: string, alt?: string): string[] {
   const keys: string[] = [];
   if (id) keys.push(slug(id));
   if (name) keys.push(slug(name));
+  // ⚠️ `alt` SITS BETWEEN THE MAN AND THE CATCH-ALL, and the overhead replay is
+  // what it exists for. A fielder there is both somebody in particular and a
+  // POSITION: `assets/fielders/6.png` should dress whoever is playing short
+  // today, while `assets/fielders/hu1.png` beats it for the one man who has his
+  // own drawing. Three ranks, most specific first, `_default` last as always.
+  if (alt) keys.push(slug(alt));
   keys.push(DEFAULT_KEY);
   return keys;
 }
@@ -216,8 +222,8 @@ function load(cacheKey: string, url: string): void {
  * Null is the normal case during development and the caller's cue to draw its
  * shell. It is never an error.
  */
-export function sprite(kind: SpriteKind, id?: string, name?: string): HTMLImageElement | null {
-  for (const key of spriteKeys(id, name)) {
+export function sprite(kind: SpriteKind, id?: string, name?: string, alt?: string): HTMLImageElement | null {
+  for (const key of spriteKeys(id, name, alt)) {
     const cacheKey = `${kind}/${key}`;
     if (cache.has(cacheKey)) {
       const hit = cache.get(cacheKey);
@@ -272,10 +278,10 @@ export function drawSprite(
   kind: SpriteKind,
   x: number,
   y: number,
-  ref: { id?: string; name?: string } = {},
+  ref: { id?: string; name?: string; alt?: string } = {},
   opts: DrawOpts = {},
 ): boolean {
-  const img = sprite(kind, ref.id, ref.name);
+  const img = sprite(kind, ref.id, ref.name, ref.alt);
   if (!img) return false;
 
   const spec = SPRITE_SPECS[kind];

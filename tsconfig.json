@@ -30,5 +30,20 @@
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+
+  // ⚠️ src/web IS THE ROGUELIKE, AND IT IS FROZEN. Basedball is the project;
+  // the gauntlet through three eras is a mode somebody may build later, and
+  // until then it does not get a vote on what compiles.
+  //
+  // It came out of the build on 2026-09-16 with its render modules — plot,
+  // overhead, swing and sprites, which Basedball's fielding and replay sit on
+  // — moved into src/game/ where their only caller now lives. What is left in
+  // src/web is the roguelike's own screens, and they still import those four
+  // from beside themselves, so THE FOLDER NO LONGER TYPES. That is expected
+  // and it is why it is excluded rather than half-fixed: reviving it means
+  // pointing those four imports at ../game/ and deciding what it shares, which
+  // is a decision for the day somebody wants the mode, not a maintenance tax
+  // on every build between now and then.
+  "exclude": ["src/web"]
 }

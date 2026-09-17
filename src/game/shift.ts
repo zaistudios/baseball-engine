@@ -68,7 +68,7 @@
  * would settle it and no script does that yet.
  */
 
-import { FIELDERS, type Fielder } from '../web/plot.ts';
+import { FIELDERS, type Fielder } from './plot.ts';
 import type { Player } from '../core/roster.ts';
 
 export type Shift = 'straight' | 'left' | 'right' | 'in';

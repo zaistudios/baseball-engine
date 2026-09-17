@@ -150,22 +150,199 @@ describe('an illegal look cannot break a pitch', () => {
     for (const build of ['human', 'augmented', 'machine'] as const) {
       const set = PARTS[build];
       for (let frame = 0; frame < set.frames.length; frame++) {
-        for (let crest = 0; crest < set.crests.length; crest++) {
-          for (const stance of ['bat', 'pitch', 'crouch'] as const) {
-            drawFigure(ctx, {
-              look: { frame, head: 0, crest, tone: 0, number: 8, wear: 0.9 },
-              uniform: u,
-              build,
-              x: 100,
-              y: 200,
-              h: 96,
-              stance,
-            });
+        for (let head = 0; head < set.heads.length; head++) {
+          for (let crest = 0; crest < set.crests.length; crest++) {
+            for (const stance of ['bat', 'pitch', 'crouch'] as const) {
+              drawFigure(ctx, {
+                look: { frame, head, crest, tone: 0, number: 8, wear: 0.9 },
+                uniform: u,
+                build,
+                x: 100,
+                y: 200,
+                h: 96,
+                stance,
+              });
+            }
           }
         }
       }
     }
     expect(calls.length).toBeGreaterThan(100);
+  });
+
+  /**
+   * ⚠️ THE REGRESSION THIS EXISTS FOR: `look.head` was read only by the machine
+   * branch of drawFigure, so round / square / narrow drew the identical circle
+   * on a human and on an augmented man. The editor offered the choice, the
+   * preview did not move, and nothing failed — a dead control is invisible to
+   * every test that only asks "did it throw".
+   *
+   * Recording the ARGUMENTS and not just the call names is the whole point. A
+   * shape change is a different arc/ellipse/roundRect call with different
+   * numbers in it; a count would have passed against the bug.
+   */
+  it('draws a different head for every head part, on every build', () => {
+    const trace = (build: 'human' | 'augmented' | 'machine', head: number): string => {
+      const calls: string[] = [];
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (_t, k: string) => {
+          if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+          return (...a: unknown[]) => {
+            calls.push(`${k}(${a.join(',')})`);
+          };
+        },
+        set: (_t, k: string, v: unknown) => {
+          calls.push(`${k}=${String(v)}`);
+          return true;
+        },
+      }) as unknown as CanvasRenderingContext2D;
+      drawFigure(ctx, {
+        look: { frame: 0, head, crest: 0, tone: 0, number: 8, wear: 0 },
+        uniform: uniformFor(LEAGUE[0]!),
+        build,
+        x: 100,
+        y: 200,
+        h: 96,
+        stance: 'bat',
+      });
+      return calls.join('|');
+    };
+
+    for (const build of ['human', 'augmented', 'machine'] as const) {
+      const drawn = PARTS[build].heads.map((_, i) => trace(build, i));
+      expect(new Set(drawn).size, `${build} heads all draw the same`).toBe(drawn.length);
+    }
+  });
+
+  /**
+   * ⚠️ THE OTHER HALF OF THE SAME FAULT. `headR` was a flat fraction of `h`, so
+   * the head was 77% of the shoulder width AND `enormous` could not touch it —
+   * the frame slider widened the body around a head that never moved. Both
+   * claims are pinned here because either one alone reads as a tuning taste.
+   */
+  it('keeps the head under the shoulders and lets the frame move it', () => {
+    const headWidths: number[] = [];
+    for (let frame = 0; frame < PARTS.human.frames.length; frame++) {
+      const arcs: number[] = [];
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (_t, k: string) => {
+          if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+          return (...a: unknown[]) => {
+            // The round head is one ellipse whose radii are equal — that is the
+            // head and nothing else in the figure is drawn that way.
+            if (k === 'ellipse' && a[2] === a[3]) arcs.push(Number(a[2]));
+          };
+        },
+        set: () => true,
+      }) as unknown as CanvasRenderingContext2D;
+      drawFigure(ctx, {
+        look: { frame, head: 0, crest: 0, tone: 0, number: 8, wear: 0 },
+        uniform: uniformFor(LEAGUE[0]!),
+        build: 'human',
+        x: 100,
+        y: 200,
+        h: 96,
+        stance: 'bat',
+      });
+      const r = arcs[0]!;
+      // Both the head and the shoulders are fractions of the FRAME-SCALED
+      // height, so `f.h` belongs on both sides or `tall` reads as a bobblehead
+      // that is not one.
+      const f = PARTS.human.frames[frame]!;
+      const shoulders = 96 * f.h * 0.3 * f.w;
+      headWidths.push(r * 2);
+      expect(r * 2, `frame ${frame} is a bobblehead`).toBeLessThan(shoulders * 0.72);
+    }
+    // Lean and enormous have to be different heads, or the frame is cosmetic.
+    expect(Math.max(...headWidths)).toBeGreaterThan(Math.min(...headWidths) * 1.08);
+  });
+
+  /**
+   * ⚠️ THE NUMBER GATE HAS TO ANSWER THE SAME WAY FOR EVERY FRAME AT A GIVEN
+   * HEIGHT. It gated on `h`, which the frame's own height multiplier scales, so
+   * raising the mound figure to 58 would have put a `spire` arm over the line
+   * and a `service chassis` under it — one pitcher wearing a number and the next
+   * one not, off a roll nobody can see.
+   *
+   * Both claims below are the ones that would break if somebody moved the gate
+   * back to a height: every batter keeps his number, no arm gets one.
+   */
+  it('puts a number on every batter and on no pitcher', () => {
+    const wearsNumber = (build: 'human' | 'augmented' | 'machine', frame: number, h: number): boolean => {
+      let drew = false;
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (_t, k: string) => {
+          if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+          return (...a: unknown[]) => {
+            if (k === 'fillText' && a[0] === '42') drew = true;
+          };
+        },
+        set: () => true,
+      }) as unknown as CanvasRenderingContext2D;
+      drawFigure(ctx, {
+        look: { frame, head: 0, crest: 1, tone: 0, number: 42, wear: 0 },
+        uniform: uniformFor(LEAGUE[0]!),
+        build,
+        x: 100,
+        y: 200,
+        h,
+        stance: h === 96 ? 'bat' : 'pitch',
+      });
+      return drew;
+    };
+
+    for (const build of ['human', 'augmented', 'machine'] as const) {
+      for (let frame = 0; frame < PARTS[build].frames.length; frame++) {
+        const name = `${build} frame ${frame}`;
+        expect(wearsNumber(build, frame, 96), `batter ${name} lost his number`).toBe(true);
+        expect(wearsNumber(build, frame, 58), `pitcher ${name} wears one he has no room for`).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * ⚠️ THE SWING USED TO PIVOT ABOUT THE FEET. `rotate` sat with the translate,
+   * so the pose table's 24° finish swung a 96px lever and the batter leaned
+   * bodily out of the box — a man toppling, not a man turning.
+   *
+   * The claim is structural, so the test is too: the legs and the shadow have to
+   * be laid down BEFORE any rotate, and a rotate has to happen after them. A
+   * pixel assertion would need a canvas and would not say which of the two
+   * mistakes it caught.
+   */
+  it('plants the feet and turns from the belt', () => {
+    const order: string[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k: string) => {
+        if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+        return (...a: unknown[]) => {
+          if (k === 'rotate' && a[0] !== 0) order.push('rotate');
+          if (k === 'fillRect' || k === 'ellipse') order.push(k);
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+
+    drawFigure(ctx, {
+      look: { frame: 1, head: 0, crest: 1, tone: 0, number: 8, wear: 0 },
+      uniform: uniformFor(LEAGUE[0]!),
+      build: 'human',
+      x: 100,
+      y: 200,
+      h: 96,
+      stance: 'bat',
+      turn: 0.42,
+    });
+
+    const turnedAt = order.indexOf('rotate');
+    expect(turnedAt, 'nothing rotates — the turn was dropped').toBeGreaterThan(-1);
+    // The shadow is the one ellipse before the legs, and the legs are the first
+    // two fillRects. All three are ground contact and none of them may swing.
+    expect(order.indexOf('ellipse'), 'the shadow swings with him').toBeLessThan(turnedAt);
+    expect(
+      order.filter((c, i) => c === 'fillRect' && i < turnedAt).length,
+      'the legs swing with him',
+    ).toBe(2);
   });
 });
 

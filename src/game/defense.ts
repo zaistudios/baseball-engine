@@ -10,15 +10,15 @@
  * WHAT THIS ADDS, and the ladder rung it sits on: almost none of the geometry
  * is new. `plotBatted()` already turns exit velocity and launch angle into a
  * landing spot, and `nearestFielder()` already answers who is closest to it —
- * both written for the roguelike's overhead replay, both already tested. This
- * file assigns REAL PLAYERS to those nine slots and lets their stats decide
- * whether the play gets made.
+ * both written for the overhead replay, both already tested. This file assigns
+ * REAL PLAYERS to those nine slots and lets their stats decide whether the play
+ * gets made.
  *
- * ponytail, on the layering: this imports from `web/plot.ts`, which is a
+ * ponytail, on the layering: this imports from `plot.ts`, which is a
  * presentation module, and that is the wrong direction on paper. The functions
  * taken are pure geometry with no DOM in them, and moving them to core/ would
- * touch every roguelike import for no behavioural gain. If core/ ever needs
- * them too, move them then.
+ * touch every caller for no behavioural gain. If core/ ever needs them too,
+ * move them then.
  *
  * STILL NOT A FIELDING SIMULATION. No shifts, no cutoff men, no assists, no
  * runner-specific throws, no scorer deciding hit-or-error. One alignment, one
@@ -38,7 +38,7 @@ import { isHit } from '../core/hitTables.ts';
 import { SAC_FLY_MIN_ANGLE } from '../core/inning.ts';
 import type { Placement } from './placement.ts';
 import type { Rng } from '../core/rng.ts';
-import { plotBatted, nearestFielder } from '../web/plot.ts';
+import { plotBatted, nearestFielder, type Fielder } from './plot.ts';
 
 export type Position = 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF' | 'DH';
 
@@ -97,19 +97,55 @@ const FILL_ORDER: readonly Position[] = ['SS', 'CF', '2B', '3B', 'C', 'RF', 'LF'
 export type Alignment = Readonly<Record<Position, Player | null>>;
 
 /**
- * A player's glove, derived rather than stored.
+ * A player's glove: his own if he has been given one, otherwise derived.
  *
- * ponytail: `Player` has no fielding stat and adding one means touching the
- * roster the roguelike shares. Legs are most of range and the build says
+ * ⚠️ THE FUNCTION SURVIVED THE STAT, and that is deliberate. The note this
+ * replaces said "add it to Player and delete this function" — but deleting it
+ * would make `glove` REQUIRED, and required means editing four hundred authored
+ * literals in teams.ts and refusing every league anybody has already exported.
+ * Keeping the derivation as the default costs one `??` and buys a field that is
+ * free to leave off, which is what makes the stat additive instead of a
+ * migration.
+ *
+ * ⚠️ SO ABSENT IS NOT "NO GLOVE", IT IS "THE OLD ANSWER". Nothing in the shipped
+ * league carries one yet, so this commit changes no game that has been played.
+ * The first authored glove is the first behaviour change, and it will be
+ * somebody typing it.
+ *
+ * The derivation itself is unchanged: legs are most of range, and the build says
  * something honest about hands — the machines were manufactured to be
- * consistent, the augmented traded control for power. When a real `glove`
- * stat is worth having, add it to Player and delete this function; every
- * caller already goes through it.
+ * consistent, the augmented traded control for power.
  */
 export function gloveOf(p: Player): number {
+  if (p.glove !== undefined) return p.glove;
   const range = 0.7 + p.speed * 0.3;
   const hands = p.build === 'machine' ? 1.12 : p.build === 'augmented' ? 0.92 : 1.0;
   return range * hands;
+}
+
+/**
+ * Put the man who is actually playing each position onto the nine spots.
+ *
+ * ⚠️ THIS IS WHAT LETS THE OVERHEAD REPLAY DRAW PEOPLE. `fieldersFor()` answers
+ * with positions — a number, a distance and a bearing — which is all placement
+ * needs and not enough to draw anybody. Attaching the roster here is what turns
+ * nine identical dots into a club in its own kit, and what lets the asset layer
+ * look for THIS man's drawing before the position's.
+ *
+ * ⚠️ IT IS CALLED AT CONTACT, NOT AT DRAW TIME, and that matters for the same
+ * reason Replay.fielders holds the shift rather than looking one up: the replay
+ * has to show the defence that decided the play. A substitution between innings
+ * must not retro-fit itself onto the play before it.
+ *
+ * The pitcher keeps no man. He is not in a DH league's batting order, so the
+ * alignment has no P — and the overhead falls back to a rolled look for him.
+ */
+export function manned(fielders: readonly Fielder[], a: Alignment): readonly Fielder[] {
+  return fielders.map((f) => {
+    const at = POSITION_BY_NUMBER[f.num];
+    const man = at ? a[at] : null;
+    return man ? { ...f, man } : f;
+  });
 }
 
 /**

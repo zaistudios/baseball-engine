@@ -82,8 +82,8 @@ describe('the plot never contradicts the outcome', () => {
 
 describe('the replay always fits the beat', () => {
   it('never asks for longer than the walk-up allows', () => {
-    // The roguelike screen (web/main.ts) gives a replay DONE_MS + WALKUP_MS to
-    // finish in, and it needs REPLAY_CUT_MS + hangMs + REPLAY_HOLD_MS to do it.
+    // The at-bat screen gives a replay DONE_MS + WALKUP_MS to finish in, and it
+    // needs REPLAY_CUT_MS + hangMs + REPLAY_HOLD_MS to do it.
     // Asserted against the real constants rather than a copied number, because
     // the copied number is what went stale when the pacing was slowed down.
     const BEAT_MS = 1800 + 2000; // DONE_MS + WALKUP_MS

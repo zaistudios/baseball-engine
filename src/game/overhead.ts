@@ -1,17 +1,17 @@
 /**
  * THE OVERHEAD REPLAY — the camera that cuts to the field when a ball is hit.
  *
- * This was inside the roguelike screen until both screens wanted it. It is a
- * REPLAY, not a simulation, and that distinction is load-bearing: the outcome
- * was decided by hitTables.ts before contact was even drawn. Nothing here can
- * change it and nothing here is allowed to try — see the scope note in plot.ts.
- * Fielders converging and the throw-versus-runner race are choreography over a
- * result already in the book.
+ * It is a REPLAY, not a simulation, and that distinction is load-bearing: the
+ * outcome was decided by hitTables.ts before contact was even drawn. Nothing
+ * here can change it and nothing here is allowed to try — see the scope note in
+ * plot.ts. Fielders converging and the throw-versus-runner race are
+ * choreography over a result already in the book.
  *
- * Everything that used to be a module global in the caller is a parameter now:
- * the canvas, the camera, the two field colours and the sound bank. That is the
- * whole of the extraction — no behaviour moved, so the roguelike screen draws
- * exactly what it drew before.
+ * Everything the picture needs is a parameter rather than a module global: the
+ * canvas, the camera, the two field colours, the sound bank, the park's fence
+ * and how to draw a man. That is what keeps this file about WHERE THE NINE MOVE
+ * AND WHEN, with no opinion on what a shortstop looks like or which club he
+ * plays for.
  */
 
 import type { RunnerMove } from '../core/inning.ts';
@@ -38,7 +38,104 @@ import {
   type Fielder,
   type Race,
 } from './plot.ts';
-import { drawSprite } from './sprites.ts';
+import { drawSprite, SPRITE_SPECS } from './sprites.ts';
+import type { Player } from '../core/roster.ts';
+
+/**
+ * How tall a man stands in the replay, and it is SPRITE_SPECS' number rather
+ * than one of this file's own — the shell and any art that replaces it have to
+ * be the same size or dropping a PNG in resizes the defence.
+ */
+const MAN_H = SPRITE_SPECS.fielders.height;
+
+/**
+ * ⚠️ HIS FEET GO BELOW THE POINT, NOT ON IT. A fielder's position is where he
+ * IS, and a figure anchored at his feet there would stand entirely above the
+ * spot with his head a body-length off it. Dropping the feet by about a quarter
+ * of his height straddles the point, which is what the 6px dot did for free and
+ * what makes a figure land where the dot used to be.
+ */
+const FEET_BELOW = MAN_H * 0.28;
+
+/**
+ * ONE MAN — his own art, then his position's art, then a drawn figure, then the
+ * numbered dot this file started with. Every rung falls through to the next, so
+ * a caller with no roster and an assets/ folder with nothing in it still get a
+ * complete picture.
+ *
+ * ⚠️ THE NUMBER MOVES OFF HIM AND UNDER HIM. It used to sit INSIDE the dot,
+ * which a 5px-wide figure has no room for — and drawFigure's own number gate
+ * refuses a chest this small anyway. It is also drawn only for the man the play
+ * is about: nine labels on nine figures is a scoreboard, one is a 6-4-3.
+ */
+function drawMan(
+  ctx: CanvasRenderingContext2D,
+  opts: OverheadOpts,
+  x: number,
+  y: number,
+  o: {
+    side: 'fielding' | 'batting';
+    seed: string;
+    man?: Player;
+    /** The scorer's number, when this is one of the nine. */
+    num?: number;
+    /** Not involved in the play — drawn faded, and never labelled. */
+    dim?: boolean;
+  },
+): void {
+  // ⚠️ 0.7 AND NOT THE OLD DOT'S 0.55. A dot is a solid disc and survives being
+  // faded; a figure is five pixels wide with grass showing between its legs,
+  // and at 0.55 the six men not involved in the play simply disappeared.
+  const alpha = o.dim ? 0.7 : 1;
+  const feet = y + FEET_BELOW;
+  const ref = { id: o.man?.id, name: o.man?.name, alt: o.num === undefined ? o.seed : String(o.num) };
+
+  /**
+   * ⚠️ THE PUCK, AND IT IS NOT DECORATION — it is the dot's job, kept.
+   *
+   * Two things broke the moment nine dots became nine figures, and one marker
+   * fixes both. A RUNNER STANDING ON A BAG landed inside the bag's own diamond
+   * outline and the two read as one smudge, where a solid blue dot had always
+   * been plainly visible inside it. And WHICH SIDE A MAN IS ON stopped being
+   * instant: it now depends on telling two clubs' kits apart at five pixels
+   * across, and two clubs are allowed to both wear pale grey.
+   *
+   * So the side colour survives underfoot — bone for the nine, blue for a
+   * runner — with the man drawn on top of it. It doubles as the shadow that
+   * stops a figure floating on the grass.
+   *
+   * ⚠️ THE FILL IS DARK AND ONLY THE RING CARRIES THE COLOUR, which is the
+   * second thing this got wrong. A solid bone puck under a club that wears pale
+   * grey is a pale figure on a pale disc, and the man vanished into his own
+   * marker. Every kit in look.ts is held well clear of the field colours —
+   * there are no near-blacks in the list, by rule — so a DARK puck is the one
+   * fill guaranteed to have contrast against all thirty of them.
+   */
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.ellipse(x, feet, MAN_H * 0.26, MAN_H * 0.13, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(8,12,9,0.5)';
+  ctx.fill();
+  ctx.strokeStyle = o.side === 'batting' ? '#5aa9e6' : '#e8e8d4';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  if (!drawSprite(ctx, 'fielders', x, feet, ref, { alpha })) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    opts.figure(ctx, { x, y: feet, h: MAN_H, side: o.side, man: o.man, seed: o.seed });
+    ctx.restore();
+  }
+
+  if (o.num === undefined || o.dim) return;
+  ctx.fillStyle = 'rgba(232,232,212,0.9)';
+  ctx.font = 'bold 8px ui-monospace, Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(o.num), x, feet + 9);
+}
 
 // ------------------------------------------------------------- the camera
 
@@ -174,8 +271,8 @@ export interface Replay {
   chaserNum?: number;
   /**
    * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
-   * earns. Absent is the ordinary hold, which is what a foul, an exhibition and
-   * the roguelike all get.
+   * earns. Absent is the ordinary hold, which is what a foul and a routine
+   * grounder get.
    *
    * ⚠️ THE NUMBER COMES FROM game/scene.ts AND THIS FILE MUST NOT GUESS AT IT.
    * How much of an occasion a play is depends on the score, the inning and the
@@ -282,15 +379,53 @@ export interface OverheadOpts {
   sfx?: Sfx;
   /**
    * THE FENCE, AS A FUNCTION OF DIRECTION — the park's outline. Omitted draws
-   * the 400-foot bowl this file has always drawn, which is what the roguelike
-   * and a park-less exhibition are played in.
+   * the 400-foot bowl this file has always drawn, which is what an exhibition
+   * between clubs nobody gave a building to is played in.
    *
-   * It is a callback rather than a Park because this file is the roguelike's
-   * and has no business importing thirty ball clubs. game/main.ts hands it
-   * `(d) => wallAt(d, game.home.park)`.
+   * It is a callback rather than a Park for the reason `figure` below is one:
+   * it keeps the import cycle out. main.ts owns the league and imports this
+   * file; this file asks for a number back and stays out of the roster.
    */
   wall?: (dirDeg: number) => number;
+  /**
+   * HOW TO DRAW A MAN. Required: there is no picture of a baseball play without
+   * people in it.
+   *
+   * ⚠️ IT IS STILL A CALLBACK, AND NOT BECAUSE ANYBODY ELSE MIGHT PASS
+   * SOMETHING ELSE. It keeps the cycle out: main.ts imports this file, and
+   * drawing a man needs the kit, the part sets and the look roll from look.ts,
+   * which main.ts also owns. Handing the drawing in costs one field and keeps
+   * this module about choreography — where the nine move and when — rather than
+   * about what a shortstop looks like.
+   *
+   * main.ts hands it a closure over drawFigure(). See overheadFigure().
+   */
+  figure: FigureFn;
 }
+
+/**
+ * Draw one man at (x, y) — his FEET, the anchor every standing figure uses.
+ *
+ * `side` picks the kit: the nine wear the fielding club's, a runner wears the
+ * batting club's, and that is the whole of how you tell them apart once they
+ * stop being a white dot and a blue one.
+ *
+ * `seed` is for the men the replay has no record of — the pitcher, who is not
+ * in a DH league's order, and every baserunner, who is a bag number and not a
+ * player. A stable string means the same face turns up in the same place rather
+ * than flickering between frames.
+ */
+export type FigureFn = (
+  ctx: CanvasRenderingContext2D,
+  o: {
+    x: number;
+    y: number;
+    h: number;
+    side: 'fielding' | 'batting';
+    man?: Player;
+    seed: string;
+  },
+) => void;
 
 /**
  * The beat stays in the batter's view before cutting — the crack of the bat
@@ -760,25 +895,17 @@ export function drawOverhead(
     const p = { x: post.x + (to.x - post.x) * k2, y: post.y + (to.y - post.y) * k2 };
     const busy = role !== 'shade';
 
-    // A per-position asset (`assets/fielders/6.png`) or one `_default.png` for
-    // all nine. The man who is not involved in the play is drawn faded either
-    // way, which is what stops nine equally-bright figures reading as a crowd.
-    if (
-      drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: String(f.num) }, { alpha: busy ? 1 : 0.55 })
-    ) {
-      continue;
-    }
-
-    ctx.fillStyle = busy ? '#e8e8d4' : 'rgba(200,204,208,0.55)';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, busy ? 6 : 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = 'rgba(11,17,12,0.9)';
-    ctx.font = 'bold 8px ui-monospace, Menlo, Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(f.num), p.x, p.y + 0.5);
+    // His own art (`assets/fielders/hu1.png`), his position's
+    // (`assets/fielders/6.png`), or one `_default.png` for all nine. The man who
+    // is not involved in the play is drawn faded either way, which is what stops
+    // nine equally-bright figures reading as a crowd.
+    drawMan(ctx, opts, p.x, p.y, {
+      side: 'fielding',
+      seed: `F${f.num}`,
+      ...(f.man ? { man: f.man } : {}),
+      num: f.num,
+      dim: !busy,
+    });
   }
 
   // ⚠️ A STEAL HAS NO BATTED BALL, so everything below — the flight, the trail,
@@ -924,16 +1051,11 @@ function cuePlaySounds(
  */
 function drawRunnerDot(
   ctx: CanvasRenderingContext2D,
+  opts: OverheadOpts,
   p: { x: number; y: number },
   dim = false,
 ): void {
-  if (drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: 'runner' }, { alpha: dim ? 0.55 : 1 })) {
-    return;
-  }
-  ctx.fillStyle = dim ? 'rgba(90,169,230,0.55)' : '#5aa9e6';
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
-  ctx.fill();
+  drawMan(ctx, opts, p.x, p.y, { side: 'batting', seed: 'runner', dim });
 }
 
 /**
@@ -966,19 +1088,20 @@ function drawSteal(
     const to = takes ? besideBag(cam, bag) : post;
     const k = takes ? Math.min(1, Math.max(0, t / STEAL_THROW_MS)) : 0;
     const p = { x: post.x + (to.x - post.x) * k, y: post.y + (to.y - post.y) * k };
-    if (!drawSprite(ctx, 'fielders', p.x, p.y + 5, { id: String(f.num) }, { alpha: takes ? 1 : 0.55 })) {
-      ctx.fillStyle = takes ? '#e8e8d4' : 'rgba(200,204,208,0.55)';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawMan(ctx, opts, p.x, p.y, {
+      side: 'fielding',
+      seed: `F${f.num}`,
+      ...(f.man ? { man: f.man } : {}),
+      num: f.num,
+      dim: !takes,
+    });
   }
 
   // The runner. He is off at the pitch, so his clock starts at zero, and he
   // stops dim on the bag he did not get.
   const runMs = runToFirstMs(steal.speed) * RUNNING_START;
   const k = Math.min(1, t / runMs);
-  drawRunnerDot(ctx, runnerPoint(cam, steal.from, steal.to, k), !steal.safe && t > runMs);
+  drawRunnerDot(ctx, opts, runnerPoint(cam, steal.from, steal.to, k), !steal.safe && t > runMs);
 
   // The catcher's throw, from the plate to the bag.
   if (t > 120) {
@@ -1145,7 +1268,7 @@ function drawRace(
   // still baserunners — an occupied base with nobody drawn on it is the thing
   // that made the field look like a diagram.
   for (const bag of r.held) {
-    drawRunnerDot(ctx, runnerPoint(cam, bag + 1, bag + 2, leadOff(t)));
+    drawRunnerDot(ctx, opts, runnerPoint(cam, bag + 1, bag + 2, leadOff(t)));
   }
 
   // Everyone who was already on and went somewhere, ALONG THE BASEPATH and at
@@ -1155,14 +1278,14 @@ function drawRace(
   for (const m of r.moves) {
     const from = m.from + 1;
     const to = m.to + 1;
-    drawRunnerDot(ctx, runnerPoint(cam, from, to, t / trip(m.speed, to - from)));
+    drawRunnerDot(ctx, opts, runnerPoint(cam, from, to, t / trip(m.speed, to - from)));
   }
 
   // The man gunned down going for one too many. He runs it exactly like the
   // rest and then stops, dim, at the bag he did not get — until now the only
   // trace of that on screen was a line of text.
   if (gunned) {
-    drawRunnerDot(ctx, runnerPoint(cam, gunned.from, gunned.at, t / gunned.ms), t > gunned.ms);
+    drawRunnerDot(ctx, opts, runnerPoint(cam, gunned.from, gunned.at, t / gunned.ms), t > gunned.ms);
   }
 
   // The forced man, on a double play AND on a plain force. He is erased from
@@ -1175,7 +1298,7 @@ function drawRace(
     // third; drawing all three of them breaking out of first put a runner on a
     // basepath he was never on. runnerPoint() counts bags the same way
     // `forceAt` does, so the two ends need no translating.
-    drawRunnerDot(ctx, runnerPoint(cam, forceAt - 1, forceAt, t / relayMs), t > relayMs);
+    drawRunnerDot(ctx, opts, runnerPoint(cam, forceAt - 1, forceAt, t / relayMs), t > relayMs);
   }
 
   // The ball's route: to second first on a double play, then on to first.
@@ -1246,7 +1369,7 @@ function drawRace(
   // ⚠️ HOW FAR HE ACTUALLY GOT, not how far the hit was worth. A stretched
   // single leaves him on second and a stretch he lost leaves him dead at it.
   const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
-  drawRunnerDot(ctx, runnerPoint(cam, 0, bases, tripK), stretchedOut && t > tripMs);
+  drawRunnerDot(ctx, opts, runnerPoint(cam, 0, bases, tripK), stretchedOut && t > tripMs);
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.
@@ -1287,7 +1410,7 @@ function drawRace(
       // first-to-second leg, his lead collapsing to nothing — a man who never
       // got past his secondary and still did not make it.
       const backK = Math.max(0, Math.min(1, (t - fieldedAt) / 420));
-      drawRunnerDot(ctx, runnerPoint(cam, 1, 2, leadOff(fieldedAt) * (1 - backK)), t > back);
+      drawRunnerDot(ctx, opts, runnerPoint(cam, 1, 2, leadOff(fieldedAt) * (1 - backK)), t > back);
       if (t > back) call('OUT', first, false);
     }
     return;

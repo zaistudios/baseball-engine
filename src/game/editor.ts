@@ -42,6 +42,7 @@ import {
   SIGNATURES,
   TELLS,
   BAT_RATINGS,
+  BAT_OPTIONAL,
   ARM_OPTIONAL,
   IDENTITY_KNOBS,
   FENCE_MIN_FT,
@@ -175,6 +176,7 @@ export const HITTER_FIELDS: readonly Field[] = [
   { key: 'build', label: 'Build', kind: 'choice', choices: BUILDS },
   { key: 'trait', label: 'Trait', kind: 'choice', choices: TRAITS },
   ...BAT_RATINGS.map((k) => rating(k, k)),
+  ...BAT_OPTIONAL.map((k) => rating(k, k, true)),
   { key: 'bio', label: 'Bio', kind: 'line' },
 ];
 

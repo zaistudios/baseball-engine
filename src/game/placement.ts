@@ -34,7 +34,7 @@
 import type { HitResult } from '../core/hit.ts';
 import { isHit, isOut, type Outcome } from '../core/hitTables.ts';
 import type { AtBatResult } from '../core/atBat.ts';
-import { plotBatted, nearestFielder, FIELDERS, type Fielder } from '../web/plot.ts';
+import { plotBatted, nearestFielder, FIELDERS, type Fielder } from './plot.ts';
 import { fieldersFor, type Shift } from './shift.ts';
 import { wallAt, type Park } from './teams.ts';
 
@@ -262,8 +262,8 @@ export function place(
 ): Placement {
   /**
    * ⚠️ THE PARK IS RESOLVED TO ONE NUMBER HERE, and this is the only place it
-   * happens. plot.ts is the roguelike's leaf and must not import game code, so
-   * it takes a fence in feet; wallAt() is what turns three fences and an easing
+   * happens. plot.ts is a geometry leaf and must not import a league, so it
+   * takes a fence in feet; wallAt() is what turns three fences and an easing
    * curve into that number for the direction this particular ball went.
    */
   const wallFt = wallAt(hit.direction, park);
@@ -437,8 +437,8 @@ export type Verdict = 'robbed' | 'dropped' | null;
  * defense.ts. It scales BOTH bars in the same direction, because both are
  * statements about how much ground one man covers: a rangy fielder robs from
  * further away AND lets fewer balls fall in behind him. Defaulting it to 1
- * keeps every caller that has no fielders — the roguelike, most tests —
- * on exactly the league-average behaviour.
+ * keeps every caller that has no fielders — most tests, the CLI — on exactly
+ * the league-average behaviour.
  */
 export function contest(
   hit: HitResult,

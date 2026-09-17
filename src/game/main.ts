@@ -190,7 +190,7 @@ import {
   type Field,
   type Group,
 } from './editor.ts';
-import { fieldBall, reachOf } from './defense.ts';
+import { fieldBall, reachOf, manned } from './defense.ts';
 import { SHIFTS, SHIFT_WORDS, SHIFT_BLURB, SHIFT_ON, fieldersFor, pickShift, pullScore, type Shift } from './shift.ts';
 import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
@@ -265,7 +265,7 @@ import {
   isSwinging,
   REST_POSE,
   CHECK_PULL_MS,
-} from '../web/swing.ts';
+} from './swing.ts';
 import {
   artSlots,
   clubBuild,
@@ -284,7 +284,8 @@ import {
   overheadAlpha,
   replayLength,
   type Replay,
-} from '../web/overhead.ts';
+  type FigureFn,
+} from './overhead.ts';
 
 // --------------------------------------------------------------- the setup
 
@@ -1841,7 +1842,7 @@ function showFoul(runnerSpeed: number): boolean {
     launchAngle: swing.launchAngle,
     direction: swing.direction,
     speed: runnerSpeed,
-    fielders: fieldersFor(shiftNow()),
+    fielders: manned(fieldersFor(shiftNow()), fieldingAlignment(game)),
     safe: false,
     chaserNum: place(swing, game.home.park).fielderNum,
     // The fence this one went toward, so the drawn ball and the sentence
@@ -2058,7 +2059,7 @@ function completePlay(
           // ⚠️ THE SAME ALIGNMENT withPlacement() JUST USED, not a fresh lookup.
           // The shift that decided whether this was a hit is the one that has
           // to be under it — see the note on Replay.fielders.
-          fielders: fieldersFor(shift),
+          fielders: manned(fieldersFor(shift), fieldingAlignment(game)),
           // ⚠️ THE BATTER IS SAFE ON A FORCE PLAY, and the replay has to know or
           // it draws a throw beating him to a bag nothing was thrown to.
           safe:
@@ -3007,7 +3008,19 @@ const BATTER_H = 96;
 /** Clear of the zone's left edge at 160, so he never stands in the strike zone. */
 const BATTER_X = 134;
 const BATTER_Y = PLATE_Y + 14;
-const ARM_XY = { x: 210, y: 78, h: 42 };
+/**
+ * ⚠️ 42 PUT HIM UNDER EVERY DETAIL THRESHOLD HE OWNS. At that height his head
+ * radius was 4.8px — below the face gate, so the one man you look at for the
+ * whole pitch had no face — and his crest was a sub-pixel smear, so a machine
+ * arm's antenna and a human's cap were the same grey nub. He read as a blob.
+ *
+ * 58 clears the face gate and leaves the crest something to be, while his chest
+ * stays under drawFigure's number gate — two digits across a seventeen-pixel
+ * chest is noise that looks like a glyph bug, and that judgement has not
+ * changed. It is also still a little over half the batter's 96, which is the
+ * perspective a man sixty feet away has to keep.
+ */
+const ARM_XY = { x: 210, y: 78, h: 58 };
 /**
  * ⚠️ THE CATCHER IS TUCKED INTO A 26-PIXEL GAP, and that is the whole of what
  * this canvas has left. The plate's point reaches y 270 and the delivery bar
@@ -3093,7 +3106,11 @@ function drawField(now: number): void {
     const oh = overheadAlpha(replay, rn);
     if (oh > 0) {
       ctx.globalAlpha = oh;
-      drawOverhead(ctx, OH_CAM, replay, rn, { ...OH_PALETTE, wall: (d) => wallAt(d, game.home.park) });
+      drawOverhead(ctx, OH_CAM, replay, rn, {
+        ...OH_PALETTE,
+        wall: (d) => wallAt(d, game.home.park),
+        figure: overheadFigure,
+      });
       // The caption rides the same alpha as the picture under it, so the two
       // cut in and out as one thing rather than the words outliving the field.
       if (scene) drawScene(scene, rn - replay.startedAt, replayLength(replay));
@@ -3351,6 +3368,40 @@ function drawHitter(now: number): void {
     flip: lefty,
   });
 }
+
+/**
+ * THE NINE, AND THE MEN RUNNING ON THEM, in the overhead replay.
+ *
+ * ⚠️ THIS IS THE HALF OF THE PICTURE overhead.ts CANNOT HAVE. That file is
+ * choreography — where the nine move and when — and this file owns the league,
+ * so it imports overhead.ts and not the other way round. The kit, the part sets
+ * and the look roll therefore have to be handed DOWN to it; see
+ * OverheadOpts.figure. The result is that the replay stops being nine identical
+ * grey dots and becomes the fielding club in its own colours with the batting
+ * club running the bases, which is the thing a dot could never say.
+ *
+ * ⚠️ THE MEN WITHOUT RECORDS ARE ROLLED OFF A SEED, and there are two kinds:
+ * the pitcher, who is not in a DH league's batting order, and every baserunner,
+ * who reaches this file as a bag number. Both borrow the trick drawHitter()
+ * already uses for the catcher — lookForArm() against a made-up name — so the
+ * face is stable within a club rather than flickering frame to frame.
+ */
+const overheadFigure: FigureFn = (c, o) => {
+  const club = clubInGame(game, o.side === 'fielding' ? fieldingSide(game) : battingSide(game));
+  drawFigure(c, {
+    look: o.man
+      ? lookFor(o.man)
+      : lookForArm({ ...currentPitcher(game), name: `${club.abbr}-${o.seed}` }, club),
+    uniform: uniformFor(club),
+    build: o.man ? o.man.build : clubBuild(club),
+    x: o.x,
+    y: o.y,
+    h: o.h,
+    // ⚠️ 'pitch', WHICH IS THE ONLY STANCE WITH BOTH ARMS DOWN. From above, a
+    // man standing on the grass is not holding a bat and is not crouching.
+    stance: 'pitch',
+  });
+};
 
 function drawBall(now: number): void {
   if (!pitch) return;
@@ -4551,12 +4602,22 @@ function bracketLines(s: Season): string[] {
  * thing you can play against, which is the entire point of building it.
  */
 /** One rating card: label, then the numbers, dimmed under average. */
+/**
+ * ⚠️ `speed` DOES NOT ABBREVIATE TO ITS FIRST THREE LETTERS. The slice below
+ * made this card say SPE while the bench list, the scouting card and the club
+ * summary all hand-write SPD — the same stat under two names, a few inches
+ * apart on one screen. Every other rating survives the slice; this is the only
+ * exception and it stays a lookup of one rather than a table of six.
+ */
+const RATING_LABELS: Record<string, string> = { speed: 'SPD' };
+
 function card(title: string, ratings: Record<string, number>): string {
   const cells = Object.entries(ratings)
     .map(([k, v]) => {
       const n = showScale(v);
       const colour = n >= 75 ? 'var(--hot)' : n < 45 ? 'var(--bad)' : 'var(--ink)';
-      return `${k.slice(0, 3).toUpperCase()} <b style="color:${colour}">${n}</b>`;
+      const label = RATING_LABELS[k] ?? k.slice(0, 3).toUpperCase();
+      return `${label} <b style="color:${colour}">${n}</b>`;
     })
     .join(' &nbsp; ');
   return `<b>${title}</b><br>${cells}`;

@@ -41,7 +41,7 @@ import { newGame } from '../game.ts';
 import { simulateGame } from '../sim.ts';
 import { place, stretch } from '../placement.ts';
 import { workingCopy, withParkField, replaceClub, PARK_FIELDS } from '../editor.ts';
-import { WALL_FT, plotBatted } from '../../web/plot.ts';
+import { WALL_FT, plotBatted } from '../plot.ts';
 import {
   FOUL_POP_ANGLE,
   caughtFoul,

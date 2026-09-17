@@ -8,12 +8,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint, runnerPoint } from '../overhead.ts';
-import { overheadPoint, WALL_FT } from '../plot.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, type Replay } from '../overhead.ts';
+import { overheadPoint, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
+import { manned, assignPositions } from '../defense.ts';
+import { HOME } from '../teams.ts';
 
 /** Both screens, plus a deliberately awkward one. */
 const CANVASES: [number, number][] = [
-  [640, 480], // the roguelike
+  [640, 480], // a wider canvas than the game uses, to catch a fitted formula
   [420, 340], // the full game
   [300, 300], // square, to catch a formula that assumes wide
 ];
@@ -167,5 +169,80 @@ describe('a runner runs the bases', () => {
     const a = bag(-1);
     const b = bag(0);
     expect(Math.hypot(mid.x - (a.x + b.x) / 2, mid.y - (a.y + b.y) / 2)).toBeLessThan(0.001);
+  });
+});
+
+/**
+ * WHO IS ON THE FIELD, and the one seam the art pipeline plugs into.
+ *
+ * Every man on the field reaches the screen through one callback, so this is
+ * where "there are people out there at all" gets pinned. It is an easy thing to
+ * lose quietly: a replay with an empty field still animates, still calls the
+ * play and still looks like something — just a ball moving over grass.
+ */
+describe('the men in the replay', () => {
+  /** Records the calls, and survives everything drawOverhead does to a context. */
+  const stub = (): { ctx: CanvasRenderingContext2D; calls: string[] } => {
+    const calls: string[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k: string) => {
+        if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+        if (k === 'createLinearGradient') return () => ({ addColorStop: () => undefined });
+        return (...a: unknown[]) => {
+          calls.push(`${k}(${a.join(',')})`);
+        };
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, calls };
+  };
+
+  const play = (fielders?: readonly Fielder[]): Replay =>
+    newReplay({
+      now: 0,
+      outcome: 'single',
+      exitVelocity: 92,
+      launchAngle: 8,
+      direction: -18,
+      speed: 1,
+      safe: true,
+      held: [1],
+      ...(fielders ? { fielders } : {}),
+    });
+
+  const PALETTE = { field: '#2d3b2c', dirt: '#5c4030' };
+
+  it('hands every man to the caller that brought one, nine plus the runners', () => {
+    const { ctx } = stub();
+    const seen: { side: string; num?: number }[] = [];
+    drawOverhead(ctx, makeCam(420, 340), play(), 1500, {
+      ...PALETTE,
+      figure: (_c, o) => seen.push({ side: o.side }),
+    });
+    expect(seen.filter((s) => s.side === 'fielding')).toHaveLength(9);
+    // A held runner and the batter racing to first — both wear the other kit,
+    // which is the only thing that tells them from the defence.
+    expect(seen.filter((s) => s.side === 'batting').length).toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * ⚠️ THE PIPELINE'S HALF OF IT. `manned()` puts a Player on each spot so the
+   * asset layer can ask for HIS drawing; if the figure callback does not receive
+   * him, per-player art is unreachable and every club fields nine of the same
+   * nine sprites.
+   */
+  it('passes the man standing there through to the drawing', () => {
+    const { ctx } = stub();
+    const nine = manned(FIELDERS, assignPositions(HOME.lineup));
+    const named: string[] = [];
+    drawOverhead(ctx, makeCam(420, 340), play(nine), 1500, {
+      ...PALETTE,
+      figure: (_c, o) => {
+        if (o.man) named.push(o.man.name);
+      },
+    });
+    // Eight of the nine: the pitcher is not in a DH league's order.
+    expect(new Set(named).size).toBe(8);
+    expect(named).toContain(assignPositions(HOME.lineup).SS!.name);
   });
 });

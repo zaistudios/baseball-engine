@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIELDERS, nearestFielder } from '../../web/plot.ts';
+import { FIELDERS, nearestFielder } from '../plot.ts';
 import { SHIFTS, SHIFT_ON, fieldersFor, pickShift, pullScore } from '../shift.ts';
 import { LEAGUE } from '../teams.ts';
 import type { Player } from '../../core/roster.ts';

@@ -16,6 +16,7 @@
  */
 
 import type { Outcome } from '../core/hitTables.ts';
+import type { Player } from '../core/roster.ts';
 
 /** Feet from home to the outfield wall, straightaway and down the lines. */
 export const WALL_FT = 400;
@@ -313,15 +314,14 @@ export function plotBatted(
   directionDeg = 0,
   /**
    * THE FENCE IN THIS DIRECTION, in feet. Defaults to the 400-foot bowl this
-   * file has always drawn, which is what a game with no park is played in — the
-   * roguelike, an exhibition between clubs nobody gave a building to, and every
-   * test written before parks existed.
+   * file has always drawn, which is what a game with no park is played in — an
+   * exhibition between clubs nobody gave a building to, and every test written
+   * before parks existed.
    *
    * ⚠️ THE CALLER RESOLVES THE DIRECTION, NOT THIS FUNCTION. A park is three
-   * fences and an easing curve (wallAt() in teams.ts) and this file is the
-   * roguelike's leaf — it takes a number so that the web layer never has to
-   * import game code. place() in placement.ts is what turns a park into this
-   * number.
+   * fences and an easing curve (wallAt() in teams.ts), and this file is a LEAF:
+   * it takes a number so the geometry never has to import a league. place() in
+   * placement.ts is what turns a park into this number.
    */
   wallFt = WALL_FT,
 ): Plot {
@@ -426,6 +426,20 @@ export interface Fielder {
   num: number;
   distFt: number;
   dirDeg: number;
+  /**
+   * WHO IS ACTUALLY STANDING THERE, when the caller knows.
+   *
+   * ⚠️ OPTIONAL, AND THE POSITIONS ALONE ARE STILL A LEGAL ALIGNMENT. FIELDERS
+   * below is standard depth with nobody in it, `fieldersFor()` shifts those
+   * positions around, and placement.ts only ever asks which one is nearest —
+   * none of that wants a roster. The man is attached at the one site that has
+   * one, so the overhead replay can draw him as himself and look for HIS art
+   * before the position's.
+   *
+   * The pitcher is normally absent even when the rest are filled: he is not in
+   * a DH league's batting order and carries no Player record at all.
+   */
+  man?: Player;
 }
 
 /**
@@ -435,12 +449,12 @@ export interface Fielder {
  * ⚠️ THIS IS STANDARD DEPTH, NOT THE ONLY ALIGNMENT ANY MORE. It was "ONE
  * alignment, no shifts, no playing in with a man on third" until 2026-09-08,
  * on the reasoning that a shift is a decision the defence would be making and
- * the roguelike's defence makes none. That is still true HERE — this table and
- * this file are unchanged, and the roguelike still plays everyone straight up.
+ * nothing was making it. That is still true HERE — this table is standard
+ * depth and nothing else.
  *
- * The full game does make that decision: game/shift.ts builds moved tables out
- * of this one and hands them to nearestFielder() below. Standard depth stays
- * the default at every seam, so nothing that does not ask for a shift gets one.
+ * shift.ts builds moved tables out of this one and hands them to
+ * nearestFielder() below. Standard depth stays the default at every seam, so
+ * nothing that does not ask for a shift gets one.
  */
 export const FIELDERS: readonly Fielder[] = [
   { num: 1, distFt: 60, dirDeg: 0 }, // pitcher
@@ -468,9 +482,9 @@ export function nearestFielder(
   distFt: number,
   dirDeg: number,
   /**
-   * Where the nine are actually standing. Defaults to standard depth, so the
-   * roguelike and every existing test keep the one alignment they were written
-   * against; game/shift.ts hands in a moved table. See its header.
+   * Where the nine are actually standing. Defaults to standard depth, so every
+   * caller that has no opinion keeps the one alignment this file was written
+   * against; shift.ts hands in a moved table. See its header.
    */
   fielders: readonly Fielder[] = FIELDERS,
 ): Fielder {
