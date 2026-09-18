@@ -25,6 +25,8 @@ import {
   drawFigure,
   lookFor,
   lookForArm,
+  lookForExtra,
+  armBuild,
   partsFor,
   safeLook,
   uniformFor,
@@ -33,6 +35,7 @@ import {
   partId,
 } from '../look.ts';
 import type { Player } from '../../core/roster.ts';
+import type { Pitcher } from '../../core/pitcher.ts';
 
 /** Everybody with a `build` — the nine, the bench, and the depth behind them. */
 const hitters = (t: Team): readonly Player[] => [...t.lineup, ...(t.bench ?? [])];
@@ -416,5 +419,120 @@ describe('naming a drawing', () => {
   it('covers exactly the three drawable parts, and not tone', () => {
     const parts = new Set(artSlots().map((s) => s.id.split('/')[1]));
     expect([...parts].sort()).toEqual(['crest', 'frame', 'head']);
+  });
+});
+
+/**
+ * THE MAN ON THE MOUND — 2026-09-17, when he stopped being undressable.
+ *
+ * `Pitcher` grew `id`, `build` and `look?`, which moved 390 of the league's 780
+ * men out of "rolled off a name" and into "chosen". Three things have to hold
+ * and none of them is visible to tsc:
+ *
+ *  1. THE COMPATIBILITY CONTRACT. Every league exported before today has arms
+ *     with no id and no build, and every one of those men has to keep the exact
+ *     face he has always had. A changed default here silently redresses the
+ *     whole league for everybody who ever exported one.
+ *  2. A STORED LOOK WINS, the same rule a hitter has.
+ *  3. THE SCENERY CANNOT INHERIT. The catcher and the overhead baserunners used
+ *     to be built by spreading the real pitcher into a fake one. The moment an
+ *     arm could carry a look, that spread copied his chosen face onto nine other
+ *     men — so lookForExtra() exists and must not take a record at all.
+ */
+describe('the arm has his own face', () => {
+  const club = LEAGUE[0]!;
+  const arm = club.rotation[0]!;
+  const bare = (a: Pitcher): Pitcher => {
+    const c = { ...a };
+    delete c.id;
+    delete c.build;
+    return c;
+  };
+
+  /**
+   * ⚠️ A GOLDEN VALUE, AND IT IS THE POINT OF THIS TEST. Every league anybody
+   * has exported before 09-17 carries arms with no id and no build, so the
+   * fallback roll — his NAME as the seed, his CLUB's modal build — is a promise
+   * to every one of those documents. Writing the six numbers out means a change
+   * to the default fails here instead of silently redressing 390 men in every
+   * league in the wild. If this test fails, the question is not "what is the new
+   * number", it is "why did the default move".
+   */
+  it('dresses an arm with no id and no build exactly as it always did', () => {
+    expect(club.abbr).toBe('NYE');
+    expect(arm.name).toBe('Whitey Pastore');
+    expect(clubBuild(club)).toBe('human');
+    expect(lookForArm(bare(arm), club)).toEqual({
+      frame: 2,
+      head: 2,
+      crest: 3,
+      tone: 4,
+      number: 27,
+      wear: 0.6541119925677776,
+    });
+  });
+
+  it('seeds the fallback off his NAME, not his ratings', () => {
+    // Same name, different everything else — the same man as far as a face goes.
+    const twin = bare({ ...arm, zoneRate: 0.4, putaway: arm.putaway, blurb: 'x' });
+    expect(lookForArm(twin, club)).toEqual(lookForArm(bare(arm), club));
+    const renamed = bare({ ...arm, name: 'Somebody Else' });
+    expect(lookForArm(renamed, club)).not.toEqual(lookForArm(bare(arm), club));
+  });
+
+  it('prefers his own id and his own build when he has them', () => {
+    const own: Pitcher = { ...arm, id: 'nye-r1', build: 'machine' };
+    const byName = lookForArm(bare(arm), club);
+    expect(lookForArm(own, club)).not.toEqual(byName);
+    // ⚠️ armBuild() HAS TO AGREE, or the look is indexed against one part set
+    // and drawn out of another — a `crest: 3` out of a list of two.
+    expect(armBuild(own, club)).toBe('machine');
+    expect(armBuild(bare(arm), club)).toBe(clubBuild(club));
+  });
+
+  it('lets a stored look win outright', () => {
+    const chosen = { frame: 1, head: 1, crest: 2, tone: 3, number: 41, wear: 0.2 };
+    expect(lookForArm({ ...arm, look: chosen }, club)).toEqual(chosen);
+    // ...and it wins over his own build and id too — a look is a look.
+    expect(lookForArm({ ...arm, id: 'x', build: 'machine', look: chosen }, club)).toEqual(chosen);
+  });
+
+  /**
+   * ⚠️ THE REGRESSION THIS EXISTS FOR. The catcher and every overhead baserunner
+   * used to be drawn by spreading the real pitcher into a fake one and changing
+   * only `name` — harmless while `Pitcher` held nothing but ratings. The moment
+   * an arm could carry a stored `look`, that spread returned HIS look, because a
+   * stored look wins: one chosen face on nine men, and only on clubs somebody
+   * had customized. lookForExtra() takes a string and no record at all, so there
+   * is nothing for a face to leak through.
+   */
+  it('never leaks the pitcher his own face onto the catcher or a baserunner', () => {
+    const chosen = { frame: 0, head: 0, crest: 0, tone: 0, number: 99, wear: 1 };
+    const dressed: Pitcher = { ...arm, look: chosen };
+    expect(lookForArm(dressed, club)).toEqual(chosen);
+    expect(lookForExtra(`${club.abbr}-catcher`, club)).not.toEqual(chosen);
+    expect(lookForExtra(`${club.abbr}-F2`, club)).not.toEqual(chosen);
+    // ...and the extras are not each other, or the nine share one face.
+    expect(lookForExtra(`${club.abbr}-catcher`, club)).not.toEqual(
+      lookForExtra(`${club.abbr}-F2`, club),
+    );
+  });
+
+  /**
+   * The same check the hitters get, and for the same reason: an off-by-one in
+   * PARTS is an `undefined` mid-pitch that nothing else here would find. 390
+   * arms that were never covered by it until today.
+   */
+  it('rolls every arm in the league an index somebody has a part for', () => {
+    for (const t of LEAGUE) {
+      for (const a of [...t.rotation, ...t.bullpen]) {
+        const set = partsFor(armBuild(a, t));
+        const l = safeLook(lookForArm(a, t), armBuild(a, t));
+        expect(l.frame, a.name).toBeLessThan(set.frames.length);
+        expect(l.head, a.name).toBeLessThan(set.heads.length);
+        expect(l.crest, a.name).toBeLessThan(set.crests.length);
+        expect(l.tone, a.name).toBeLessThan(set.tones.length);
+      }
+    }
   });
 });

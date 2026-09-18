@@ -38,7 +38,7 @@ import {
   type Fielder,
   type Race,
 } from './plot.ts';
-import { drawSprite, SPRITE_SPECS } from './sprites.ts';
+import { SPRITE_SPECS } from './sprites.ts';
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -58,10 +58,15 @@ const MAN_H = SPRITE_SPECS.fielders.height;
 const FEET_BELOW = MAN_H * 0.28;
 
 /**
- * ONE MAN — his own art, then his position's art, then a drawn figure, then the
- * numbered dot this file started with. Every rung falls through to the next, so
- * a caller with no roster and an assets/ folder with nothing in it still get a
- * complete picture.
+ * ONE MAN — a puck under him, a figure on top of it, and his number below.
+ *
+ * ⚠️ THE ASSET LADDER IS GONE — 09-17. This used to read "his own art, then his
+ * position's art, then a drawn figure, then the numbered dot", falling through
+ * `assets/fielders/` before it reached a figure. See the note at the draw
+ * below: a pre-composited man cannot be tinted, cannot carry a build and cannot
+ * be edited, so he cannot be allowed to outrank a look somebody chose. The part
+ * library IS the asset layer for people now, and it plugs in a rung lower —
+ * inside drawFigure(), per part.
  *
  * ⚠️ THE NUMBER MOVES OFF HIM AND UNDER HIM. It used to sit INSIDE the dot,
  * which a 5px-wide figure has no room for — and drawFigure's own number gate
@@ -88,7 +93,6 @@ function drawMan(
   // and at 0.55 the six men not involved in the play simply disappeared.
   const alpha = o.dim ? 0.7 : 1;
   const feet = y + FEET_BELOW;
-  const ref = { id: o.man?.id, name: o.man?.name, alt: o.num === undefined ? o.seed : String(o.num) };
 
   /**
    * ⚠️ THE PUCK, AND IT IS NOT DECORATION — it is the dot's job, kept.
@@ -122,12 +126,34 @@ function drawMan(
   ctx.stroke();
   ctx.restore();
 
-  if (!drawSprite(ctx, 'fielders', x, feet, ref, { alpha })) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    opts.figure(ctx, { x, y: feet, h: MAN_H, side: o.side, man: o.man, seed: o.seed });
-    ctx.restore();
-  }
+  /**
+   * ⚠️ THE FIGURE WINS, AND `assets/fielders/` NO LONGER GETS A VOTE — 09-17.
+   *
+   * This read `if (!drawSprite(ctx, 'fielders', …)) { …figure… }`: a whole-man
+   * PNG out of `assets/`, and the drawn figure only if there wasn't one. That
+   * precedence is backwards and it was a trap with the pin already pulled. The
+   * folder is empty today, so nothing was visibly wrong — but `sprites.ts`
+   * reads `assets/` through a BUILD-TIME `import.meta.glob`, which means one
+   * PNG dropped in that folder would have silently overridden every look
+   * anybody had chosen in the editor, on every man on the field, with no
+   * control anywhere on any screen to turn it back off.
+   *
+   * ⚠️ THE TWO ASSET SYSTEMS ARE NOT PEERS AND THIS IS WHERE THAT GETS SAID.
+   * `art.ts` is the part library: runtime, IndexedDB, imported from CUSTOMIZE,
+   * removable one part at a time, and tinted per club. `sprites.ts` is the
+   * roguelike's whole-figure loader, fixed at build time and reachable from no
+   * screen. A player's look is DATA, not an asset — that is rule one of the
+   * customization engine — and a pre-composited man contradicts it outright:
+   * he cannot be tinted to a club, cannot carry a build, and cannot be edited.
+   *
+   * So people go through opts.figure() — which is drawFigure(), which is the
+   * part library with shells underneath it. `sprites.ts` keeps the ball and the
+   * field, which are scenery and have no look to override.
+   */
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  opts.figure(ctx, { x, y: feet, h: MAN_H, side: o.side, man: o.man, seed: o.seed });
+  ctx.restore();
 
   if (o.num === undefined || o.dim) return;
   ctx.fillStyle = 'rgba(232,232,212,0.9)';

@@ -18,6 +18,7 @@ import {
   HITTER_FIELDS,
   IDENTITY_FIELDS,
   addPerson,
+  buildOf,
   blankArm,
   blankHitter,
   coerce,
@@ -40,7 +41,15 @@ import {
   workingCopy,
 } from '../editor.ts';
 import { checkLeague } from '../league.ts';
-import { PART_KEYS, partNames, uniformFor } from '../look.ts';
+import {
+  PART_KEYS,
+  clubBuild,
+  lookForArm,
+  partNames,
+  partsFor,
+  safeLook,
+  uniformFor,
+} from '../look.ts';
 import { IDENTITIES } from '../identity.ts';
 import { LEAGUE_SOURCE } from '../teams.ts';
 import type { Team } from '../teams.ts';
@@ -386,7 +395,7 @@ describe('editing a look', () => {
 
   it('keeps the face he already had, apart from the part that moved', () => {
     let l = league();
-    const was = lookOf(l[0]!.lineup[0]!);
+    const was = lookOf(l[0]!.lineup[0]!, l[0]!, 'lineup');
     l = replaceClub(l, 0, withLookField(l[0]!, 'lineup', 0, 'number', 21)) as Team[];
     expect(l[0]!.lineup[0]!.look).toEqual({ ...was, number: 21 });
   });
@@ -454,5 +463,147 @@ describe('every part on offer is one the build actually has', () => {
     expect(coerce(f, '2')).toBe(2);
     // A select cannot hand back nonsense, but a hand-edited DOM can.
     expect(coerce(f, '')).toBe(0);
+  });
+});
+
+/**
+ * THE ARM'S LOOK — 09-17, the commit that moved 390 men out of "cannot be
+ * dressed at all". Every test here ends in stillLoads() for the file's own
+ * reason: the editor does not validate, so the failure worth catching is an
+ * edit that produces an arm checkLeague() then refuses.
+ */
+describe('an arm can be dressed', () => {
+  const armGroups = ['rotation', 'bullpen'] as const;
+
+  it('offers him a build, which is what unlocked the look block', () => {
+    expect(ARM_FIELDS.map((f) => f.key)).toContain('build');
+  });
+
+  /**
+   * ⚠️ THE DEFAULT THAT MUST NOT BE 'human'. An arm's build is optional, so
+   * every arm in every league written before today has none — and offering a
+   * Detroit Foundry reliever a list of haircuts and then drawing him as a
+   * chassis is the exact mismatch buildOf() exists to prevent.
+   */
+  it('falls back to his club, not to human, when he has no build', () => {
+    const l = league();
+    for (const club of l) {
+      for (const g of armGroups) {
+        for (const a of club[g]) {
+          expect(buildOf(a, club, g), `${club.abbr} ${a.name}`).toBe(
+            a.build ?? clubBuild(club),
+          );
+        }
+      }
+    }
+  });
+
+  it('shows him the face he was already wearing, not a form of zeroes', () => {
+    const l = league();
+    const club = l[0]!;
+    const arm = club.rotation[0]!;
+    expect(lookOf(arm, club, 'rotation')).toEqual(
+      safeLook(lookForArm(arm, club), buildOf(arm, club, 'rotation')),
+    );
+  });
+
+  /**
+   * ⚠️ THE FAILURE THIS CATCHES IS A NaN. lookOf() used to run every man
+   * through lookFor(), which biases the silhouette off `p.power` and `p.speed`
+   * and seeds off `p.id` — a Pitcher has none of the three, so an arm came back
+   * as six NaNs that safeLook() then flattened to zeroes. Opening the editor on
+   * any arm would have redressed him the moment anything was saved.
+   */
+  it('gives him six real numbers, not six NaNs', () => {
+    const l = league();
+    for (const g of armGroups) {
+      const club = l[0]!;
+      for (const a of club[g]) {
+        const look = lookOf(a, club, g);
+        for (const k of ['frame', 'head', 'crest', 'tone', 'number', 'wear'] as const) {
+          expect(Number.isFinite(look[k]), `${a.name} ${k}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('keeps the face he had, apart from the part that moved', () => {
+    let l = league();
+    const was = lookOf(l[0]!.rotation[0]!, l[0]!, 'rotation');
+    l = replaceClub(l, 0, withLookField(l[0]!, 'rotation', 0, 'number', 21)) as Team[];
+    expect(l[0]!.rotation[0]!.look).toEqual({ ...was, number: 21 });
+    stillLoads(l);
+  });
+
+  it('randomizes him inside his own part set', () => {
+    let l = league();
+    let n = 0;
+    const roll = () => ((n = (n + 7) % 11), n / 11);
+    l = replaceClub(l, 0, withRandomLook(l[0]!, 'bullpen', 0, roll)) as Team[];
+    const club = l[0]!;
+    const arm = club.bullpen[0]!;
+    const set = partsFor(buildOf(arm, club, 'bullpen'));
+    expect(arm.look!.frame).toBeLessThan(set.frames.length);
+    expect(arm.look!.crest).toBeLessThan(set.crests.length);
+    stillLoads(l);
+  });
+
+  it('accepts an arm carrying id, build and look, and one carrying none', () => {
+    let l = league();
+    l = replaceClub(l, 0, withPersonField(l[0]!, 'rotation', 0, 'build', 'machine')) as Team[];
+    l = replaceClub(l, 0, withLookField(l[0]!, 'rotation', 0, 'crest', 1)) as Team[];
+    expect(l[0]!.rotation[0]!.build).toBe('machine');
+    expect(l[0]!.rotation[0]!.look!.crest).toBe(1);
+    stillLoads(l);
+    // ...and the untouched arms next to him, which have neither, still load.
+    stillLoads(league());
+  });
+
+  it('refuses a build that is not one of the three', () => {
+    const l = league();
+    const broken = replaceClub(
+      l,
+      0,
+      withPersonField(l[0]!, 'rotation', 0, 'build', 'robot'),
+    ) as Team[];
+    expect(said(broken)).toMatch(/build must be one of/);
+  });
+});
+
+/**
+ * ⚠️ THE INVARIANT THE UI GLUE BROKE, AND THE REASON IT IS TESTED HERE.
+ *
+ * main.ts's change listener read `lookFields(who.build)` — the record, not
+ * buildOf() — and an arm's build is OPTIONAL. For every arm nobody had set one
+ * on, that is lookFields(undefined) -> partsFor(undefined) -> PARTS[undefined]
+ * -> undefined.frames, which THROWS inside the listener. The six dropdowns
+ * rendered, moved when you dragged them, and then did nothing at all: the edit
+ * never applied and the preview never repainted.
+ *
+ * Nothing above caught it because every test called the pure functions with a
+ * build already resolved. This asserts the thing the screen actually needs: a
+ * usable part vocabulary for EVERY man in EVERY group, hitters and arms, off
+ * whatever is written on the record — which for 390 of them is nothing.
+ */
+describe('every man in the league has a part vocabulary', () => {
+  it('builds six usable fields for all 780, from what is actually on the record', () => {
+    const l = league();
+    for (const club of l) {
+      for (const g of GROUPS) {
+        const people = (club[g.key] ?? []) as readonly { name: string; build?: string }[];
+        for (const who of people) {
+          const build = buildOf(who as never, club, g.key);
+          expect(build, `${club.abbr} ${g.key} ${who.name}`).toBeDefined();
+          const fields = lookFields(build);
+          expect(fields.length, `${club.abbr} ${who.name}`).toBe(PART_KEYS.length + 2);
+          for (const f of fields) {
+            if (f.kind !== 'part') continue;
+            // The listener does exactly this to coerce the new value. An empty
+            // or missing choice list is the crash, one frame later.
+            expect(f.choices?.length ?? 0, `${who.name} ${f.key}`).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
   });
 });

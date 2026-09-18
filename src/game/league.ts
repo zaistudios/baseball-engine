@@ -246,6 +246,26 @@ function checkArm(raw: unknown, where: string, r: Report): void {
   if (!isText(p['name'])) r.add(where, 'needs a name.');
   if (!isText(p['blurb'])) r.add(where, 'needs a blurb — it is shown when he takes the mound.');
   if (!oneOf(p['throws'], HANDS)) r.add(where, "throws must be 'L' or 'R'.");
+
+  /**
+   * ⚠️ AN ARM'S id, build AND look ARE ALL OPTIONAL, AND THAT IS THE WHOLE
+   * COMPATIBILITY STORY — 09-17. A hitter is REFUSED without an id and a build;
+   * an arm must be ACCEPTED without either, because every league anybody has
+   * exported before today has thirty clubs' worth of arms carrying neither.
+   * Requiring them here would refuse every league that exists to buy a field
+   * nobody has written yet.
+   *
+   * What is checked is that a PRESENT one is usable: an arm whose build is
+   * "robot" would reach partsFor() as undefined and draw out of an empty list.
+   * Absent means his club's modal build — see buildOf() in editor.ts.
+   */
+  if (p['id'] !== undefined && !isText(p['id'])) {
+    r.add(where, 'id must be text, or left off entirely — his name is the seed without one.');
+  }
+  if (p['build'] !== undefined && !oneOf(p['build'], BUILDS)) {
+    r.add(where, `build must be one of ${BUILDS.join(', ')}, or left off entirely.`);
+  }
+  if (p['look'] !== undefined) checkLook(p['look'], where, r);
   if (!oneOf(p['signature'], SIGNATURES)) {
     r.add(where, `signature must be one of ${SIGNATURES.join(', ')}.`);
   }

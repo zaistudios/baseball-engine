@@ -32,15 +32,18 @@ purpose. Do not settle it by accident.**
 > slots. It is not on the backburner; it is finished. What survives of it
 > survives as *engine* — `src/core/` — and as the setting above.
 >
-> ⚠️ **`Build` stays. It is the lore, not a remnant** — but it is doing two jobs
-> at once, because `defense.ts:111` also reads it as the **glove**, the only
-> fielding-hands number in the game. **Split them:** keep `build` as the
-> fiction, add a real `glove` rating to `Player`, point `gloveOf()` at that.
+> ⚠️ **`Build` stays. It is the lore, not a remnant** — and it is no longer
+> doing two jobs. ✅ **Split, 2026-09-16:** `glove` is a real optional rating on
+> `Player` (`src/core/roster.ts:80`) and `gloveOf()` reads it first, falling
+> back to the build-and-legs derivation only for a man who has not been given
+> one (`src/game/defense.ts:119`). `build` is the fiction again.
 >
-> Not everything is unwired yet. `src/game/` imports `swing.ts`, `overhead.ts`
-> and `plot.ts` out of `src/web/`, so those **move** rather than delete. Until
-> that lands, treat anything naming a division, an encounter, a shop or a
-> power-up as history.
+> ✅ **And the unwiring landed.** `swing.ts`, `overhead.ts` and `plot.ts` live in
+> `src/game/` now, and nothing under `src/game/`, `src/core/` or `scripts/`
+> imports out of `src/web/` any more. **`src/web/` and `index.html` are
+> frozen** — out of the build, out of `tsconfig`, out of `vitest`. Do not edit
+> them and do not build around them. Treat anything naming a division, an
+> encounter, a shop or a power-up as history.
 
 ## Status
 
@@ -62,23 +65,54 @@ top of it, a broadcast that says what just happened: a caption on every ball
 in play, a card when a big spot arrives, and a **score recap between halves**
 so the innings stop running together.
 
-🔴 **The top job, found by playing a season on 2026-09-15: there is nobody on
-screen.** `src/game/main.ts` draws a strike zone, a plate, a base widget, the
-ball and a timing bar — and **no batter, no pitcher, no catcher, no bat**. The
-figures went to `src/web/` (the roguelike) along with `drawBatter()` and the
-sprite layer. The engine is more correct than the picture, and the picture is
-what gets judged. Shapes in the at-bat view first; art on top of them second.
+✅ **There is somebody on screen — 2026-09-16.** The 09-15 note here read
+"there is nobody on screen": `src/game/main.ts` drew a strike zone, a plate, a
+base widget, the ball and a timing bar, and no people. It draws them now —
+`drawHitter()` and `drawArm()` — and everybody on the field has a face you can
+edit. The figures are shapes, not art; art goes on top of them, and the part
+library in `src/game/art.ts` is where it lands.
 
-⚠️ **`scripts/scenes.ts` cannot see what it is measuring.** Line 180 hardcodes
-`doublePlay: false, error: false, walkOff: false` and `sceneForTake()` is never
-called, so the double play, the error, the walk-off, the strikeout and the walk
-— about a third of all plate appearances, and most of what shipped on 09-12 and
-09-13 — are invisible to it. **Fix the instrument before tuning a caption.** It
-is the fourth time a measurement here has read "fine" while sampling the wrong
-population; see "The rules this codebase is built on".
+✅ **`scripts/scenes.ts` can see what it is measuring — 2026-09-17.** It could
+not until today. It hardcoded `doublePlay: false, error: false, walkOff: false`
+at the `sceneFor()` call and never called `sceneForTake()` at all, so the double
+play, the triple play, the man doubled off, the sacrifice fly, the error, the
+walk-off, the strikeout and the walk were all unreachable — about a third of
+every plate appearance, and most of what shipped on 09-12 and 09-13. It read
+"fine" the whole time, because a caption that cannot fire cannot look wrong.
+**The fourth time a measurement here sampled the wrong population**; see "The
+rules this codebase is built on".
 
-`✂` marks a file the 09-15 reframe retires. `↗` marks one that **moves** into
-`src/game/` rather than going — `src/game/` imports it today.
+It now reads the fielding facts off `SimResult`'s own counters — the same ones
+`balance.ts` reads, so there is one number per rule and not two — runs the takes
+through `sceneForTake()`, and stamps the walk-off off `game.ending`. The
+measured population and the played one are the same size to the plate
+appearance. **What it says at 150 games:**
+
+```
+mean extra hold          78.6 ms per plate appearance
+  on a ball in play      85.4 ms
+  on a strikeout/walk    63.2 ms   ← no replay under it: pure added clock
+per nine-inning game     5.81 s added
+```
+
+⚠️ **The strikeout and the walk are 30% of the plate appearances and the only
+beats with no replay underneath them.** On a ball in play the hold is partly
+paid for by an overhead worth watching; on a punch-out it buys a still picture.
+That is the line to watch if the afternoon starts feeling slow. Every tier is
+reachable — `huge` fires 0.6% of the time, so the grand slam beat is not dead
+code — and the rarest captions are rare because the plays are: `SACRIFICE FLY`
+17 in 150 games, `WALK-OFF` 17, `GRAND SLAM` 7, the triple play's `THREE` 2.
+
+⚠️ **`error` and `doublePlay` are EXCLUSIVE, and the instrument has to hold them
+that way.** `sceneFor()` branches the error before the double play, so an error
+stamped onto a ball that had already been given one silently ate the `TWO`
+caption — 230 of them read as 168 until the errors were moved onto balls no
+other fielding fact had claimed. A man who booted it did not also turn two.
+
+`✂` marks a file the 09-15 reframe retires and that is still sitting there. The
+`↗` moves are **done** — `swing.ts`, `plot.ts`, `overhead.ts` and `sprites.ts`
+are in `src/game/` now, and `src/web/` is frozen behind `tsconfig.json`'s
+`exclude` and `vitest.config.ts`'s.
 
 ```
 src/core/          the engine. Shared, and it stays.
@@ -91,26 +125,24 @@ src/core/          the engine. Shared, and it stays.
   inning.ts      outs, bases, runs, the sac fly, the double play and the extra base
   pitcher.ts     5 pitch types, 9 arms, and the PLAN each one pitches to
   baserunning.ts steals — one decision, one stat, one resolution
+  fielding.ts    what the defence turns: the force, the double and triple play,
+                 the man doubled off, the tag, the relay and the throw home
   roster.ts      the player record. `Build` (human/augmented/machine) STAYS —
                  it is the setting, and the spine the look system hangs on.
-                 ⚠️ defense.ts also reads it as the GLOVE; split that out into a
-                 real `glove` rating. `chemistry` leaves with the roguelike.
+                 ✅ `glove` is its own rating now; build is the fiction only.
+                 `chemistry` leaves with the roguelike.
 ✂ run.ts         9 encounters, money, shop, power-ups
 ✂ opponent.ts    the other team's runs, rolled not played
 ✂ division.ts    the three divisions — how automated the league is
 
-src/web/           the roguelike's screen. Retired, except where marked.
+src/web/           THE ROGUELIKE'S SCREEN. FROZEN — 2026-09-16. Excluded from
+                   tsconfig and from vitest, no script builds index.html, and
+                   nothing outside this folder imports it. Do not edit it and
+                   do not build around it; it is kept for reference, not reuse.
 ✂ main.ts        the roguelike at-bat screen
-↗ swing.ts       the bat as a physical object — the level arc, and its geometry
-↗ plot.ts        where a batted ball lands, for the overhead replay
-↗ overhead.ts    the replay itself — the cut, the nine, the race to first
-↗ sprites.ts     the asset layer. ⚠️ build-time `import.meta.glob`, which does
-                 not survive a league you can edit. It becomes a RUNTIME store
-                 (IndexedDB) holding the PART library — see "The customization
-                 engine" below. Everything below `sprite()` is correct and
-                 stays; only the source of the image changes.
 ✂ scorecard.ts   the scorer's line and what the booth says
 ✂ save.ts        resuming a run
+✂ clock.ts · juice.ts · settings.ts   the rest of the run's screen
 ✂ src/cli/play.ts   one encounter, played in a terminal
 ```
 
@@ -133,6 +165,7 @@ src/game/
   rotation.ts    who starts tonight, and what his last start cost him
   bullpen.ts     an arm gets tired, and somebody has to come get him
   defense.ts     nine men standing somewhere, and the ball reaching one of them
+  shift.ts       ...and moving them, when the hitter has earned it
   placement.ts   where the ball actually went, and what the geometry is worth
   running.ts     the running game — steals, and taking the extra base
   form.ts        hot and cold: what a man is doing THIS week
@@ -153,6 +186,19 @@ src/game/
   art.ts         the part library: IndexedDB, and the tint that makes one
                  drawing serve all thirty clubs. Knows nothing about parts
   tuning.ts      the knobs somebody will actually want to turn
+
+  ...and the four that came out of src/web/ when the run was revoked:
+  swing.ts       the bat as a physical object — the level arc, and its geometry
+  plot.ts        where a batted ball lands, for the overhead replay
+  overhead.ts    the replay itself — the cut, the nine, the race to first
+  sprites.ts     the BALL and the FIELD, out of assets/ at build time.
+                 ⚠️ IT NO LONGER DRAWS PEOPLE — 09-17. overhead.ts used to try
+                 `assets/fielders/` BEFORE the drawn figure, so one PNG in an
+                 empty folder would have silently outranked every look anybody
+                 chose, from a build-time glob no screen can reach. A player's
+                 look is DATA, not an asset: a pre-composited man cannot be
+                 tinted to a club, cannot carry a build and cannot be edited.
+                 People go through art.ts, per part. Scenery stays here.
 ```
 
 ```bash
@@ -205,9 +251,12 @@ interface Look {
 ```
 
 ```
-CUSTOMIZE -> a club -> a man      six dropdowns and a live preview, by part NAME
+CUSTOMIZE -> a club -> anybody    six dropdowns and a live preview, by part NAME
+                                  — the lineup, the bench, the ROTATION and the
+                                  BULLPEN. All 780, not the 390 hitters.
 CUSTOMIZE -> a club               the kit: three native colour inputs
-CUSTOMIZE -> THE ART PACK         import drawings; they replace shells per part
+CUSTOMIZE -> THE ART PACK         a grid of every slot: what is in it, what to
+                                  call the file, and ✕ to drop that one part
 ```
 
 Four rules, and none of them is optional:
@@ -240,8 +289,13 @@ cannot validate, and a bad image must never cost somebody a franchise.
 `machine-crest-vent-stack.png`. Matched on the part's NAME and not its index,
 because an index is a thing nobody drawing a vent stack should have to look up.
 `frame`, `head` and `crest` can carry art; **`tone` cannot** — skin and alloy
-are the colour the other three are tinted against. `artSlots()` prints every
-filename the library accepts, and it is one button on the screen.
+are the colour the other three are tinted against. `artSlots()` is every slot the
+library accepts, and the screen draws all 36 of them as a **grid**: a filled one
+shows the drawing, an empty one shows the filename it is waiting for, and each
+filled one carries its own ✕. It used to be a button that printed the 36 names
+into a paragraph, with the header saying `4 of 36` and no way on earth to find
+out *which* four — the 09-03 lesson (a control whose effect cannot report
+itself) one screen over.
 
 ⚠️ **An index is a promise.** Saved looks point into the lists in `PARTS`, so
 entries may be **appended and renamed** freely and must never be **reordered or
@@ -260,12 +314,39 @@ figures a frame is eleven offscreen canvases a frame, and the GDD's own
 acceptance criterion is *sprite assembly under 0.1s*. `tinted()` keys on part
 and colour; a club changing its jersey misses once.
 
-**Still shells, and known:** `Pitcher` carries no `id` and no `build`, so an
-arm's face is rolled from his name and his club (`lookForArm()`) and there is
-nowhere to store a choice — the look block in the editor is hitters only until
-`Pitcher` grows those two fields. And `build` is still doing double duty as the
-**glove** at `defense.ts:111`; splitting a real `glove` rating out is its own
-commit.
+✅ **The man on the mound has a face somebody chose — 2026-09-17.** The note here
+used to say `Pitcher` carried no `id` and no `build`, so an arm's face was rolled
+off his name and his club and there was nowhere to store a choice: the look block
+was hitters only, and **390 of the league's 780 men could not be dressed at all**
+— including the one you look at for the whole half you spend hitting. `Pitcher`
+carries `id`, `build` and `look?` now, and the rotation and the bullpen get the
+same six dropdowns, the same live preview and the same RANDOMIZE as the lineup.
+
+⚠️ **All three are OPTIONAL, and that is the compatibility contract, not
+laziness.** Every league anybody has exported carries arms with none of them.
+`lookForArm()` falls back to his name as the seed and `clubBuild()` as the part
+set — the exact roll every arm has always had — and `checkArm()` accepts their
+absence while refusing a *present* build that is not one of the three.
+`look.test.ts` pins the fallback as a **golden value** for one named arm, so
+moving the default fails a test instead of silently redressing 390 men in every
+league in the wild. One cost stays: an arm with no written build still changes
+species if he is traded between a holdout club and a foundry club, until
+somebody opens him and picks one. The alternative was refusing to load every
+league that exists.
+
+⚠️ **Scenery gets its own door — `lookForExtra()`.** The catcher and every
+overhead baserunner used to be drawn by spreading the real pitcher into a fake
+one and changing only `name`. That was harmless while `Pitcher` held nothing but
+ratings; the moment an arm could carry a stored `look`, the spread returned *his*
+look, because a stored look wins — one chosen face on nine men, and only on
+clubs somebody had customized. `lookForExtra()` takes a string and no record at
+all, so there is nothing for a face to leak through.
+
+⚠️ **`armBuild()` exists so the look and the part set cannot disagree.**
+`drawFigure()` takes them as two fields, and three call sites in `main.ts` passed
+`clubBuild(club)` next to a `lookForArm()` that now reads the arm's own build —
+a `crest: 3` indexed against a list of two, clamped at the draw to something
+nobody picked.
 
 ## Getting it onto another machine
 
@@ -2247,14 +2328,21 @@ Extra milliseconds are spent only where they are earned.
 
 | tier | fires | pays | what reaches it |
 |---|---|---|---|
-| **routine** | 77.0% | 0 ms | `GROUND OUT · TO SHORT`, `BASE HIT`, `POPPED UP` |
-| **solid** | 17.5% | 220 ms | `RBI SINGLE`, `INTO THE GAP`, `OFF THE WALL`, `ERROR`, `TWO` |
-| **big** | 4.7% | 620 ms | `HOME RUN`, `TRIPLE`, `ROBBED`, `HE DELIVERS` |
-| **huge** | 0.7% | 1150 ms | `GRAND SLAM`, `THREE-RUN SHOT`, `WALK-OFF` (+500) |
+| **routine** | 76.1% | 0 ms | `STRIKE THREE`, `GROUND OUT · TO SHORT`, `BASE HIT`, `POPPED UP`, `WALK`, `FORCE AT SECOND` |
+| **solid** | 18.4% | 220 ms | `RBI SINGLE`, `INTO THE GAP`, `OFF THE WALL`, `ERROR`, `TWO`, `SACRIFICE FLY`, `STRUCK HIM OUT` |
+| **big** | 4.9% | 620 ms | `HOME RUN`, `TRIPLE`, `ROBBED`, `HE DELIVERS`, `TWO, AND THE RUN IS OUT`, `FORCED IN` |
+| **huge** | 0.6% | 1150 ms | `GRAND SLAM`, `THREE-RUN SHOT`, `THREE`, `WALK-OFF` (+500) |
 
-**The bill: 3.94 seconds added to a nine-inning game**, measured over 15,564
-balls in play. `node scripts/scenes.ts` prints it, and also how often each
-caption fires — *a tier nothing ever reaches is dead code with a comment on it.*
+**The bill: 5.81 seconds added to a nine-inning game**, measured over 11,085
+plate appearances — 7,723 balls in play and 3,362 strikeouts and walks.
+`node scripts/scenes.ts` prints it, and also how often each caption fires —
+*a tier nothing ever reaches is dead code with a comment on it.*
+
+⚠️ **That is a bigger number than the 3.94 s this section used to quote, and
+none of the growth is new code.** The old figure was measured on an instrument
+that could only see balls in play and could not reach eight of the captions;
+see the note at the top of this file. The beats did not get slower, the
+measurement got honest.
 
 It reuses `placement.ts`'s own vocabulary rather than inventing a second one. A
 hit is about the **place** it went (`INTO THE GAP`, `TO LEFT FIELD`); an out is
@@ -2440,7 +2528,7 @@ This one did not come from the autopsy. It came from being wrong four times in t
 - **`scripts/sensitivity.ts`, 08-25** — never converged; two runs disagreed about the biggest lever in the game, and three of the seven weights in `value.ts` had been tuned against it.
 - **`GAP_FT`, 08-28** — measured over all hits and applied to triples, which is why the game had **zero** triples in 16,479 plate appearances. The league walk rate was correct while no individual's was.
 - **The test suite, 09-03** — 996 green tests, and not one of them could ask whether a person could *reach* the club editor. A suite that passes and a feature that is reachable are independent facts.
-- **`scripts/scenes.ts`, 09-15** — hardcodes `doublePlay: false, error: false, walkOff: false` at line 180 and never calls `sceneForTake()`, so the double play, the error, the walk-off, the strikeout and the walk are invisible to the one instrument that exists to answer "does this caption ever fire". Its own header says *"a tier nothing ever reaches is a tier that does not exist. Read the FIRES column."*
+- **`scripts/scenes.ts`, 09-15 — fixed 09-17** — hardcoded `doublePlay: false, error: false, walkOff: false` at the `sceneFor()` call and never called `sceneForTake()`, so the double play, the triple play, the man doubled off, the sacrifice fly, the error, the walk-off, the strikeout and the walk were invisible to the one instrument that exists to answer "does this caption ever fire". Its own header says *"a tier nothing ever reaches is a tier that does not exist. Read the FIRES column."* — and eight of them could not reach it. **The tell was in the output the whole time and nobody read it:** the header line printed `3006 balls in play · 4347 plate appearances` and the 1341 missing ones were never explained. It reads the facts off `SimResult`'s counters now, and the two numbers are equal.
 
 **An aggregate that matches reality is not evidence**, because a broken distribution and a correct one have the same mean. The check is cheap and it is always the same: name the population the change touches, then confirm the instrument samples it.
 

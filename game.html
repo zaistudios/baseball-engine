@@ -349,6 +349,38 @@
         border: 1px solid var(--line); background: #101a12;
         image-rendering: pixelated; align-self: flex-start;
       }
+      /* THE ART PACK'S SLOTS. Thirty-six cells, one per part a drawing can
+         fill, so "which four of the thirty-six do I actually have" is a thing
+         you can see rather than a number in a header. A filled cell shows the
+         drawing; an empty one shows the filename it is waiting for. */
+      #start .artgrid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: 6px; padding-top: 8px;
+      }
+      #start .artslot {
+        border: 1px solid var(--line); background: #0a0f0c; padding: 5px;
+        display: flex; flex-direction: column; align-items: center; gap: 3px;
+      }
+      #start .artslot.on { border-color: var(--hot); }
+      #start .artslot b {
+        font-size: 9px; letter-spacing: 1px; color: var(--ink); font-weight: 400;
+        text-align: center; line-height: 1.3;
+      }
+      /* The filename, and it is deliberately selectable — somebody naming a
+         file is going to want to copy it rather than transcribe it. */
+      #start .artslot i {
+        font-size: 8px; color: var(--dim); font-style: normal; word-break: break-all;
+        text-align: center; -webkit-user-select: text; user-select: text;
+      }
+      #start .artslot .edtiny { width: 100%; margin-top: 2px; }
+      #start .artpic {
+        width: 64px; height: 64px; image-rendering: pixelated; flex: 0 0 auto;
+        background: #101a12; border: 1px solid var(--line);
+      }
+      #start .artpic.empty {
+        display: flex; align-items: center; justify-content: center;
+        color: var(--line); font-size: 18px;
+      }
       #start input[type="color"] {
         width: 44px; height: 26px; padding: 1px; cursor: pointer;
         background: #0a0f0c; border: 1px solid var(--line);

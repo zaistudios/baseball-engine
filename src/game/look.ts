@@ -316,25 +316,72 @@ export function lookFor(p: Player): Look {
 }
 
 /**
- * THE MAN ON THE MOUND, and he needs his own door for a reason worth knowing.
+ * THE MAN ON THE MOUND. Three ways to answer, and they are tried in that order.
  *
- * ⚠️ `Pitcher` CARRIES NEITHER AN `id` NOR A `build`. It is keyed by NAME —
- * league.ts is explicit that names are keys here — and it has no lore tier at
- * all, because the roguelike's nine arms were bosses rather than roster men. So
- * two things have to be borrowed:
+ * ✅ **HE HAS HIS OWN RECORD NOW — 2026-09-17.** The note that used to live here
+ * said `Pitcher` carried neither an `id` nor a `build`, that both had to be
+ * borrowed, and that it made this the one look in the game that depends on the
+ * club — so a traded arm changed species. `Pitcher` carries all three fields
+ * today and this reads them:
  *
- *   the seed   his name, which is already required to be unique league-wide.
- *   the build  his CLUB's, via clubBuild(). An Albany Holdouts arm has to be a
- *              holdout and a Detroit Foundry arm has to be a machine; rolling
- *              it off the name would put a robot in the last human league.
+ *   his look   somebody chose it in the editor. Wins outright, as it does for a
+ *              hitter. This is the half that did not exist at all before.
+ *   his build  his own, if he has one. Falls back to his CLUB's modal build via
+ *              clubBuild() — right for an arm nobody has opened, because an
+ *              Albany Holdouts arm has to be a holdout and rolling it off the
+ *              name would put a robot in the last human league.
+ *   his seed   his own id, if he has one. Falls back to his NAME, which is
+ *              league-wide unique and is the exact roll every arm has had since
+ *              the feature shipped.
  *
- * ⚠️ THAT MAKES THIS THE ONE LOOK THAT DEPENDS ON THE CLUB, which lookFor()
- * forbids for hitters — a traded arm changes species. It is a hole in the DATA,
- * not a design choice: give `Pitcher` its own `build` when the editor grows the
- * field, point this at it, and the exception goes away.
+ * ⚠️ THE FALLBACKS ARE NOT TIDINESS, THEY ARE THE COMPATIBILITY CONTRACT. Every
+ * league anybody has exported before today has arms with no id and no build. All
+ * of them still open, and every one of those men still turns up wearing the same
+ * face he has always worn. Do not make either field required.
+ *
+ * ⚠️ AND THE CLUB FALLBACK IS STILL A CLUB DEPENDENCE, which lookFor() forbids
+ * for hitters. It is narrower than it was — it now only reaches an arm nobody
+ * has dressed — but a man traded between a holdout club and a foundry club will
+ * still change species until somebody opens him in the editor and picks one.
+ * That is the honest cost of `build` being optional, and it is the right trade:
+ * the alternative is refusing to load every league that exists.
  */
 export function lookForArm(arm: Pitcher, team: Team): Look {
-  return rollLook(arm.name, clubBuild(team), 0.45);
+  if (arm.look) return arm.look;
+  return rollLook(arm.id ?? arm.name, armBuild(arm, team), 0.45);
+}
+
+/**
+ * WHICH PART SET AN ARM IS DRAWN FROM, and it exists so that it cannot
+ * disagree with lookForArm().
+ *
+ * ⚠️ THE LOOK AND THE BUILD ARE ONE ANSWER, NOT TWO. drawFigure() takes them as
+ * separate fields, so every call site that rolled the look one way and the build
+ * another was one edit away from a machine-indexed look drawn out of the human
+ * parts — a man with `crest: 3` out of a list of two, silently clamped to
+ * something nobody picked. Three call sites in main.ts passed `clubBuild(club)`
+ * next to a `lookForArm()` that now reads the arm's OWN build. Both go through
+ * here instead.
+ */
+export const armBuild = (arm: Pitcher, team: Team): Build => arm.build ?? clubBuild(team);
+
+/**
+ * A MAN WITH NO RECORD ANYWHERE — the catcher, and every baserunner the overhead
+ * replay knows only as a bag number.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE OLD TRICK BECAME A BUG. Both call sites used to
+ * build a fake Pitcher — `{ ...currentPitcher(game), name: 'DET-catcher' }` —
+ * and hand it to lookForArm(), which was harmless while `Pitcher` held nothing
+ * but ratings and a name. The moment an arm could carry a stored `look`, that
+ * spread copied the pitcher's chosen face onto his own catcher and onto every
+ * runner on the field: nine men wearing one face, and only for clubs somebody
+ * had bothered to customize.
+ *
+ * Scenery gets its own door. No record is spread, so nothing can leak through
+ * it, and the seed is plainly what it is — a string.
+ */
+export function lookForExtra(seed: string, team: Team): Look {
+  return rollLook(seed, clubBuild(team), 0.45);
 }
 
 /** What this club mostly is — the modal build of its nine. */

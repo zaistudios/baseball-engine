@@ -168,6 +168,7 @@ import {
   PARK_FIELDS,
   UNIFORM_FIELDS,
   addPerson,
+  buildOf,
   coerce,
   groupOf,
   lookFields,
@@ -267,16 +268,17 @@ import {
   CHECK_PULL_MS,
 } from './swing.ts';
 import {
+  armBuild,
   artSlots,
   clubBuild,
   drawFigure,
   idForFilename,
   lookFor,
   lookForArm,
+  lookForExtra,
   uniformFor,
 } from './look.ts';
-import { MAX_ART_BYTES, clearArt, hasArt, loadArt, putArt } from './art.ts';
-import type { Build } from '../core/roster.ts';
+import { MAX_ART_BYTES, clearArt, hasArt, loadArt, putArt, removeArt, sprite } from './art.ts';
 import {
   makeCam,
   newReplay,
@@ -3311,7 +3313,9 @@ function drawArm(now: number): void {
   drawFigure(ctx, {
     look: lookForArm(arm, club),
     uniform: kit,
-    build: clubBuild(club),
+    // ⚠️ armBuild(), NOT clubBuild(). He has his own build now, and the look
+    // above is indexed against it — see armBuild().
+    build: armBuild(arm, club),
     x: ARM_XY.x,
     y: ARM_XY.y,
     h: ARM_XY.h,
@@ -3340,8 +3344,12 @@ function drawHitter(now: number): void {
   // The catcher is scenery and has no record anywhere in the engine, so he is
   // rolled off his club's abbr and wears its kit. ponytail: a nameless man in
   // the right colours beats inventing a catcher entity nothing else would read.
+  //
+  // ⚠️ lookForExtra(), NOT A SPREAD OF THE PITCHER. That spread used to be
+  // harmless and stopped being the moment an arm could carry a stored look —
+  // it put the pitcher's chosen face on his own catcher. See lookForExtra().
   drawFigure(ctx, {
-    look: lookForArm({ ...currentPitcher(game), name: `${fielding.abbr}-catcher` }, fielding),
+    look: lookForExtra(`${fielding.abbr}-catcher`, fielding),
     uniform: uniformFor(fielding),
     build: clubBuild(fielding),
     x: CATCHER_XY.x,
@@ -3380,20 +3388,31 @@ function drawHitter(now: number): void {
  * grey dots and becomes the fielding club in its own colours with the batting
  * club running the bases, which is the thing a dot could never say.
  *
- * ⚠️ THE MEN WITHOUT RECORDS ARE ROLLED OFF A SEED, and there are two kinds:
- * the pitcher, who is not in a DH league's batting order, and every baserunner,
- * who reaches this file as a bag number. Both borrow the trick drawHitter()
- * already uses for the catcher — lookForArm() against a made-up name — so the
- * face is stable within a club rather than flickering frame to frame.
+ * ⚠️ THE MAN ON THE MOUND IS NOT ONE OF THE MEN WITHOUT A RECORD — not since
+ * 09-17. `FILL_ORDER` in defense.ts never fills `'P'`, so the pitcher reaches
+ * here with no `man` and used to be rolled off a made-up name like every other
+ * anonymous figure. He has his own face now, chosen in the editor, and drawing
+ * him as scenery would mean the man you just watched deliver the pitch turns
+ * into somebody else the instant the camera cuts to the field. Seed `F1` on the
+ * fielding side IS the pitcher; see overhead.ts, which numbers the nine.
+ *
+ * ⚠️ EVERY OTHER MAN WITHOUT A RECORD IS STILL ROLLED OFF A SEED — the
+ * baserunners, who reach this file as bag numbers. They go through
+ * lookForExtra(), which spreads no record and so cannot leak one man's chosen
+ * face onto another's.
  */
 const overheadFigure: FigureFn = (c, o) => {
   const club = clubInGame(game, o.side === 'fielding' ? fieldingSide(game) : battingSide(game));
+  const onMound = o.side === 'fielding' && !o.man && o.seed === 'F1';
+  const arm = onMound ? currentPitcher(game) : null;
   drawFigure(c, {
     look: o.man
       ? lookFor(o.man)
-      : lookForArm({ ...currentPitcher(game), name: `${club.abbr}-${o.seed}` }, club),
+      : arm
+        ? lookForArm(arm, club)
+        : lookForExtra(`${club.abbr}-${o.seed}`, club),
     uniform: uniformFor(club),
-    build: o.man ? o.man.build : clubBuild(club),
+    build: o.man ? o.man.build : arm ? armBuild(arm, club) : clubBuild(club),
     x: o.x,
     y: o.y,
     h: o.h,
@@ -6577,13 +6596,17 @@ function pregame(): void {
       c2.fillStyle = '#101a12';
       c2.fillRect(0, 0, el2.width, el2.height);
       drawFigure(c2, {
-        look: lookOf(who),
+        look: lookOf(who, club, group),
         uniform: kit,
-        build: who.build,
+        build: buildOf(who, club, group),
         x: el2.width / 2,
         y: el2.height - 12,
         h: 108,
-        stance: 'bat',
+        // ⚠️ AN ARM IS PREVIEWED IN HIS DELIVERY, NOT HOLDING A BAT. It is the
+        // pose you actually see him in for the whole half you spend hitting,
+        // and previewing him in a batting stance would be showing somebody a
+        // picture the game never draws.
+        stance: groupOf(group).of === 'arm' ? 'pitch' : 'bat',
       });
     }
   };
@@ -6608,6 +6631,41 @@ function pregame(): void {
   const artPanel = (): string => {
     const slots = artSlots();
     const have = slots.filter((s) => hasArt(s.id)).length;
+
+    /**
+     * ⚠️ THE SLOTS ARE A GRID, NOT A TEXT DUMP — 09-17. This screen used to
+     * answer "what is in my art pack" with a button that printed thirty-six
+     * filenames into a paragraph, and nothing at all for "which of them did I
+     * actually import". The count in the header said `4 of 36` and there was no
+     * way on earth to find out WHICH four. That is the 09-03 lesson again, one
+     * screen over: a control whose effect has no way to report itself.
+     *
+     * So every slot is a cell, a filled one shows the drawing, and the filename
+     * is printed on the cell that wants it rather than in a list somebody has to
+     * match up by eye. WHAT TO CALL THEM stops being a button.
+     */
+    const cells = slots
+      .map((s) => {
+        const on = hasArt(s.id);
+        return (
+          `<div class="artslot${on ? ' on' : ''}">` +
+          (on
+            ? `<canvas class="artpic" width="64" height="64" data-art-id="${escapeText(s.id)}"></canvas>`
+            : `<div class="artpic empty">—</div>`) +
+          `<b>${escapeText(s.label.split('—')[1]?.trim() ?? s.label)}</b>` +
+          `<i>${escapeText(s.file)}</i>` +
+          // ⚠️ ONE PART, NOT THE WHOLE LIBRARY. removeArt() has existed in
+          // art.ts since the pack shipped and nothing ever called it, so the
+          // only way out of one bad import was REMOVE ALL and re-importing the
+          // other thirty-five.
+          (on
+            ? `<button class="edtiny" data-ed-go="artdrop" data-art-id="${escapeText(s.id)}">✕ REMOVE</button>`
+            : '') +
+          '</div>'
+        );
+      })
+      .join('');
+
     return (
       `<div class="edgroup" style="grid-column:1/-1">` +
       `<div class="edhead">THE ART PACK <i>${have} of ${slots.length}</i></div>` +
@@ -6615,20 +6673,46 @@ function pregame(): void {
       'Drawings replace the shells one part at a time, and everything is optional — ' +
       'a part with no file keeps the shape it already draws. ' +
       '<b>Draw them in greyscale</b>: each one is tinted to the club that wears it, ' +
-      'so one cap serves all thirty. Name a file after the part it holds — ' +
-      `<i>machine-crest-vent-stack.png</i>. They live on this machine, not in the league ` +
+      'so one cap serves all thirty. Name a file after the part it holds — the name ' +
+      'is printed under every slot below. They live on this machine, not in the league ' +
       'document, so a league you hand somebody lands on their own parts.</div>' +
       `<div class="edmix"><span>` +
       `<label class="edtiny" style="cursor:pointer">IMPORT DRAWINGS` +
       `<input type="file" id="artin" accept="image/*" multiple hidden></label>` +
-      `<button class="edtiny" data-ed-go="artnames">WHAT TO CALL THEM</button>` +
       `<button class="edtiny" data-ed-go="artclear"${have ? '' : ' disabled'}>REMOVE ALL</button>` +
       `</span></div>` +
       (artSays.length
         ? `<div class="says">${artSays.map((p) => `<div>${escapeText(p)}</div>`).join('')}</div>`
         : '') +
+      `<div class="artgrid">${cells}</div>` +
       '</div>'
     );
+  };
+
+  /**
+   * Paint the thumbnails, for the same reason paintLookPreviews() exists: the
+   * canvases do not exist until the innerHTML above has landed.
+   *
+   * ⚠️ UNTINTED, ON PURPOSE. Everywhere else a part is tinted to the club that
+   * wears it, but this screen is answering "what did I import" — and showing
+   * somebody their own greyscale drawing in the Albany blue they never chose is
+   * the screen telling them their file is wrong. The tint is a club's business;
+   * the library is the drawing's.
+   */
+  const paintArtSlots = (): void => {
+    for (const el2 of grid.querySelectorAll<HTMLCanvasElement>('canvas.artpic')) {
+      const id = el2.dataset['artId'];
+      const img = id ? sprite(id) : undefined;
+      const c2 = el2.getContext('2d');
+      if (!img || !c2) continue;
+      c2.clearRect(0, 0, el2.width, el2.height);
+      // Fit inside the cell with the aspect kept — the same rule the draw path
+      // uses, so a tall crest reads here the way it will on a man.
+      const k = Math.min(el2.width / img.width, el2.height / img.height);
+      const w = img.width * k;
+      const h = img.height * k;
+      c2.drawImage(img, (el2.width - w) / 2, (el2.height - h) / 2, w, h);
+    }
   };
 
   const drawEditor = (): void => {
@@ -6758,33 +6842,55 @@ function pregame(): void {
                 '</div>'
               : '';
           /**
-           * ⚠️ THE LOOK BLOCK IS HITTERS ONLY, AND THAT IS THE DATA'S FAULT
-           * RATHER THAN A DECISION. `Pitcher` carries no id and no build, so an
-           * arm's face is rolled off his name and his club — lookForArm() — and
-           * there is nowhere on the record to store a choice. Give Pitcher its
-           * own `build` and `look` and this block moves down to cover him.
+           * ✅ THE LOOK BLOCK COVERS EVERYBODY — 2026-09-17. It used to read
+           * `g.of === 'hitter' ? ... : ''`, and the note here said that was the
+           * DATA's fault rather than a decision: `Pitcher` carried no id and no
+           * build, so an arm's face was rolled off his name and his club and
+           * there was nowhere on the record to store a choice. It carries all
+           * three fields now, so the rotation and the bullpen get the same six
+           * dropdowns, the same preview and the same RANDOMIZE as the lineup —
+           * 390 men who could not be dressed at all.
+           *
+           * ⚠️ AN ARM'S DEFAULT BUILD IS HIS CLUB'S, NOT 'human'. A hitter with
+           * no build written is a human; an arm with none is whatever his club
+           * mostly is, because that is what lookForArm() has always drawn him
+           * as. Defaulting him to 'human' here would offer a Detroit Foundry
+           * reliever a list of haircuts and then draw him as a chassis.
            *
            * ⚠️ THE PREVIEW IS THE POINT. Picking "crest 3" out of a dropdown
            * with nothing to look at is not customization, it is data entry —
            * and the parts only mean anything assembled. The canvas is filled in
            * after this HTML lands; see paintLookPreviews().
            */
+          const build = buildOf(who as unknown as Player, club, g.key);
           const look =
-            g.of === 'hitter'
-              ? `<div class="edmix"><span>how he looks — ` +
-                `${escapeText((who['build'] as string) ?? 'human')} parts, his club's kit` +
-                `<button class="edtiny" data-ed-go="roll" data-group="${g.key}" ` +
-                `data-index="${i}">RANDOMIZE</button></span>` +
-                `<canvas class="edlook" width="120" height="150" ` +
-                `data-look-group="${g.key}" data-look-index="${i}"></canvas>` +
-                rows(
-                  lookFields(((who['build'] as Build) ?? 'human')),
-                  lookOf(who as unknown as Player) as unknown as Record<string, unknown>,
-                  `data-ed="look" data-group="${g.key}" data-index="${i}"`,
-                ) +
-                '</div>'
-              : '';
-          return `${head}<div class="edform">${rows(fields, who, at)}${mix}${look}</div>`;
+            `<div class="edmix"><span>how he looks — ` +
+            `${escapeText(build)} parts, his club's kit` +
+            `<button class="edtiny" data-ed-go="roll" data-group="${g.key}" ` +
+            `data-index="${i}">RANDOMIZE</button></span>` +
+            `<canvas class="edlook" width="120" height="150" ` +
+            `data-look-group="${g.key}" data-look-index="${i}"></canvas>` +
+            rows(
+              lookFields(build),
+              lookOf(who as unknown as Player, club, g.key) as unknown as Record<string, unknown>,
+              `data-ed="look" data-group="${g.key}" data-index="${i}"`,
+            ) +
+            '</div>';
+          /**
+           * ⚠️ THE BUILD SELECT SHOWS WHAT HE IS, NOT WHAT IS WRITTEN DOWN.
+           * An arm's build is optional, so `who.build` is undefined for most of
+           * them — and an unselected `<select>` shows its FIRST option, which is
+           * 'human'. So the form said "Build: human" with "machine parts" in the
+           * look block two inches below it, on the same man.
+           *
+           * Seeding the displayed record with the resolved build is the same
+           * trick lookOf() plays: show him the face and the species he has
+           * actually been wearing, so that saving is a change to what he was
+           * rather than a change from a default nobody chose. Nothing is
+           * written until somebody touches a field.
+           */
+          const shown = g.of === 'arm' ? { ...who, build } : who;
+          return `${head}<div class="edform">${rows(fields, shown, at)}${mix}${look}</div>`;
         })
         .join('');
       return (
@@ -6989,7 +7095,9 @@ function pregame(): void {
       if (editing) {
         drawEditor();
         // The canvases exist only now, and drawEditor() writes innerHTML.
+        // Both passes are no-ops on the screen that has none of their canvases.
         paintLookPreviews();
+        paintArtSlots();
       } else drawLeague();
       return;
     }
@@ -7130,7 +7238,19 @@ function pregame(): void {
     if (kind === 'look') {
       const who = ((club[group] ?? []) as readonly Player[])[index];
       if (!who) return;
-      const f = lookFields(who.build).find((x) => x.key === key);
+      /**
+       * ⚠️ buildOf(), NOT who.build — AND THIS IS THE ONE THAT BROKE THE ARMS.
+       * An arm's build is optional, so `who.build` is undefined for every arm
+       * nobody has set one on: lookFields(undefined) reaches partsFor(undefined),
+       * which is PARTS[undefined], which is undefined, and `.frames.map()` on it
+       * throws inside this listener. The change event dies there — so every one
+       * of the six dropdowns rendered, moved when you dragged it, and then did
+       * NOTHING, silently, on every arm in the league.
+       *
+       * The form was already computing the same answer with buildOf(); this was
+       * the one place that still asked the record directly.
+       */
+      const f = lookFields(buildOf(who, club, group)).find((x) => x.key === key);
       if (f) {
         editing = replaceClub(
           editing,
@@ -7370,8 +7490,18 @@ function pregame(): void {
             : group
               ? { group, index }
               : null;
-      } else if (ed === 'artnames') {
-        artSays = ['Name a file after the part it holds:', ...artSlots().map((s) => s.file)];
+      } else if (ed === 'artdrop') {
+        // ⚠️ ONE PART. The grid names the slot it came from, so the message can
+        // say what went rather than "removed" — somebody who drops the wrong
+        // one has to be able to see which one they actually dropped.
+        const id = btn.dataset['artId'];
+        const slot = artSlots().find((s) => s.id === id);
+        if (id) {
+          void removeArt(id).then(() => {
+            artSays = [`${slot?.file ?? id} removed. That part draws its shell again.`];
+            drawn();
+          });
+        }
       } else if (ed === 'artclear') {
         void clearArt().then(() => {
           artSays = ['Every drawing removed. The shells are back.'];

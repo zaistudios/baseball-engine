@@ -46,6 +46,10 @@
 import type { Rng } from './rng.ts';
 import { ALL_PITCH_TYPES, type PitchType } from './hitTables.ts';
 import { ALL_LOCATIONS, type Hand, type PitchLocation } from './hit.ts';
+// ⚠️ TYPE-ONLY, AND IT HAS TO STAY THAT WAY. roster.ts reaches run.ts and
+// inning.ts; a value import here would close a cycle that ES modules tolerate
+// right up until somebody calls one at module scope. Erased at compile time.
+import type { Build, Look } from './roster.ts';
 
 /**
  * When the pitch becomes readable. This is the league ladder.
@@ -133,6 +137,38 @@ export type Arsenal = Partial<Record<PitchType, number>>;
 
 export interface Pitcher {
   name: string;
+  /**
+   * HIS OWN SEED, and the reason he gets one — 2026-09-17.
+   *
+   * ⚠️ ARMS ARE KEYED BY NAME IN THE LEAGUE DOCUMENT and that does not change;
+   * league.ts still holds every name unique. This is the stable handle a LOOK
+   * hangs on, so that renaming a man does not redress him and two clubs can
+   * both have a "Cy Vance" without sharing a face.
+   *
+   * Optional, because every league exported before today has none — and an arm
+   * without one falls back to his name, which is exactly the roll he has always
+   * had. See lookForArm().
+   */
+  id?: string;
+  /**
+   * HUMAN, AUGMENTED OR MACHINE. The setting, on the one record that was
+   * missing it.
+   *
+   * ⚠️ IT IS NOT A RATING AND NOTHING MAY READ IT AS ONE. `build` on Player is
+   * the lore and the part set, and `glove` was split out of it in 09-16 for
+   * exactly this reason. It picks which parts he is drawn from and nothing else.
+   *
+   * Optional for the same reason `id` is. Absent means his club's modal build,
+   * which is what lookForArm() has always used and is right for an arm nobody
+   * has opened the editor on.
+   */
+  build?: Build;
+  /**
+   * What he looks like, when somebody chose. Absent means roll — the same
+   * override rule Player has, and the reason the whole league is dressed with
+   * nothing stored.
+   */
+  look?: Look;
   /** One line of flavour, shown when they take the mound. */
   blurb: string;
   /**

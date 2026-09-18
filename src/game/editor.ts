@@ -34,7 +34,15 @@ import type { Build, Look, Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
 import type { Identity } from './identity.ts';
 import { ALL_PITCH_TYPES } from '../core/hitTables.ts';
-import { PART_KEYS, lookFor, partNames, safeLook, uniformFor } from './look.ts';
+import {
+  PART_KEYS,
+  clubBuild,
+  lookFor,
+  lookForArm,
+  partNames,
+  safeLook,
+  uniformFor,
+} from './look.ts';
 import {
   BUILDS,
   TRAITS,
@@ -182,6 +190,15 @@ export const HITTER_FIELDS: readonly Field[] = [
 
 export const ARM_FIELDS: readonly Field[] = [
   { key: 'name', label: 'Name', kind: 'text' },
+  /**
+   * ⚠️ THE ARM GETS A BUILD — 2026-09-17, and it is the field that unlocked
+   * half the league. Without it `Pitcher` had no lore tier at all, an arm's
+   * parts were borrowed from his club's modal build, and the look block in the
+   * editor was hitters only: 390 of the 780 men in the league could not be
+   * dressed. It is the SETTING and not a rating — see the note on Pitcher.build
+   * — and nothing in the sim may read it.
+   */
+  { key: 'build', label: 'Build', kind: 'choice', choices: BUILDS },
   { key: 'throws', label: 'Throws', kind: 'choice', choices: HANDS },
   { key: 'signature', label: 'Signature', kind: 'choice', choices: SIGNATURES },
   { key: 'tellTiming', label: 'Tell', kind: 'choice', choices: TELLS },
@@ -321,14 +338,43 @@ export function coerce(f: Field, raw: string): unknown {
 }
 
 /**
+ * WHICH PART SET A MAN IS DRAWN FROM — hitter or arm, in one place.
+ *
+ * ⚠️ A HITTER WITH NO BUILD IS A HUMAN; AN ARM WITH NO BUILD IS HIS CLUB'S.
+ * Those two defaults are not interchangeable and getting it wrong is silent:
+ * `Pitcher.build` is optional, so every arm in every league written before
+ * 09-17 has none, and defaulting him to 'human' would offer a Detroit Foundry
+ * reliever a list of haircuts and then draw him as a chassis. His club's modal
+ * build is what lookForArm() has always drawn him as, so it is what the form
+ * has to agree with.
+ *
+ * Three functions below need this answer and they must not each compute it.
+ */
+export function buildOf(who: Player | Pitcher, club: Team, group: Group): Build {
+  const written = (who as { build?: Build }).build;
+  if (written) return written;
+  return groupOf(group).of === 'arm' ? clubBuild(club) : 'human';
+}
+
+/**
  * What the screen should show in a part select — the index, as a string.
  *
  * ⚠️ A MAN WITH NO STORED LOOK STILL HAS ONE, and this is where that shows up.
  * lookFor() rolls him a stable face off his id, so opening the editor on an
  * untouched player shows the face he has actually been wearing all along rather
  * than a form full of zeroes that would redress him the moment it was saved.
+ *
+ * ⚠️ AND AN ARM GOES THROUGH lookForArm(), NOT lookFor() — 09-17. lookFor()
+ * reads `p.id`, `p.power` and `p.speed` to bias the silhouette, and a `Pitcher`
+ * has none of the three: it would roll off `undefined` and arrive as NaN, which
+ * safeLook() then clamps to a form full of zeroes. That is the exact failure
+ * the note above says this function exists to prevent, one record type over.
  */
-export const lookOf = (who: Player): Look => safeLook(lookFor(who), who.build);
+export const lookOf = (who: Player | Pitcher, club: Team, group: Group): Look =>
+  safeLook(
+    groupOf(group).of === 'arm' ? lookForArm(who as Pitcher, club) : lookFor(who as Player),
+    buildOf(who, club, group),
+  );
 
 // ------------------------------------------------------------ the setters
 
@@ -443,8 +489,9 @@ export function withLookField(
   const list = [...((club[group] ?? []) as readonly Player[])];
   const who = list[index];
   if (!who) return club;
-  const next = put(lookOf(who), key, value);
-  list[index] = { ...who, look: safeLook(next, who.build) };
+  const build = buildOf(who, club, group);
+  const next = put(lookOf(who, club, group), key, value);
+  list[index] = { ...who, look: safeLook(next, build) };
   return put(club, group, list);
 }
 
@@ -466,7 +513,9 @@ export function withRandomLook(
   const who = list[index];
   if (!who) return club;
   const pick = (n: number): number => Math.min(n - 1, Math.floor(roll() * n));
-  const counts = PART_KEYS.map((k) => partNames(who.build, k).length);
+  // buildOf(), not who.build — an arm's is optional and RANDOMIZE on one with
+  // none would call partNames(undefined) and roll him out of an empty list.
+  const counts = PART_KEYS.map((k) => partNames(buildOf(who, club, group), k).length);
   list[index] = {
     ...who,
     look: {
