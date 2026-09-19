@@ -386,6 +386,90 @@ live batter. The swing is 340ms and only happens when you swing, which is not
 enough to judge a shape by — the roguelike has had this hook for months and it is
 why its arc got tuned at all.
 
+✅ **The bodies stop being cardboard — 2026-09-19.** The choreography was
+already fluid: the ball has friction, hops decay, runners round the bags on a
+smoothstep bulge rather than cutting the corner. The men doing it were drawn in
+one frozen stance while their x and y slid, which is most of what *"THIS DOES
+NOT PLAY LIKE BASEBALL — scripted, not fluid"* meant.
+
+**Joints.** `FigureOpts` takes `legFront`, `legBack`, `armFront` and
+`armBack`; the boxes `drawFigure()` already filled are hinged at a hip or a
+shoulder. Every figure in the game routes through that function, so the batter,
+the pitcher, the catcher, all nine fielders and every runner got limbs in one
+edit — and limbs are always shells, so the art layer is untouched.
+
+⚠️ **A ZERO ANGLE IS NOT A ROTATION.** `limb()` falls straight through to the
+old `fillRect` when an angle is absent or zero, so a figure nobody has posed is
+drawn by the identical call, and that is pinned by a test. `positive` means
+FORWARD, which canvas rotation does not — the flip lives in `limb()` once
+rather than as a minus sign remembered at four keyframes a table. There is no
+`lean`: in a flat side view a lean and a turn are the same rotation about the
+same belt, and `turn` is already it.
+
+⚠️ **THE STRIDE IS KEYED ON GROUND COVERED, NOT ON WALL TIME**, and that is
+the difference between animation and information. On a clock every man on the
+field cycles at the same rate and speed stops being visible; on distance a fast
+man's legs go faster because he is covering more ground, so the rating that
+decides the play is the one you can see. `drawRunnerDot()` takes the PATH
+rather than a point, because a point cannot say how far a man has run — every
+caller already held the two bags and the fraction between them, so nothing has
+to remember where anybody was last frame. `GAIT_CYCLE_PX` is the one knob:
+the figures are not to scale with the field (an 18px man on a field drawn at
+0.7 px/ft is twenty-five feet tall), so the stride is tuned to read at about
+five cycles per base path.
+
+✅ **The delivery is a pose table, and it stops snapping.** It was
+`turn = progress × −0.22` while the bar ran and `0` the frame the ball left, so
+the pitcher popped square in one frame on every pitch. `ARM_POSES` is four
+keyframes — set, lift, release, recover — `t: 1` is release exactly as `t: 1`
+is contact on the bat, and the follow-through is a keyframe rather than an
+instant reset. The throwing arm runs `0 → −2.1 → −4.3 → −2π`: one revolution
+over the top, landing on an angle that draws identically to where it started.
+Interpolating the short way round takes the arm through the BOTTOM of the
+circle, which is a bowling action, and a test holds the table monotone so
+nobody tidies a keyframe into its equivalent nearer zero.
+
+⚠️ **ONE TIMING MODEL, NOT TWO.** `segmentAt()` is extracted from `poseAt()`
+and both tables go through it, so acceleration stays in the keyframe SPACING
+for both. It deliberately does not blend the fields: a bat has an angle that
+must take the short way round and a body has joints that must not.
+
+✅ **Idle life.** One sine, two men. The batter breathes through his LEGS — his
+hands hold a bat drawn in plate coordinates, so rocking his torso would slide
+the body out from under the barrel — and it stops dead during the swing,
+because the pose table owns those 340ms.
+
+✅ **The end of a season — 2026-09-19.** A hundred and sixty-two games used to
+finish in a banner and two lines of scrolling play-by-play. `showChampion()`
+is the screen the year is played to reach: who won it, the final table with
+your own row pulled up wherever you came, and the year's leaders — the SAME six
+lists the in-season screen draws, through `leaderBoardsFor()`, because two
+leaderboards is two places for a qualifying rule to drift.
+
+⚠️ **AND THE RECORD BOOK NOW QUALIFIES A RATE ON THE LENGTH OF THE YEAR.**
+`marks()` already kept a man out of his own season's book below a plate
+appearance per scheduled game; nothing checked the SEASON. A .486 off fourteen
+games and a .306 off a hundred and sixty-two landed in the same column, so the
+batting and ERA records went to the shortest franchise anybody ever started.
+The bar is `QUALIFY` from stats.ts, one level up: 60% of the longest year in
+the book. Counting records are deliberately NOT gated — more games should mean
+more home runs, and the book prints a games column beside every row.
+
+⚫ **The talent spread is closed, by measurement.** The 09-15 finding was
+*"thirty clubs, one talent level — no dynasty, no doormat"*. Re-measured at
+`node scripts/season.ts 8 162`: best 108-54, worst 56-107, win% SD 7.5 against
+a real 6.8. `temper()` and `TALENT_SPREAD` did it. What survives is that
+`clubValue()` spans only 9.03–9.50 across the thirty and correlates about 0.53
+with true win rate — so the STACKED / THIN label on the club card is a weak
+claim. That is an instrument problem, not a roster one, and it wants a
+sensitivity sweep rather than a guess.
+
+⚫ **`TRIPLE_PLAY` verified and left alone.** Measured over 3,000 games with
+`scripts/balance.ts`: **one per 158 games**, against the constant's own
+documented one per 190 — inside the noise on nineteen events. It is about
+sixteen times commoner than real ball and that is deliberate and argued in
+`fielding.ts`: a rule nobody can observe is not a rule, it is a comment.
+
 ## Getting it onto another machine
 
 ⚠️ **Cloning this repo does not get you a playable game.** `dist/` is gitignored

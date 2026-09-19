@@ -35,8 +35,8 @@
  * why anybody opens one.
  */
 
-import { champion, regularDays, standings, teamOf, type Season } from './franchise.ts';
-import { avg, era, type StatBook } from './stats.ts';
+import { champion, DEFAULT_GAMES, regularDays, standings, teamOf, type Season } from './franchise.ts';
+import { avg, era, QUALIFY, type StatBook } from './stats.ts';
 
 /** One hitter's season, as the book remembers it. */
 export interface BatMark {
@@ -214,10 +214,36 @@ export interface Record_ {
   value: string;
 }
 
+/**
+ * ⚠️ A RATE RECORD NEEDS A SEASON LONG ENOUGH TO HAVE MEANT IT.
+ *
+ * marks() already keeps a man out of his own year's book until he has a plate
+ * appearance per scheduled game. What nothing checked was the YEAR: a .486 off
+ * a fourteen-game season and a .306 off a hundred and sixty-two landed in the
+ * same column, so the batting record was won by the shortest franchise anybody
+ * ever started and the ERA record with it. Season length decided the book
+ * rather than performance.
+ *
+ * The bar is stats.ts's own QUALIFY, one level up: in-season it asks for 60% of
+ * the leader's plate appearances, and here it asks for 60% of the longest year
+ * in the book. Same rule, same constant, same reason — a rate over a small
+ * sample is a different claim, and the record page cannot show you the sample.
+ *
+ * ⚠️ COUNTING RECORDS ARE NOT GATED, deliberately. Home runs in a longer
+ * season SHOULD beat home runs in a shorter one — that is what the record is —
+ * and the book prints a games column beside every row so a 9-5 year cannot
+ * pass itself off as a full one.
+ */
 export function records(c: Career): Record_[] {
   const out: Record_[] = [];
+  const lengthOf = (y: Year): number => y.games ?? DEFAULT_GAMES;
+  const longest = c.years.reduce((a, y) => Math.max(a, lengthOf(y)), 0);
+  const fullYear = (y: Year): boolean => lengthOf(y) >= QUALIFY * longest;
+
   const withBat = c.years.filter((y) => y.bat);
   const withArm = c.years.filter((y) => y.arm);
+  const rateBat = withBat.filter(fullYear);
+  const rateArm = withArm.filter(fullYear);
 
   const best = <T>(rows: T[], of: (r: T) => number, low = false): T | undefined =>
     rows.length === 0
@@ -228,7 +254,7 @@ export function records(c: Career): Record_[] {
     if (y && name) out.push({ label, name, club: y.club, value });
   };
 
-  const bestAvg = best(withBat, (y) => y.bat!.avg);
+  const bestAvg = best(rateBat, (y) => y.bat!.avg);
   add('BATTING AVERAGE', bestAvg, bestAvg?.bat?.name, bestAvg ? bestAvg.bat!.avg.toFixed(3).replace(/^0\./, '.') : '');
 
   const bestHr = best(withBat, (y) => y.bat!.hr);
@@ -237,7 +263,7 @@ export function records(c: Career): Record_[] {
   const bestRbi = best(withBat, (y) => y.bat!.rbi);
   add('RUNS BATTED IN', bestRbi, bestRbi?.bat?.name, `${bestRbi?.bat?.rbi ?? 0}`);
 
-  const bestEra = best(withArm, (y) => y.arm!.era, true);
+  const bestEra = best(rateArm, (y) => y.arm!.era, true);
   add('EARNED RUN AVERAGE', bestEra, bestEra?.arm?.name, bestEra ? bestEra.arm!.era.toFixed(2) : '');
 
   const bestK = best(withArm, (y) => y.arm!.k);

@@ -180,3 +180,55 @@ describe('single-season records', () => {
     expect(labels).not.toContain('EARNED RUN AVERAGE');
   });
 });
+
+/**
+ * THE QUALIFIER, which is the one rule in the record book with a real decision
+ * in it.
+ *
+ * ⚠️ WITHOUT IT THE BOOK IS A LIST OF SHORT SEASONS. Rate records are always
+ * won by the smallest sample anybody ever played — a fourteen-game year hands
+ * out a .486 and a 1.20 ERA as a matter of course — so season length decided
+ * the record page rather than performance.
+ */
+describe('the record book qualifies a rate on the length of the year', () => {
+  const year = (games: number, bat: number, arm: number, name: string): Year => ({
+    club: 'NYE',
+    w: Math.round(games / 2),
+    l: games - Math.round(games / 2),
+    finish: 1,
+    games,
+    champion: 'NYE',
+    seed: games,
+    bat: { name: `${name} bat`, avg: bat, hr: 10, rbi: 40 },
+    arm: { name: `${name} arm`, era: arm, k: 100, w: 12, l: 6, outs: games * 6 },
+  });
+
+  const labelled = (rows: { label: string; name: string }[], label: string): string | undefined =>
+    rows.find((r) => r.label === label)?.name;
+
+  it('throws out a fortnight that outhit a full year', () => {
+    const c: Career = { years: [year(162, 0.306, 2.55, 'full'), year(14, 0.486, 1.2, 'short')] };
+    const rows = records(c);
+    expect(labelled(rows, 'BATTING AVERAGE')).toBe('full bat');
+    expect(labelled(rows, 'EARNED RUN AVERAGE')).toBe('full arm');
+  });
+
+  it('still lets the counting records go to whoever piled them up', () => {
+    // A longer season SHOULD produce more home runs. That is the record.
+    const c: Career = {
+      years: [year(162, 0.306, 2.55, 'full'), { ...year(14, 0.486, 1.2, 'short'), bat: { name: 'short bat', avg: 0.486, hr: 99, rbi: 40 } }],
+    };
+    expect(labelled(records(c), 'HOME RUNS')).toBe('short bat');
+  });
+
+  it('leaves a book of one short season alone — it is the longest there is', () => {
+    const c: Career = { years: [year(14, 0.486, 1.2, 'short')] };
+    expect(labelled(records(c), 'BATTING AVERAGE')).toBe('short bat');
+  });
+
+  it('keeps a year that is merely shorter, not a token one', () => {
+    // 0.6 of 162 is 97: a 110-game season is a real season and stays eligible.
+    const c: Career = { years: [year(162, 0.306, 2.55, 'full'), year(110, 0.34, 2.1, 'medium')] };
+    expect(labelled(records(c), 'BATTING AVERAGE')).toBe('medium bat');
+  });
+});

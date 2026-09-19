@@ -2280,6 +2280,9 @@ function finalize(): void {
     // The year goes in the book. See retire().
     retire(season);
     say('Your year is in the record book — press K.', 'half');
+    // ⚠️ AND IT IS SHOWN, not offered. A season is played to reach this and
+    // it used to arrive as two lines in a scrolling log. See showChampion().
+    showChampion(season, () => render());
     return;
   }
 
@@ -5838,6 +5841,57 @@ function skipTo(day: number): void {
  * honestly does not, so an exhibition gets the night's numbers and no league
  * panels. What it does not get is nothing at all, which is what it got before.
  */
+/**
+ * THE LEAGUE LEADERS — six short lists rather than one long table: nobody reads
+ * a four-hundred-row sort, and the question is always "who is leading".
+ *
+ * ⚠️ EVERY ROW CARRIES ITS PLAYING TIME, and that is not decoration. ".577"
+ * and "0.00" are different claims over 26 at-bats and over 300, and in a
+ * fourteen-game season they are ALWAYS over the small number — a board that
+ * prints the rate alone is asking the player to trust a sample he cannot see.
+ *
+ * ⚠️ IT LIVES OUT HERE BECAUSE THE YEAR ENDS. This was written inside
+ * showStats(), which is the DURING-the-season screen; the champion screen wants
+ * the identical six lists with the season finished, and two copies of a
+ * leaderboard is two places for a qualifying rule to drift.
+ */
+function leaderBoardsFor(book: StatBook | undefined): string {
+  if (!book) return '';
+  const board = (
+    title: string,
+    rows: { name: string; line: { tm: string } }[],
+    over: (l: never) => string,
+    val: (l: never) => string,
+  ): string =>
+    `<div class="panel" style="flex:1 1 200px"><div class="dim penhead">${title}</div>` +
+    (rows.length === 0
+      ? '<div class="dim">nothing yet</div>'
+      : rows
+          .map(
+            (r) =>
+              `<div class="penrow" style="grid-template-columns:1fr auto auto"><b>${r.name}` +
+              ` <span class="dim">${r.line.tm}</span></b>` +
+              `<span class="dim" style="font-size:10px">${over(r.line as never)}</span>` +
+              `<span class="tot">${val(r.line as never)}</span></div>`,
+          )
+          .join('')) +
+    '</div>';
+
+  const AB = (l: BatLine): string => `${l.ab}ab`;
+  const IP = (l: ArmLine): string => `${ip(l.outs)}ip`;
+  return (
+    '<div class="vs">' +
+    board('BATTING AVERAGE', leaders(book.bat, avg, (l) => l.pa, 5), AB, (l: BatLine) => rate(avg(l))) +
+    board('HOME RUNS', leaders(book.bat, (l) => l.hr, (l) => l.pa, 5), AB, (l: BatLine) => String(l.hr)) +
+    board('RUNS BATTED IN', leaders(book.bat, (l) => l.rbi, (l) => l.pa, 5), AB, (l: BatLine) => String(l.rbi)) +
+    '</div><div class="vs">' +
+    board('EARNED RUN AVERAGE', leaders(book.arm, era, (l) => l.outs, 5, true), IP, (l: ArmLine) => era(l).toFixed(2)) +
+    board('STRIKEOUTS', leaders(book.arm, (l) => l.k, (l) => l.outs, 5), IP, (l: ArmLine) => String(l.k)) +
+    board('WINS', leaders(book.arm, (l) => l.w, (l) => l.outs, 5), IP, (l: ArmLine) => `${l.w}-${l.l}`) +
+    '</div>'
+  );
+}
+
 function showStats(s: Season | null, box: StatBook | null, back: () => void): void {
   dpadOffPre();
   const el = document.getElementById('pre');
@@ -5971,47 +6025,8 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
         .join('')
     : '';
 
-  // ---- the league. Six short lists rather than one long table: nobody reads a
-  // four-hundred-row sort, and the question is always "who is leading".
-  //
-  // ⚠️ EVERY ROW CARRIES ITS PLAYING TIME, and that is not decoration. ".577"
-  // and "0.00" are different claims over 26 at-bats and over 300, and in a
-  // fourteen-game season they are ALWAYS over the small number — a board that
-  // prints the rate alone is asking the player to trust a sample he cannot see.
   const book = s?.stats;
-  const board = (
-    title: string,
-    rows: { name: string; line: { tm: string } }[],
-    over: (l: never) => string,
-    val: (l: never) => string,
-  ): string =>
-    `<div class="panel" style="flex:1 1 200px"><div class="dim penhead">${title}</div>` +
-    (rows.length === 0
-      ? '<div class="dim">nothing yet</div>'
-      : rows
-          .map(
-            (r) =>
-              `<div class="penrow" style="grid-template-columns:1fr auto auto"><b>${r.name}` +
-              ` <span class="dim">${r.line.tm}</span></b>` +
-              `<span class="dim" style="font-size:10px">${over(r.line as never)}</span>` +
-              `<span class="tot">${val(r.line as never)}</span></div>`,
-          )
-          .join('')) +
-    '</div>';
-
-  const AB = (l: BatLine): string => `${l.ab}ab`;
-  const IP = (l: ArmLine): string => `${ip(l.outs)}ip`;
-  const leaderBoards = book
-    ? '<div class="vs">' +
-      board('BATTING AVERAGE', leaders(book.bat, avg, (l) => l.pa, 5), AB, (l: BatLine) => rate(avg(l))) +
-      board('HOME RUNS', leaders(book.bat, (l) => l.hr, (l) => l.pa, 5), AB, (l: BatLine) => String(l.hr)) +
-      board('RUNS BATTED IN', leaders(book.bat, (l) => l.rbi, (l) => l.pa, 5), AB, (l: BatLine) => String(l.rbi)) +
-      '</div><div class="vs">' +
-      board('EARNED RUN AVERAGE', leaders(book.arm, era, (l) => l.outs, 5, true), IP, (l: ArmLine) => era(l).toFixed(2)) +
-      board('STRIKEOUTS', leaders(book.arm, (l) => l.k, (l) => l.outs, 5), IP, (l: ArmLine) => String(l.k)) +
-      board('WINS', leaders(book.arm, (l) => l.w, (l) => l.outs, 5), IP, (l: ArmLine) => `${l.w}-${l.l}`) +
-      '</div>'
-    : '';
+  const leaderBoards = leaderBoardsFor(book);
 
   // ---- and your own club, everybody, in the order they bat. This is the one
   // list where a man hitting .180 matters as much as the league leader does:
@@ -6090,6 +6105,79 @@ function showStats(s: Season | null, box: StatBook | null, back: () => void): vo
  * the button at the bottom does, so the same screen serves the title screen and
  * the end of a franchise.
  */
+/**
+ * THE CHAMPION — the one screen a season is played to get to.
+ *
+ * ⚠️ A HUNDRED AND SIXTY-TWO GAMES USED TO END IN A LOG LINE. The year
+ * finished, a banner said who won it, two lines scrolled past in the play-by-play
+ * and the only button offered was the record book. Every number the season
+ * accumulated — the batting title, the ERA title, the final table — was
+ * reachable only by going and looking for it, on a screen labelled THE YEAR SO
+ * FAR, after the year had stopped.
+ *
+ * ⚠️ THE LEADERS ARE THE SAME SIX LISTS THE IN-SEASON SCREEN SHOWS, through
+ * leaderBoardsFor(). A separate "final" leaderboard would be a second copy of
+ * the qualifying rule, and the qualifying rule is the entire content of a
+ * leaderboard — see QUALIFY in stats.ts.
+ */
+function showChampion(s: Season, back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const champ = champion(s) ?? '—';
+  const table = standings(s);
+  const mine = table.findIndex((r) => r.abbr === s.you);
+  const won = champ === s.you;
+
+  const row = (r: (typeof table)[number], i: number): string =>
+    `<tr${r.abbr === s.you ? ' class="you"' : ''}><td class="team">${i + 1}. ${r.abbr}` +
+    `${r.abbr === champ ? ' ★' : ''}</td><td>${r.w}</td><td>${r.l}</td>` +
+    `<td>${r.rf}</td><td>${r.ra}</td></tr>`;
+
+  // The top of the table, and you — wherever you came. A thirty-row table is
+  // the record book's job; this screen answers "who won it and where did I
+  // finish", which is two rows and a handful of context.
+  const top = table.slice(0, 5);
+  const you = mine >= 5 && table[mine] ? row(table[mine]!, mine) : '';
+
+  el.innerHTML =
+    `<div class="wrap"><h1>BASEDBALL</h1>` +
+    `<h2>${won ? `${champ} WIN IT ALL` : `${champ} TAKE THE TITLE`}</h2>` +
+    `<div class="panel" style="text-align:center">` +
+    `<div style="font-size:28px;font-weight:bold;color:var(--good)">${champ}</div>` +
+    `<div class="dim">champions — ${teamOf(s, champ)?.name ?? ''}</div>` +
+    (won
+      ? ''
+      : `<div class="dim" style="margin-top:6px">${s.you} finished ${mine + 1} of ${table.length}</div>`) +
+    `</div>` +
+    `<div class="panel"><div class="dim penhead">THE FINAL TABLE</div>` +
+    `<div style="overflow-x:auto"><table class="line"><thead><tr>` +
+    `<th></th><th>W</th><th>L</th><th>RF</th><th>RA</th></tr></thead>` +
+    `<tbody>${top.map(row).join('')}${you}</tbody></table></div></div>` +
+    `<div class="dim penhead" style="margin-top:10px">THE YEAR'S LEADERS</div>` +
+    leaderBoardsFor(s.stats) +
+    `<button class="go" data-back="1">DONE <kbd>SPACE</kbd></button></div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  };
+  addEventListener('keydown', onKey);
+  const b = el.querySelector<HTMLButtonElement>('[data-back]');
+  if (b) b.onclick = leave;
+}
+
 function showCareer(back: () => void): void {
   dpadOffPre();
   const el = document.getElementById('pre');
