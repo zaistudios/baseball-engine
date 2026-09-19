@@ -2274,15 +2274,7 @@ function finalize(): void {
   // any of four nights. champion() going from null to a name is the event.
   const champ = champion(season);
   if (champ) {
-    elBanner.textContent =
-      champ === season.you ? `${champ} WIN IT ALL.` : `${champ} TAKE THE TITLE.`;
-    say(`${champ} are champions.`, 'big');
-    // The year goes in the book. See retire().
-    retire(season);
-    say('Your year is in the record book — press K.', 'half');
-    // ⚠️ AND IT IS SHOWN, not offered. A season is played to reach this and
-    // it used to arrive as two lines in a scrolling log. See showChampion().
-    showChampion(season, () => render());
+    crownChampion(season, champ);
     return;
   }
 
@@ -6356,6 +6348,28 @@ function showBox(): void {
   showStats(season, boxScore(game), () => render());
 }
 
+/**
+ * THE YEAR IS OVER AND SOMEBODY WON IT — the one ending, called from both.
+ *
+ * ⚠️ THERE ARE TWO WAYS TO REACH A CHAMPION AND THEY ARE NOT THE SAME CODE
+ * PATH. You are in the last game and it ends under you, or you are out and the
+ * rest of the year plays itself off the schedule screen — and the second is
+ * most players. Both branches carried their own copy of these five lines, so
+ * the champion screen shipped on one of them and the one nearly everybody
+ * lands on still ended in a banner. Found by playing a fourteen-game season to
+ * its end, not by the suite: 1239 tests were green while half the endings had
+ * no ending.
+ */
+function crownChampion(s: Season, champ: string): void {
+  elBanner.textContent = champ === s.you ? `${champ} WIN IT ALL.` : `${champ} TAKE THE TITLE.`;
+  say(`${champ} are champions.`, 'big');
+  // The year goes in the book. See retire().
+  retire(s);
+  say('Your year is in the record book — press K.', 'half');
+  // ...and it is SHOWN, not offered. A season is played to reach this.
+  showChampion(s, () => render());
+}
+
 function nextGame(): void {
   let s = season;
   if (!s) return;
@@ -6389,15 +6403,9 @@ function nextGame(): void {
     if (lastGameIsStale) phase = 'over';
 
     const champ = champion(s);
-    if (champ) {
-      elBanner.textContent =
-        champ === s.you ? `${champ} WIN IT ALL.` : `${champ} TAKE THE TITLE.`;
-      say(`${champ} are champions.`, 'big');
-      // ⚠️ THE ELIMINATED ENDING FILES THE YEAR TOO. This is the branch a
-      // player who missed the bracket lands on, and it is most of them.
-      retire(s);
-      say('Your year is in the record book — press K.', 'half');
-    }
+    // ⚠️ THE ELIMINATED ENDING FILES THE YEAR TOO. This is the branch a player
+    // who missed the bracket lands on, and it is most of them.
+    if (champ) crownChampion(s, champ);
     // No kickOff, so nothing else will redraw the panels. Stay on the final
     // screen; it now shows the finished bracket.
     render();

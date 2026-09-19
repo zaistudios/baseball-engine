@@ -564,6 +564,17 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   ): void => {
     if (!angle) return box(x, y, bw, bh, fill);
     const jx = x + bw / 2;
+    // ⚠️ THE LIMB GROWS UPWARD INTO THE JOINT, and without this the joint is a
+    // hole. A box hinged on the middle of its top edge tips that edge when it
+    // rotates, so the leading corner drops below the hip and a notch of
+    // background opens between the jersey and the leg — plainly visible at 4x
+    // in a browser, on every stride, and invisible to every test in this file.
+    //
+    // Same fault and the same answer as `hem` below, which hangs the torso past
+    // the belt by exactly what the turn opens up. Legs are drawn BEFORE the
+    // torso so the extra length is covered by it; an arm is drawn after, where
+    // overlapping the shoulder is what an arm does anyway.
+    const lift = bw * Math.abs(Math.sin(angle));
     ctx.save();
     ctx.translate(jx, y);
     // ⚠️ NEGATED, AND THE SIGN IS THE CONTRACT. A limb hangs DOWN from its
@@ -573,7 +584,7 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     // minus sign remembered at four keyframes a table.
     ctx.rotate(-angle);
     ctx.translate(-jx, -y);
-    box(x, y, bw, bh, fill);
+    box(x, y - lift, bw, bh + lift, fill);
     ctx.restore();
   };
 

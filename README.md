@@ -470,6 +470,25 @@ documented one per 190 — inside the noise on nineteen events. It is about
 sixteen times commoner than real ball and that is deliberate and argued in
 `fielding.ts`: a rule nobody can observe is not a rule, it is a comment.
 
+⚠️ **TWO DEFECTS THE SUITE COULD NOT SEE, both found by playing it.** 1,239
+tests were green for both of them.
+
+**The joint was a hole.** A box hinged on the middle of its top edge tips that
+edge as it rotates, so the leading corner drops below the hip and a notch of
+background opens between the jersey and the leg — on every stride, plainly
+visible at 4x in a browser and invisible to every assertion in `look.test.ts`.
+`limb()` grows the box upward into the joint by `bw × |sin θ|`, the same answer
+`hem` already gives for the turn: legs are drawn before the torso so the extra
+length is covered, and an arm overlapping its own shoulder is what an arm does.
+
+**Half the endings had no ending.** There are TWO ways to reach a champion and
+they are not the same code path: you are in the last game and it ends under
+you, or you are out and the rest of the year plays itself off the schedule
+screen — and the second is most players. Both branches carried their own copy
+of the same five closing lines, so the champion screen shipped on one of them
+and the one nearly everybody lands on still ended in a banner. `crownChampion()`
+is the one ending now, called from both.
+
 ## Getting it onto another machine
 
 ⚠️ **Cloning this repo does not get you a playable game.** `dist/` is gitignored
