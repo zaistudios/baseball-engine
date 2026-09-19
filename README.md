@@ -348,6 +348,44 @@ all, so there is nothing for a face to leak through.
 a `crest: 3` indexed against a list of two, clamped at the draw to something
 nobody picked.
 
+✅ **The swing swings — 2026-09-19.** `swing.ts` has had a real keyframe rig
+since the roguelike: five poses, `poseAt()` lerping between them, timing as
+acceleration in the keyframe spacing, 38 tests. `BatPose` carries six fields and
+**the at-bat view read one of them** — `turn`, for the body. What you saw when
+you swung was a fixed stick drawn inside `drawFigure()`, hung off the torso and
+rotating with it, so the authored arc (LOAD → COIL → CONTACT → THROUGH → FINISH,
+167px of level travel) existed, was covered, and had never rendered here.
+
+⚠️ **THE SHORTCUT WAS TAKEN AGAINST A COST NOBODY MEASURED.** The `ponytail:`
+comment on that stick said borrowing the pose table would mean rescaling five
+keyframes against the roguelike's 640-wide canvas. The table is authored against
+the **plate**, not a canvas — x from its centre line, y from the plate — and both
+views hang the batter off the plate the same way: a 92px man 83px to the side of
+it there, a 96px man 76px to the side of it here. `drawBat()` takes the plate as
+an origin and draws the poses at **1:1**, which is what the roguelike has always
+done. The fix was mostly deletion.
+
+⚠️ **SCALE IS NOT FOR THE FIELD.** `BatAnchor.scale` exists for panels with no
+plate in them — the editor preview is a 120x150 box and the bat at rest reaches
+149px above his feet — and the at-bat view must pass 1, because scaling moves the
+drawn barrel off the pose the engine grades. The preview derives its fit from
+`barrelOf(REST_POSE)` rather than a typed-in number, so re-authoring the swing
+re-fits the panel instead of quietly shaving the barrel.
+
+⚠️ **THE BARREL CROSSES THE BOTTOM OF THE ZONE, AND THAT IS THE VIEW'S DOING.**
+In the roguelike the zone's bottom edge *is* the plate line and the batter's feet
+are on it, so the contact barrel lands dead centre. Here the zone is drawn 24px
+above the plate and 108 tall while the batter's feet are 14px **below** it, so at
+1:1 the barrel crosses about three-quarters of the way down the zone. Moving the
+bat up to meet it puts his hands above his head. It is the zone and the batter
+that disagree, not the bat and the pose — recorded here rather than papered over
+with an offset.
+
+⚠️ **`__swingGhosts()`** in the dev console freezes every pose at once over the
+live batter. The swing is 340ms and only happens when you swing, which is not
+enough to judge a shape by — the roguelike has had this hook for months and it is
+why its arc got tuned at all.
+
 ## Getting it onto another machine
 
 ⚠️ **Cloning this repo does not get you a playable game.** `dist/` is gitignored

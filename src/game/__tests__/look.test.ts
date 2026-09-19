@@ -19,8 +19,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { LEAGUE, type Team } from '../teams.ts';
+import { BAT_POSES, CONTACT_POSE, REST_POSE, barrelOf } from '../swing.ts';
 import {
   PARTS,
+  batLine,
   clubBuild,
   drawFigure,
   lookFor,
@@ -534,5 +536,107 @@ describe('the arm has his own face', () => {
         expect(l.tone, a.name).toBeLessThan(set.tones.length);
       }
     }
+  });
+});
+
+/**
+ * WHERE THE BAT LANDS, which is the one thing about drawing a bat that a test
+ * can actually hold.
+ *
+ * ⚠️ THIS IS THE CHECK THAT WAS MISSING FOR THE WHOLE LIFE OF THE BUG. The
+ * pose table had 38 tests and every one of them passed while the at-bat view
+ * drew a fixed stick and read one of BatPose's six fields — because nothing
+ * asserted that the ARC reaches the CANVAS. batLine() exists to be asserted.
+ *
+ * The layout numbers below are main.ts's: PLATE_X / PLATE_Y, the ZONE rect, and
+ * the batter's own box. main.ts is a DOM entry point and cannot be imported
+ * here, so they are repeated — and that is the point of repeating them. If the
+ * at-bat view moves the plate or the zone and this is not updated, the bat is
+ * drawn somewhere nobody checked, and that is exactly the failure being pinned.
+ */
+describe('the bat on the canvas', () => {
+  const PLATE = { x: 210, y: 250 };
+  const ZONE = { x: 160, y: 118, w: 100, h: 108 };
+  const BATTER_X = 134;
+  const BATTER_Y = 264;
+  const BATTER_H = 96;
+
+  it('puts the barrel through the strike zone at contact', () => {
+    const { tx, ty } = batLine(CONTACT_POSE, PLATE);
+    expect(tx).toBeGreaterThan(ZONE.x);
+    expect(tx).toBeLessThan(ZONE.x + ZONE.w);
+    expect(ty).toBeGreaterThan(ZONE.y);
+    expect(ty).toBeLessThan(ZONE.y + ZONE.h);
+  });
+
+  /**
+   * The hands are the half of this that says the mapping is right. A barrel can
+   * be in the zone with the hands anywhere; hands off the body are how a
+   * rescale, a flipped sign or a wrong origin actually shows up.
+   */
+  it(`keeps every pose's hands on the man, not in the air beside him`, () => {
+    for (const pose of BAT_POSES) {
+      const { hx, hy } = batLine(pose, PLATE);
+      // Between his own centre line and the plate: his hands are in front of
+      // him, which is the correction BAT_POSES was rewritten for.
+      expect(hx, `${pose.name} hands x`).toBeGreaterThan(BATTER_X);
+      expect(hx, `${pose.name} hands x`).toBeLessThan(PLATE.x);
+      // Between his feet and the top of his head.
+      expect(hy, `${pose.name} hands y`).toBeLessThan(BATTER_Y);
+      expect(hy, `${pose.name} hands y`).toBeGreaterThan(BATTER_Y - BATTER_H);
+    }
+  });
+
+  it('draws the barrel exactly where the pose grades it, at 1:1', () => {
+    const b = barrelOf(CONTACT_POSE);
+    const { tx, ty } = batLine(CONTACT_POSE, PLATE);
+    expect(tx).toBeCloseTo(PLATE.x + b.x, 6);
+    expect(ty).toBeCloseTo(PLATE.y + b.y, 6);
+  });
+
+  it('mirrors a left-hander about the plate, not about himself', () => {
+    const r = batLine(CONTACT_POSE, PLATE);
+    const l = batLine(CONTACT_POSE, { ...PLATE, flip: true });
+    expect(l.hx - PLATE.x).toBeCloseTo(PLATE.x - r.hx, 6);
+    expect(l.tx - PLATE.x).toBeCloseTo(PLATE.x - r.tx, 6);
+    // The lefty stands on the other side, so his hands must be on that side.
+    expect(l.hx).toBeGreaterThan(PLATE.x);
+    expect(l.hy).toBeCloseTo(r.hy, 6);
+  });
+
+  it('scales the whole rig about the plate, so a panel can shrink it', () => {
+    const full = batLine(REST_POSE, PLATE);
+    const half = batLine(REST_POSE, { ...PLATE, scale: 0.5 });
+    expect(half.hx - PLATE.x).toBeCloseTo((full.hx - PLATE.x) / 2, 6);
+    expect(half.ty - PLATE.y).toBeCloseTo((full.ty - PLATE.y) / 2, 6);
+  });
+
+  /**
+   * The editor preview has no plate in it and hangs one off the at-bat layout.
+   * At BATTER_H with the feet on the floor of a 120x150 box, the bat at rest
+   * has to FIT — it reaches 149px above his feet, which is what forced the
+   * preview figure down from 108.
+   */
+  it('fits the resting bat, cap and all, inside the editor preview box', () => {
+    const W = 120;
+    const H = 150;
+    // The same fit paintLookPreviews() derives, and the reason it is derived:
+    // at 1:1 the tip landed on y = 0 in a browser and the round cap was shaved.
+    const rig = BATTER_Y - PLATE.y - barrelOf(REST_POSE).y;
+    const k = Math.min(1, (H - 8) / rig);
+    const feet = H - 4;
+    const { hx, hy, tx, ty } = batLine(REST_POSE, {
+      x: W / 2 + (PLATE.x - BATTER_X) * k,
+      y: feet - (BATTER_Y - PLATE.y) * k,
+      scale: k,
+    });
+    // CAP is half the barrel stroke: the drawing reaches past the tip by it.
+    const CAP = 4 * k;
+    for (const [name, v] of [['hands x', hx], ['tip x', tx]] as const) {
+      expect(v, name).toBeGreaterThan(CAP);
+      expect(v, name).toBeLessThan(W - CAP);
+    }
+    expect(ty - CAP, 'tip y').toBeGreaterThan(0);
+    expect(hy, 'hands y').toBeLessThan(H);
   });
 });

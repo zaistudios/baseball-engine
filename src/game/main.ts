@@ -261,7 +261,9 @@ import {
 import {
   travelMs,
   canCheck,
+  barrelOf,
   batSpeedLabel,
+  BAT_POSES,
   poseAt,
   isSwinging,
   REST_POSE,
@@ -271,6 +273,7 @@ import {
   armBuild,
   artSlots,
   clubBuild,
+  drawBat,
   drawFigure,
   idForFilename,
   lookFor,
@@ -2972,6 +2975,20 @@ if (import.meta.env.DEV) {
     momentFrom = performance.now();
     return line;
   };
+  /**
+   * `__swingGhosts()` in the console — every bat pose at once, frozen over the
+   * live batter.
+   *
+   * ⚠️ THE SWING IS 340ms AND ONLY HAPPENS WHEN YOU SWING, which is not
+   * enough to judge a shape by, and judging the shape is the entire job. The
+   * roguelike has had this hook for months and it is the reason its arc got
+   * tuned at all; this view drew a fixed stick for months and nobody could see
+   * that either. Same two lines, same argument.
+   */
+  (window as unknown as Record<string, unknown>)['__swingGhosts'] = (on = true) => {
+    swingGhosts = !!on;
+    return swingGhosts;
+  };
   // Step the play to an exact millisecond and hand back the frame. Frame-level
   // tuning without having to catch a two-second animation live.
   (window as unknown as Record<string, unknown>)['__frame'] = (ms: number) => {
@@ -2982,7 +2999,13 @@ if (import.meta.env.DEV) {
   };
 }
 
+/** Dev only: freeze every bat pose over the batter. See `__swingGhosts`. */
+let swingGhosts = false;
+
 const PLATE_Y = 250;
+// The plate's centre line. swing.ts measures the whole swing from it, so it is
+// a name now rather than a 210 repeated down the file.
+const PLATE_X = 210;
 const ZONE = { x: 160, y: 118, w: 100, h: 108 };
 
 /**
@@ -3367,14 +3390,34 @@ function drawHitter(now: number): void {
     uniform: uniformFor(batting),
     build: man.build,
     // Mirrored about the plate, so he stands on the other side of it and faces
-    // back in. 2 * 210 is the plate's own centre line.
-    x: lefty ? 420 - BATTER_X : BATTER_X,
+    // back in. 2 * PLATE_X is the plate's own centre line.
+    x: lefty ? 2 * PLATE_X - BATTER_X : BATTER_X,
     y: BATTER_Y,
     h: BATTER_H,
     stance: 'bat',
     turn: lefty ? -pose.turn : pose.turn,
     flip: lefty,
   });
+
+  // ⚠️ THE BAT IS DRAWN HERE, OVER HIM, AND OFF THE POSE THE ENGINE GRADES.
+  // Until 09-19 this view read ONE of BatPose's six fields — `turn`, for the
+  // body above — and drew the bat as a fixed stick inside drawFigure(), so the
+  // authored arc (LOAD → COIL → CONTACT → THROUGH → FINISH, 167px of level
+  // travel through the zone) existed, was tested, and had never once rendered
+  // in Basedball. `scale` is not passed: 1:1 is the only mapping that cannot
+  // move the barrel off the graded pose.
+  //
+  // ponytail: the barrel lands where the pose puts it, not on this pitch's
+  // crossing point — same stance the roguelike takes. Aiming the bat is a
+  // different game; this one only has to make the timing legible.
+  const anchor = { x: PLATE_X, y: PLATE_Y, flip: lefty };
+  if (import.meta.env.DEV && swingGhosts) {
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    for (const ghost of BAT_POSES) drawBat(ctx, ghost, anchor);
+    ctx.restore();
+  }
+  drawBat(ctx, pose, anchor);
 }
 
 /**
@@ -6595,19 +6638,46 @@ function pregame(): void {
       c2.clearRect(0, 0, el2.width, el2.height);
       c2.fillStyle = '#101a12';
       c2.fillRect(0, 0, el2.width, el2.height);
+      const arm = groupOf(group).of === 'arm';
+      // ⚠️ THE MAN AND HIS BAT ARE SCALED TOGETHER, BY THE BAT.
+      //
+      // The preview was 108 tall with the feet 12 off the bottom, which fits a
+      // stick nailed to the shoulder and does not fit a real one: the bat at
+      // rest reaches from his feet to 149px above them, and the box is 150.
+      // Measured in a browser at 1:1 the barrel tip landed on y = 0 and the
+      // round cap was shaved off.
+      //
+      // ⚠️ THE FIT IS DERIVED FROM THE POSE, NOT TYPED IN. `rig` asks the pose
+      // table how tall the thing being drawn is, so re-authoring the swing
+      // re-fits this panel instead of quietly clipping it again. The 8 is the
+      // barrel's round cap (half of an 8px stroke) plus a pixel.
+      const rig = (BATTER_Y - PLATE_Y) - barrelOf(REST_POSE).y;
+      const k = Math.min(1, (el2.height - 8) / rig);
+      const feet = el2.height - 4;
       drawFigure(c2, {
         look: lookOf(who, club, group),
         uniform: kit,
         build: buildOf(who, club, group),
         x: el2.width / 2,
-        y: el2.height - 12,
-        h: 108,
+        y: feet,
+        h: BATTER_H * k,
         // ⚠️ AN ARM IS PREVIEWED IN HIS DELIVERY, NOT HOLDING A BAT. It is the
         // pose you actually see him in for the whole half you spend hitting,
         // and previewing him in a batting stance would be showing somebody a
         // picture the game never draws.
-        stance: groupOf(group).of === 'arm' ? 'pitch' : 'bat',
+        stance: arm ? 'pitch' : 'bat',
       });
+      // The same bat the field draws, hung off a plate this panel does not
+      // have: the batter stands PLATE_X - BATTER_X to the side of it and
+      // BATTER_Y - PLATE_Y below it, so the offsets come off the at-bat
+      // layout rather than off two numbers typed again here.
+      if (!arm) {
+        drawBat(c2, REST_POSE, {
+          x: el2.width / 2 + (PLATE_X - BATTER_X) * k,
+          y: feet - (BATTER_Y - PLATE_Y) * k,
+          scale: k,
+        });
+      }
     }
   };
 

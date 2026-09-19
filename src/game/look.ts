@@ -44,6 +44,7 @@ import type { Pitcher } from '../core/pitcher.ts';
 import { makeRng, seedFromString } from '../core/rng.ts';
 import { slug, tinted } from './art.ts';
 import type { Team } from './teams.ts';
+import { barrelOf, type BatPose } from './swing.ts';
 
 /** Re-exported so everything about looks can be imported from one place. */
 export type { Look };
@@ -671,32 +672,14 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     ctx.fill();
   }
 
-  // ---- THE BAT, and he has to be holding one even standing still.
+  // ---- NO BAT IS DRAWN HERE, and that is the whole of job 1.
   //
-  // ⚠️ THE FIRST CUT DREW HIM EMPTY-HANDED. main.ts only draws a barrel once a
-  // swing is in flight, so between pitches there was a man at the plate with
-  // nothing in his hands — which reads as a bug rather than as a hitter, and is
-  // the kind of thing only playing it finds.
-  //
-  // ponytail: a line at a fixed angle off the hands, not swing.ts's pose table.
-  // That table is authored against the roguelike's 640-wide canvas and its own
-  // plate origin; borrowing its geometry would mean rescaling five keyframes to
-  // draw a stick. The BODY still turns off `turn`, so the bat turns with him and
-  // the two cannot drift.
-  if (o.stance === 'bat') {
-    const hx = w * 0.42;
-    const hy = torsoTop + torsoH * 0.3;
-    ctx.strokeStyle = '#c8a05a';
-    ctx.lineWidth = Math.max(1.5, h * 0.035);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(hx, hy);
-    // Up and BACK over the shoulder, which is where a bat at rest is. Forward
-    // put the barrel across the strike zone from the camera's side of it, and a
-    // bat lying over the zone reads as a rendering fault rather than a stance.
-    ctx.lineTo(hx - h * 0.07, hy - h * 0.42);
-    ctx.stroke();
-  }
+  // ⚠️ A BAT IN THIS FUNCTION IS A BAT IN THE WRONG COORDINATE SYSTEM. The
+  // fixed stick that used to live here hung off the torso and rode the turn
+  // above, so the body carried the bat and all it could ever do was rotate.
+  // swing.ts authors the swing the other way round: the hands TRAVEL in plate
+  // coordinates while the body turns underneath them. See drawBat(), which the
+  // at-bat view and the editor preview both call.
 
   // ---- head. Tinted to his TONE rather than to the kit — a face is skin or
   // alloy, and a head that took the jersey colour would be a green man.
@@ -896,4 +879,94 @@ function drawCrest(
       ctx.fillRect(-r * 1.06, headY - r * 0.14, r * 2.12, px(r * 0.16));
       break;
   }
+}
+
+/**
+ * WHERE THE PLATE IS, for a rig authored against it.
+ *
+ * ⚠️ THE POSE TABLE IS PLATE-RELATIVE, NOT CANVAS-RELATIVE, and that single
+ * sentence is why this is four lines instead of a rescale. swing.ts measures x
+ * from the plate's centre line and y from the plate, in right-handed-batter
+ * coordinates — it says so at the top of the file — so hanging it on a canvas
+ * is an origin and nothing else.
+ *
+ * The comment this replaces claimed the table was authored against the
+ * roguelike's 640-wide canvas and would need five keyframes rescaled. It was
+ * wrong on both counts. The roguelike draws it at `W / 2 + pose.hx`,
+ * `PLATE_Y + pose.hy` — the same two numbers this takes — and the two views
+ * hang the batter off the plate almost identically: a 92px man centred 83px to
+ * the side of the plate there, a 96px man centred 76px to the side of it here.
+ * The hands land on his body at 1:1, which is the only thing a bat has to do.
+ */
+export interface BatAnchor {
+  /** The plate's centre line. */
+  x: number;
+  /** The plate itself. Pose y is measured UP from here, so it is negative. */
+  y: number;
+  /**
+   * ⚠️ THE FIELD PASSES 1 AND MUST. Scaling the rig moves the drawn barrel
+   * away from the pose swing.ts grades, and decoration does not get to touch
+   * graded geometry. It exists for panels that have no plate in them — the
+   * editor preview is a 120x150 box, and the load pose reaches 149px above the
+   * feet at 1:1 — where shrinking the whole rig beats drawing a second bat.
+   */
+  scale?: number;
+  /** Bats left: mirrored about the PLATE, the same as his feet are. */
+  flip?: boolean;
+}
+
+/**
+ * The hands and the barrel of one pose, in canvas pixels.
+ *
+ * Split out from the drawing so the geometry can be asserted without a canvas
+ * — a bat that lands in the wrong place is not something a green suite has
+ * ever been able to say.
+ */
+export function batLine(
+  pose: BatPose,
+  a: BatAnchor,
+): { hx: number; hy: number; tx: number; ty: number } {
+  const k = a.scale ?? 1;
+  const dir = a.flip ? -1 : 1;
+  const b = barrelOf(pose);
+  return {
+    hx: a.x + dir * pose.hx * k,
+    hy: a.y + pose.hy * k,
+    tx: a.x + dir * b.x * k,
+    ty: a.y + b.y * k,
+  };
+}
+
+/**
+ * THE BAT — one pose of it, hands and all.
+ *
+ * Handle, then a fatter barrel over the outer third, which is what makes a
+ * line read as a bat. Same two strokes the roguelike has drawn for months;
+ * this is the drawing that was already proven, moved to the view that was
+ * still drawing a stick.
+ *
+ * ⚠️ DRAWN OVER THE BODY, ALWAYS. The barrel passes behind the hitter at the
+ * coil, because a lagging barrel physically is behind him, and hiding it there
+ * costs a third of the swing for a realism nobody asked for.
+ */
+export function drawBat(ctx: CanvasRenderingContext2D, pose: BatPose, a: BatAnchor): void {
+  const k = a.scale ?? 1;
+  const { hx, hy, tx, ty } = batLine(pose, a);
+  const mx = hx + (tx - hx) * 0.66;
+  const my = hy + (ty - hy) * 0.66;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#b98a4a';
+  ctx.lineWidth = 4 * k;
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(tx, ty);
+  ctx.stroke();
+  ctx.lineWidth = 8 * k;
+  ctx.beginPath();
+  ctx.moveTo(mx, my);
+  ctx.lineTo(tx, ty);
+  ctx.stroke();
+  ctx.restore();
 }
