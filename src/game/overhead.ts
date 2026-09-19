@@ -58,6 +58,31 @@ const MAN_H = SPRITE_SPECS.fielders.height;
 const FEET_BELOW = MAN_H * 0.28;
 
 /**
+ * GROUND COVERED PER FULL STRIDE CYCLE, in canvas pixels.
+ *
+ * ⚠️ THE FIGURES ARE NOT TO SCALE WITH THE FIELD and this number is where
+ * that gets paid for. An 18px man on a field drawn at about 0.7 px/ft is
+ * twenty-five feet tall; cycling his legs at a real man's stride would be a
+ * blur, and at his own height it would be six paces from home to first. Off
+ * his height, tuned to read: about five cycles per base path.
+ *
+ * It is the one knob here. Turn it down for a faster patter, up for a lope.
+ */
+const GAIT_CYCLE_PX = MAN_H * 0.7;
+
+/** Distance travelled to stride phase. */
+function gaitPhase(moved: number): number {
+  return ((moved / GAIT_CYCLE_PX) * Math.PI * 2) % (Math.PI * 2);
+}
+
+/** The length of one base path on this camera, in canvas pixels. */
+function legPx(cam: Cam): number {
+  const a = pathPoint(cam, 0);
+  const b = pathPoint(cam, 1);
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+/**
  * ONE MAN — a puck under him, a figure on top of it, and his number below.
  *
  * ⚠️ THE ASSET LADDER IS GONE — 09-17. This used to read "his own art, then his
@@ -86,6 +111,15 @@ function drawMan(
     num?: number;
     /** Not involved in the play — drawn faded, and never labelled. */
     dim?: boolean;
+    /**
+     * How far he has travelled from where this play started him, in canvas
+     * pixels. Drives the run cycle. Omitted is a man who has not moved.
+     *
+     * ⚠️ DISTANCE AND NOT SPEED, so nothing here needs to remember the last
+     * frame. A man who stops keeps the phase he stopped on, which draws as a
+     * stance with his feet apart rather than as a snap back to attention.
+     */
+    moved?: number;
   },
 ): void {
   // ⚠️ 0.7 AND NOT THE OLD DOT'S 0.55. A dot is a solid disc and survives being
@@ -152,7 +186,15 @@ function drawMan(
    */
   ctx.save();
   ctx.globalAlpha = alpha;
-  opts.figure(ctx, { x, y: feet, h: MAN_H, side: o.side, man: o.man, seed: o.seed });
+  opts.figure(ctx, {
+    x,
+    y: feet,
+    h: MAN_H,
+    side: o.side,
+    man: o.man,
+    seed: o.seed,
+    phase: gaitPhase(o.moved ?? 0),
+  });
   ctx.restore();
 
   if (o.num === undefined || o.dim) return;
@@ -450,6 +492,14 @@ export type FigureFn = (
     side: 'fielding' | 'batting';
     man?: Player;
     seed: string;
+    /**
+     * How far through his stride he is, radians. See GAIT_CYCLE_PX.
+     *
+     * ⚠️ OPTIONAL, AND 0 IS A MAN STANDING STILL. Every figure here was
+     * drawn in one frozen 'pitch' stance while its x and y slid across the
+     * grass, which is most of what "scripted, not fluid" meant.
+     */
+    phase?: number;
   },
 ) => void;
 
@@ -931,6 +981,9 @@ export function drawOverhead(
       ...(f.man ? { man: f.man } : {}),
       num: f.num,
       dim: !busy,
+      // How far off his post he has come. A man shading a step and a man
+      // running the ball down are the same call with different distances.
+      moved: Math.hypot(p.x - post.x, p.y - post.y),
     });
   }
 
@@ -1078,10 +1131,19 @@ function cuePlaySounds(
 function drawRunnerDot(
   ctx: CanvasRenderingContext2D,
   opts: OverheadOpts,
-  p: { x: number; y: number },
+  cam: Cam,
+  from: number,
+  to: number,
+  k: number,
   dim = false,
 ): void {
-  drawMan(ctx, opts, p.x, p.y, { side: 'batting', seed: 'runner', dim });
+  const p = runnerPoint(cam, from, to, k);
+  // ⚠️ HE TAKES THE PATH, NOT A POINT, and that is the reason this signature
+  // changed. A point cannot say how far a man has run, and every caller already
+  // had the two bags and the fraction between them — so the distance is theirs
+  // for free and nothing has to remember where he was last frame.
+  const moved = Math.max(0, Math.min(1, k)) * (to - from) * legPx(cam);
+  drawMan(ctx, opts, p.x, p.y, { side: 'batting', seed: 'runner', dim, moved });
 }
 
 /**
@@ -1120,6 +1182,7 @@ function drawSteal(
       ...(f.man ? { man: f.man } : {}),
       num: f.num,
       dim: !takes,
+      moved: Math.hypot(p.x - post.x, p.y - post.y),
     });
   }
 
@@ -1127,7 +1190,7 @@ function drawSteal(
   // stops dim on the bag he did not get.
   const runMs = runToFirstMs(steal.speed) * RUNNING_START;
   const k = Math.min(1, t / runMs);
-  drawRunnerDot(ctx, opts, runnerPoint(cam, steal.from, steal.to, k), !steal.safe && t > runMs);
+  drawRunnerDot(ctx, opts, cam, steal.from, steal.to, k, !steal.safe && t > runMs);
 
   // The catcher's throw, from the plate to the bag.
   if (t > 120) {
@@ -1294,7 +1357,7 @@ function drawRace(
   // still baserunners — an occupied base with nobody drawn on it is the thing
   // that made the field look like a diagram.
   for (const bag of r.held) {
-    drawRunnerDot(ctx, opts, runnerPoint(cam, bag + 1, bag + 2, leadOff(t)));
+    drawRunnerDot(ctx, opts, cam, bag + 1, bag + 2, leadOff(t));
   }
 
   // Everyone who was already on and went somewhere, ALONG THE BASEPATH and at
@@ -1304,14 +1367,14 @@ function drawRace(
   for (const m of r.moves) {
     const from = m.from + 1;
     const to = m.to + 1;
-    drawRunnerDot(ctx, opts, runnerPoint(cam, from, to, t / trip(m.speed, to - from)));
+    drawRunnerDot(ctx, opts, cam, from, to, t / trip(m.speed, to - from));
   }
 
   // The man gunned down going for one too many. He runs it exactly like the
   // rest and then stops, dim, at the bag he did not get — until now the only
   // trace of that on screen was a line of text.
   if (gunned) {
-    drawRunnerDot(ctx, opts, runnerPoint(cam, gunned.from, gunned.at, t / gunned.ms), t > gunned.ms);
+    drawRunnerDot(ctx, opts, cam, gunned.from, gunned.at, t / gunned.ms, t > gunned.ms);
   }
 
   // The forced man, on a double play AND on a plain force. He is erased from
@@ -1324,7 +1387,7 @@ function drawRace(
     // third; drawing all three of them breaking out of first put a runner on a
     // basepath he was never on. runnerPoint() counts bags the same way
     // `forceAt` does, so the two ends need no translating.
-    drawRunnerDot(ctx, opts, runnerPoint(cam, forceAt - 1, forceAt, t / relayMs), t > relayMs);
+    drawRunnerDot(ctx, opts, cam, forceAt - 1, forceAt, t / relayMs, t > relayMs);
   }
 
   // The ball's route: to second first on a double play, then on to first.
@@ -1395,7 +1458,7 @@ function drawRace(
   // ⚠️ HOW FAR HE ACTUALLY GOT, not how far the hit was worth. A stretched
   // single leaves him on second and a stretch he lost leaves him dead at it.
   const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
-  drawRunnerDot(ctx, opts, runnerPoint(cam, 0, bases, tripK), stretchedOut && t > tripMs);
+  drawRunnerDot(ctx, opts, cam, 0, bases, tripK, stretchedOut && t > tripMs);
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.
@@ -1436,7 +1499,7 @@ function drawRace(
       // first-to-second leg, his lead collapsing to nothing — a man who never
       // got past his secondary and still did not make it.
       const backK = Math.max(0, Math.min(1, (t - fieldedAt) / 420));
-      drawRunnerDot(ctx, opts, runnerPoint(cam, 1, 2, leadOff(fieldedAt) * (1 - backK)), t > back);
+      drawRunnerDot(ctx, opts, cam, 1, 2, leadOff(fieldedAt) * (1 - backK), t > back);
       if (t > back) call('OUT', first, false);
     }
     return;

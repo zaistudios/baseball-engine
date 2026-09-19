@@ -273,8 +273,10 @@ import {
   armBuild,
   artSlots,
   clubBuild,
+  armPoseAt,
   drawBat,
   drawFigure,
+  runCycle,
   idForFilename,
   lookFor,
   lookForArm,
@@ -3324,14 +3326,13 @@ function drawArm(now: number): void {
   const arm = currentPitcher(game);
   const kit = uniformFor(club);
 
-  // The delivery is the only motion he has: he turns into it as the bar runs,
-  // and he is square again the moment the ball is gone. One number off state
-  // the mound mechanic already keeps, rather than a second animation clock.
-  let turn = 0;
-  if (phase === 'winding') {
-    const sweep = deliveryOf(deliveryPitch).sweepMs;
-    turn = Math.min(1, Math.max(0, (now - deliveryAt) / sweep)) * -0.22;
-  }
+  // ⚠️ OFF THE CLOCK, NOT OFF THE PHASE, and that is what kills the snap.
+  // This read `if (phase === 'winding')` and turned him back to square the
+  // instant the ball left, so the recovery never existed: he popped upright in
+  // one frame, every pitch. `deliveryAt` keeps running after release, and
+  // armPoseAt() parks him at rest once the recovery is done — which is the
+  // same pose the set is, so the pitch before last cannot leave him crooked.
+  const pose = armPoseAt(now - deliveryAt, deliveryOf(deliveryPitch));
 
   drawFigure(ctx, {
     look: lookForArm(arm, club),
@@ -3343,7 +3344,11 @@ function drawArm(now: number): void {
     y: ARM_XY.y,
     h: ARM_XY.h,
     stance: 'pitch',
-    turn,
+    turn: pose.turn,
+    armBack: pose.armBack,
+    armFront: pose.armFront,
+    legFront: pose.legFront,
+    legBack: pose.legBack,
   });
 }
 
@@ -3371,19 +3376,40 @@ function drawHitter(now: number): void {
   // ⚠️ lookForExtra(), NOT A SPREAD OF THE PITCHER. That spread used to be
   // harmless and stopped being the moment an arm could carry a stored look —
   // it put the pitcher's chosen face on his own catcher. See lookForExtra().
+  const since = swingStartedAt === null ? -1 : now - swingStartedAt;
+  const swinging = isSwinging(since, swingTravel);
+  const pose = swinging ? poseAt(since, swingTravel) : REST_POSE;
+  const lefty = man.bats === 'L';
+
+  /**
+   * ⚠️ ONE SINE, TWO MEN, NO SYSTEM. Between pitches this screen drew two
+   * statues: `REST_POSE` and a crouch, held perfectly still for however long
+   * you took to pick a pitch, which reads as a paused game rather than as two
+   * men waiting. A slow breath is the cheapest thing that says the game is
+   * still running.
+   *
+   * ⚠️ IT STOPS DEAD DURING THE SWING. The pose table owns the batter's body
+   * for those 340ms and a bob added under it would be decoration moving graded
+   * geometry — the one thing that is not allowed to happen.
+   *
+   * ponytail: the batter breathes through his LEGS, not his chest. His hands
+   * hold a bat that is drawn in plate coordinates, so rocking his torso would
+   * slide the body out from under the barrel; legs hinge at the hip and move
+   * his feet instead, which is what a hitter waiting actually does.
+   */
+  const breath = swinging ? 0 : Math.sin(now / 900);
+
   drawFigure(ctx, {
     look: lookForExtra(`${fielding.abbr}-catcher`, fielding),
     uniform: uniformFor(fielding),
     build: clubBuild(fielding),
     x: CATCHER_XY.x,
-    y: CATCHER_XY.y,
+    // Under a pixel either way. A catcher who bobs any harder is a catcher
+    // rocking on his heels, and he has 26 pixels of band to live in.
+    y: CATCHER_XY.y + breath * 0.9,
     h: CATCHER_XY.h,
     stance: 'crouch',
   });
-
-  const since = swingStartedAt === null ? -1 : now - swingStartedAt;
-  const pose = isSwinging(since, swingTravel) ? poseAt(since, swingTravel) : REST_POSE;
-  const lefty = man.bats === 'L';
 
   drawFigure(ctx, {
     look: lookFor(man),
@@ -3397,6 +3423,8 @@ function drawHitter(now: number): void {
     stance: 'bat',
     turn: lefty ? -pose.turn : pose.turn,
     flip: lefty,
+    legFront: breath * 0.05,
+    legBack: breath * -0.05,
   });
 
   // ⚠️ THE BAT IS DRAWN HERE, OVER HIM, AND OFF THE POSE THE ENGINE GRADES.
@@ -3462,6 +3490,10 @@ const overheadFigure: FigureFn = (c, o) => {
     // ⚠️ 'pitch', WHICH IS THE ONLY STANCE WITH BOTH ARMS DOWN. From above, a
     // man standing on the grass is not holding a bat and is not crouching.
     stance: 'pitch',
+    // ⚠️ AND NOW HE RUNS. overhead.ts owns how far he has gone, look.ts owns
+    // what a running man looks like, and this line is the whole of the join.
+    // Every one of the nine and every runner comes through here.
+    ...runCycle(o.phase ?? 0),
   });
 };
 

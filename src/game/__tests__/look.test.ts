@@ -22,9 +22,13 @@ import { LEAGUE, type Team } from '../teams.ts';
 import { BAT_POSES, CONTACT_POSE, REST_POSE, barrelOf } from '../swing.ts';
 import {
   PARTS,
+  ARM_POSES,
+  ARM_REST,
+  armPoseAt,
   batLine,
   clubBuild,
   drawFigure,
+  runCycle,
   lookFor,
   lookForArm,
   lookForExtra,
@@ -638,5 +642,126 @@ describe('the bat on the canvas', () => {
     }
     expect(ty - CAP, 'tip y').toBeGreaterThan(0);
     expect(hy, 'hands y').toBeLessThan(H);
+  });
+});
+
+/**
+ * THE BODIES, now that they have joints.
+ *
+ * ⚠️ WHAT THESE PIN IS THE CONTRACT, NOT THE PIXELS. A limb angle is a thing
+ * for eyes; "a man nobody posed is drawn exactly as he was before joints
+ * existed" is a thing a test can hold, and it is the one that protects every
+ * league and every screen that never asked for animation.
+ */
+describe('joints, and the two pose tables that drive them', () => {
+  it('draws an unposed figure with no rotation at all', () => {
+    const calls: string[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k: string) => {
+        if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+        return (...a: unknown[]) => calls.push(`${k}(${a.join(',')})`);
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+
+    const base = {
+      look: { frame: 0, head: 0, crest: 0, tone: 0, number: 8, wear: 0 },
+      uniform: uniformFor(LEAGUE[0] as Team),
+      build: 'human' as const,
+      x: 100,
+      y: 200,
+      h: 96,
+      stance: 'pitch' as const,
+    };
+    drawFigure(ctx, base);
+    const bare = calls.slice();
+    calls.length = 0;
+    drawFigure(ctx, { ...base, legFront: 0, legBack: 0, armFront: 0, armBack: 0 });
+    // Same calls, and in particular NO rotate() — a zero angle is skipped, not
+    // applied, so "omitted" and "zero" are one drawing and not two.
+    expect(calls).toEqual(bare);
+    expect(bare.some((c) => c.startsWith('rotate('))).toBe(false);
+  });
+
+  describe('the run cycle', () => {
+    it('stands a man still at phase 0', () => {
+      // Every joint zero, and limb() skips a zero rather than rotating by it.
+      // (Some come back as -0, which is falsy and draws identically — the
+      // contract is "no rotation", not "the sign of nothing".)
+      for (const [k, v] of Object.entries(runCycle(0))) expect(v, k).toBeFalsy();
+    });
+
+    it('opposes the arms to the legs, which is what makes it read as running', () => {
+      const c = runCycle(Math.PI / 2);
+      expect(c.legFront!).toBeGreaterThan(0);
+      expect(c.legBack!).toBeLessThan(0);
+      // The arm on the same side goes the other way.
+      expect(Math.sign(c.armFront!)).toBe(-Math.sign(c.legFront!));
+      expect(Math.sign(c.armBack!)).toBe(-Math.sign(c.legBack!));
+    });
+
+    it('is a cycle: half a turn later every limb has swapped', () => {
+      const a = runCycle(1);
+      const b = runCycle(1 + Math.PI);
+      expect(b.legFront!).toBeCloseTo(-a.legFront!, 10);
+      expect(b.armBack!).toBeCloseTo(-a.armBack!, 10);
+    });
+  });
+
+  describe('the delivery', () => {
+    const TEMPO = { sweepMs: 960, releaseAtMs: 603 };
+
+    it('is at rest before the press and after the recovery', () => {
+      expect(armPoseAt(-1, TEMPO)).toEqual(ARM_REST);
+      expect(armPoseAt(0, TEMPO)).toEqual(ARM_REST);
+      expect(armPoseAt(99999, TEMPO)).toEqual(ARM_REST);
+    });
+
+    /**
+     * The old code turned him to −0.22 over the whole sweep and snapped him
+     * back to 0 the frame the ball left. `t: 1` is RELEASE, so that number now
+     * lands where the ball does.
+     */
+    it('hits the release pose exactly at releaseAtMs', () => {
+      const p = armPoseAt(TEMPO.releaseAtMs, TEMPO);
+      expect(p.name).toBe('release');
+      expect(p.turn).toBeCloseTo(-0.22, 10);
+    });
+
+    it('recovers to the set pose instead of snapping to it', () => {
+      const end = armPoseAt(TEMPO.sweepMs, TEMPO);
+      expect(end.turn).toBeCloseTo(0, 10);
+      expect(end.legFront).toBeCloseTo(0, 10);
+      // −2π is 0 as far as a canvas is concerned, which is the whole trick.
+      expect(Math.abs(end.armBack! % (Math.PI * 2))).toBeCloseTo(0, 10);
+    });
+
+    /**
+     * ⚠️ THE ARM GOES OVER THE TOP, AND THIS IS WHAT SAYS SO. The keyframes
+     * decrease monotonically through a full revolution; if anybody ever
+     * "tidies" one of them into the equivalent angle nearer zero, the
+     * interpolation reverses and he throws underarm.
+     */
+    it('carries the throwing arm one way round, never back through the bottom', () => {
+      const backs = ARM_POSES.map((p) => p.armBack);
+      for (let i = 1; i < backs.length; i++) {
+        expect(backs[i]!, ARM_POSES[i]!.name).toBeLessThan(backs[i - 1]!);
+      }
+      expect(backs[backs.length - 1]).toBeCloseTo(-Math.PI * 2, 10);
+      // and the sampled path never turns round either
+      let prev = 0;
+      for (let ms = 1; ms <= TEMPO.sweepMs; ms += 17) {
+        const v = armPoseAt(ms, TEMPO).armBack;
+        expect(v).toBeLessThanOrEqual(prev + 1e-9);
+        prev = v;
+      }
+    });
+
+    it('scales with the pitch: a slower delivery reaches the same pose later', () => {
+      const slow = { sweepMs: 1110, releaseAtMs: 710 };
+      expect(armPoseAt(710, slow).name).toBe('release');
+      // At the fastball's release the changeup is not there yet.
+      expect(armPoseAt(603, slow).turn).toBeGreaterThan(-0.22);
+    });
   });
 });

@@ -316,29 +316,58 @@ const lerp = (a: number, b: number, k: number): number => a + (b - a) * k;
  * the contact pose unchanged and the graded frame is still the drawn frame.
  */
 export function poseAt(sinceMs: number, travel = SWING_TRAVEL_MS): BatPose {
-  const first = BAT_POSES[0]!;
-  if (sinceMs <= 0) return first;
+  const seg = segmentAt(BAT_POSES, sinceMs, (t) => poseTimeMs(t, travel));
+  if (!seg) return sinceMs <= 0 ? BAT_POSES[0]! : BAT_POSES[BAT_POSES.length - 1]!;
 
-  for (let i = 0; i < BAT_POSES.length - 1; i++) {
-    const a = BAT_POSES[i]!;
-    const b = BAT_POSES[i + 1]!;
-    const t0 = poseTimeMs(a.t, travel);
-    const t1 = poseTimeMs(b.t, travel);
+  const { a, b, k } = seg;
+  return {
+    name: k < 0.5 ? a.name : b.name,
+    t: lerp(a.t, b.t, k),
+    hx: lerp(a.hx, b.hx, k),
+    hy: lerp(a.hy, b.hy, k),
+    // ⚠️ THE ONE FIELD THAT IS NOT A PLAIN LERP. See lerpAngle(): load is
+    // −100° and coil is +170°, and the naive way round is a 270° trip through
+    // the plate. Anything else with an angle in it has to decide this too,
+    // which is why the shared part below stops at finding the segment.
+    angle: lerpAngle(a.angle, b.angle, k),
+    len: lerp(a.len, b.len, k),
+    turn: lerp(a.turn, b.turn, k),
+  };
+}
+
+/**
+ * WHICH SEGMENT OF A KEYFRAME TABLE `sinceMs` LANDS IN, and how far through it.
+ *
+ * ⚠️ THIS IS THE SHARED PART, AND IT IS SHARED ON PURPOSE. The timing model
+ * is the valuable half of a pose table — acceleration lives in the SPACING of
+ * the keyframes rather than in an easing curve, so a second table written with
+ * its own search loop would be a second timing model that drifts from this one.
+ * The pitcher's delivery in look.ts goes through here.
+ *
+ * What it deliberately does NOT do is blend the fields. A bat has an angle that
+ * has to take the short way round; a body has joints that do not. The caller
+ * knows which of its own fields is which, and one generic blender pretending
+ * otherwise is how the swing would end up taking the long way round the plate.
+ *
+ * `null` means before the first keyframe or past the last — the caller decides
+ * which end it is, because `null` at the start is a pose held and `null` at the
+ * end is a pose finished.
+ */
+export function segmentAt<T extends { t: number }>(
+  table: readonly T[],
+  sinceMs: number,
+  msOf: (t: number) => number,
+): { a: T; b: T; k: number } | null {
+  if (sinceMs <= 0) return null;
+  for (let i = 0; i < table.length - 1; i++) {
+    const a = table[i]!;
+    const b = table[i + 1]!;
+    const t0 = msOf(a.t);
+    const t1 = msOf(b.t);
     if (sinceMs >= t1) continue;
-
-    const k = t1 > t0 ? (sinceMs - t0) / (t1 - t0) : 0;
-    return {
-      name: k < 0.5 ? a.name : b.name,
-      t: lerp(a.t, b.t, k),
-      hx: lerp(a.hx, b.hx, k),
-      hy: lerp(a.hy, b.hy, k),
-      angle: lerpAngle(a.angle, b.angle, k),
-      len: lerp(a.len, b.len, k),
-      turn: lerp(a.turn, b.turn, k),
-    };
+    return { a, b, k: t1 > t0 ? (sinceMs - t0) / (t1 - t0) : 0 };
   }
-
-  return BAT_POSES[BAT_POSES.length - 1]!;
+  return null;
 }
 
 /** True while the bat is still moving. After this it is back at rest. */

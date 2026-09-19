@@ -44,7 +44,7 @@ import type { Pitcher } from '../core/pitcher.ts';
 import { makeRng, seedFromString } from '../core/rng.ts';
 import { slug, tinted } from './art.ts';
 import type { Team } from './teams.ts';
-import { barrelOf, type BatPose } from './swing.ts';
+import { barrelOf, segmentAt, type BatPose } from './swing.ts';
 
 /** Re-exported so everything about looks can be imported from one place. */
 export type { Look };
@@ -461,6 +461,30 @@ export interface FigureOpts {
   turn?: number;
   /** Mirror about x. A left-handed batter is the same man, flipped. */
   flip?: boolean;
+  /**
+   * JOINTS. Radians, positive swings the limb FORWARD (toward +x, the way he
+   * faces). Omitted is zero, which is the standing figure this drew before
+   * they existed — down to the pixel, because a zero rotation is skipped
+   * rather than applied.
+   *
+   * ⚠️ FOUR NUMBERS, NOT A SKELETON. One rotation per limb about one joint,
+   * which is all a run cycle and a delivery need. Elbows and knees would each
+   * cost a second segment on a figure that is 96 pixels tall and usually 30.
+   *
+   * ⚠️ NO `lean`, DELIBERATELY. In a flat side view a forward lean and a
+   * turn are the same rotation about the same belt, and `turn` is already it.
+   * A second name for one number is how two things start disagreeing.
+   *
+   * ⚠️ LIMBS ARE ALWAYS SHELLS, so this is free of the art layer: only
+   * `frame`, `head` and `crest` can carry a drawing, and none of them is an
+   * arm or a leg. Every figure in the game routes through this function, so
+   * these four fields reach the batter, the pitcher, the catcher, all nine
+   * fielders and every runner at once.
+   */
+  legFront?: number;
+  legBack?: number;
+  armFront?: number;
+  armBack?: number;
 }
 
 /**
@@ -527,6 +551,33 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   };
 
   /**
+   * The same box, hinged at the middle of its TOP edge — a hip for a leg, a
+   * shoulder for an arm.
+   *
+   * ⚠️ ZERO IS NOT A ROTATION. An angle of 0 (or undefined) falls straight
+   * through to box(), so a figure nobody has posed is drawn by the identical
+   * call it was drawn by before joints existed. That is the compatibility
+   * contract for a drawing: not "close enough", the same pixels.
+   */
+  const limb = (
+    x: number, y: number, bw: number, bh: number, fill: string, angle?: number,
+  ): void => {
+    if (!angle) return box(x, y, bw, bh, fill);
+    const jx = x + bw / 2;
+    ctx.save();
+    ctx.translate(jx, y);
+    // ⚠️ NEGATED, AND THE SIGN IS THE CONTRACT. A limb hangs DOWN from its
+    // joint, and canvas rotation takes +y toward −x, so a raw positive angle
+    // swings a leg BACKWARDS. Every pose table in this file is written in
+    // "positive is forward", so the flip belongs here once rather than as a
+    // minus sign remembered at four keyframes a table.
+    ctx.rotate(-angle);
+    ctx.translate(-jx, -y);
+    box(x, y, bw, bh, fill);
+    ctx.restore();
+  };
+
+  /**
    * ⚠️ THE ART SEAM, AND EVERY PART GOES THROUGH IT. A drawing replaces the
    * shape below it and inherits the same box, the same anchor and the same
    * tint — so importing a cap changes one part of one build and nothing else
@@ -565,8 +616,11 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   // robot, which is the one place the kit should stop and the chassis start.
   const legW = w * 0.34;
   const legFill = machine ? tone : u.secondary;
-  box(-w * 0.44, legTop, legW, -legTop, legFill);
-  box(w * 0.1, legTop, legW, -legTop, legFill);
+  // ⚠️ THE HIP IS THE PIVOT, WHICH IS WHY THE SHADOW IS DRAWN ABOVE AND NOT
+  // BELOW. A swinging leg lifts its own foot off the ground; the shadow stays
+  // where the man is, because what casts it is him and not his shoe.
+  limb(-w * 0.44, legTop, legW, -legTop, legFill, o.legBack);
+  limb(w * 0.1, legTop, legW, -legTop, legFill, o.legFront);
 
   // ---- ⚠️ THE TURN STARTS HERE, AT THE BELT, AND NOT AT THE FEET.
   //
@@ -658,10 +712,12 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   const armW = w * 0.22;
   const skin = machine ? '#8a9098' : tone;
   if (o.stance === 'pitch') {
-    box(-w / 2 - armW * 0.6, torsoTop + torsoH * 0.2, armW, torsoH * 0.7, skin);
-    box(w / 2 - armW * 0.4, torsoTop + torsoH * 0.2, armW, torsoH * 0.7, skin);
+    limb(-w / 2 - armW * 0.6, torsoTop + torsoH * 0.2, armW, torsoH * 0.7, skin, o.armBack);
+    limb(w / 2 - armW * 0.4, torsoTop + torsoH * 0.2, armW, torsoH * 0.7, skin, o.armFront);
   } else {
-    box(w * 0.3, torsoTop + torsoH * 0.18, armW, torsoH * 0.55, skin);
+    // One arm on a bat or a crouch, and it is the front one — the back arm is
+    // behind his body from this camera and was never drawn.
+    limb(w * 0.3, torsoTop + torsoH * 0.18, armW, torsoH * 0.55, skin, o.armFront);
   }
 
   // ---- the mitt. A crouched man with nothing in his hand is a man squatting.
@@ -969,4 +1025,110 @@ export function drawBat(ctx: CanvasRenderingContext2D, pose: BatPose, a: BatAnch
   ctx.lineTo(tx, ty);
   ctx.stroke();
   ctx.restore();
+}
+
+/**
+ * THE RUN CYCLE — four joints off one number.
+ *
+ * ⚠️ PHASE IS DISTANCE, NOT TIME, and that is the whole point of it. Keyed on
+ * wall time every man on the field cycles his legs at the same rate and speed
+ * stops being visible; keyed on ground covered, a fast man's legs go faster
+ * because he is covering more of it, and the one rating you can actually SEE in
+ * an overhead replay is the one that decides the play.
+ *
+ * Arms oppose legs, which is the whole of what makes a walk cycle read as a
+ * walk rather than as a man being shaken.
+ *
+ * At phase 0 every joint is 0, so a man who has not moved is drawn by the same
+ * call he was drawn by before any of this existed.
+ */
+const LEG_SWING = 0.42;
+const ARM_SWING = 0.32;
+
+export function runCycle(phase: number): Pick<
+  FigureOpts,
+  'legFront' | 'legBack' | 'armFront' | 'armBack'
+> {
+  const s = Math.sin(phase);
+  return {
+    legFront: s * LEG_SWING,
+    legBack: -s * LEG_SWING,
+    armFront: -s * ARM_SWING,
+    armBack: s * ARM_SWING,
+  };
+}
+
+/**
+ * THE DELIVERY — a pose table, same model as BAT_POSES.
+ *
+ * ⚠️ IT USED TO BE ONE NUMBER AND IT SNAPPED. `turn = progress × −0.22`
+ * while the bar ran, then straight back to 0 the frame the ball left: he popped
+ * square in one frame at release, every pitch, which is the pitcher's half of
+ * the same fault the bat had. The follow-through is a KEYFRAME now, so the
+ * recovery is drawn instead of skipped.
+ *
+ * ⚠️ `t` IS RELEASE, NOT THE END OF THE SWEEP, exactly as `t: 1` on the bat
+ * is contact. Before it, time is a fraction of this pitch's `releaseAtMs`;
+ * after it, of the recovery. That is what lets a changeup take longer to arrive
+ * without its follow-through turning to treacle.
+ *
+ * ⚠️ THE THROWING ARM TRAVELS A FULL REVOLUTION, 0 → −2.1 → −4.3 → −2π, and
+ * the last number is the point: −2π draws identically to 0, so he arrives back
+ * at rest with no seam to hide. Going the other way round — −2.1 to +0.5 —
+ * interpolates the arm through the BOTTOM of the circle, which is a man
+ * skimming a bowling ball rather than throwing a baseball.
+ *
+ * ⚠️ −0.22 AT RELEASE IS THE OLD CONSTANT, KEPT. It is the one number in here
+ * anybody had already looked at, so it survives as a keyframe rather than being
+ * re-guessed.
+ */
+export interface ArmPose {
+  name: string;
+  /** 1 is release. Above it, into the recovery. */
+  t: number;
+  turn: number;
+  armBack: number;
+  armFront: number;
+  legFront: number;
+  legBack: number;
+}
+
+export const ARM_POSES: readonly ArmPose[] = [
+  { name: 'set',     t: 0,    turn: 0,     armBack: 0,      armFront: 0,     legFront: 0,     legBack: 0 },
+  { name: 'lift',    t: 0.55, turn: -0.17, armBack: -2.1,   armFront: 0.35,  legFront: -0.45, legBack: 0.06 },
+  { name: 'release', t: 1,    turn: -0.22, armBack: -4.3,   armFront: -0.35, legFront: 0.38,  legBack: -0.1 },
+  { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,   legBack: 0 },
+];
+
+export const ARM_REST: ArmPose = ARM_POSES[0]!;
+
+/**
+ * The pitcher `sinceMs` after the bar started, for a delivery of this tempo.
+ *
+ * Before the press and after the recovery he is at rest — which is the same
+ * pose at both ends, so nothing has to know which side of the pitch it is on.
+ */
+export function armPoseAt(
+  sinceMs: number,
+  d: { sweepMs: number; releaseAtMs: number },
+): ArmPose {
+  const recoverMs = Math.max(1, d.sweepMs - d.releaseAtMs);
+  const seg = segmentAt(ARM_POSES, sinceMs, (t) =>
+    t <= 1 ? t * d.releaseAtMs : d.releaseAtMs + (t - 1) * recoverMs,
+  );
+  if (!seg) return ARM_REST;
+  const { a, b, k } = seg;
+  const at = (x: number, y: number): number => x + (y - x) * k;
+  return {
+    name: k < 0.5 ? a.name : b.name,
+    t: at(a.t, b.t),
+    turn: at(a.turn, b.turn),
+    // Plain lerps, every one: these are joints, and a joint has no short way
+    // round to take. The arm's full revolution is deliberate and a shortest-arc
+    // blend would be exactly what undoes it.
+    armBack: at(a.armBack, b.armBack),
+    armFront: at(a.armFront, b.armFront),
+    legFront: at(a.legFront, b.legFront),
+    legBack: at(a.legBack, b.legBack),
+  };
 }

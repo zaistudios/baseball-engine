@@ -226,6 +226,43 @@ describe('the men in the replay', () => {
   });
 
   /**
+   * ⚠️ THE GLIDE, AND WHAT KILLED IT. Every one of the nine and every runner
+   * used to be handed to the caller with nothing but an x and a y, so they slid
+   * across the grass in one frozen stance — the single biggest piece of
+   * "scripted, not fluid". `phase` is how far through his stride a man is, and
+   * it is keyed on GROUND COVERED, so it cannot be right by accident: a man who
+   * has not left his post has to come through at exactly 0.
+   */
+  describe('the stride', () => {
+    const phases = (now: number): { side: string; phase: number }[] => {
+      const { ctx } = stub();
+      const seen: { side: string; phase: number }[] = [];
+      drawOverhead(ctx, makeCam(420, 340), play(), now, {
+        ...PALETTE,
+        figure: (_c, o) => seen.push({ side: o.side, phase: o.phase ?? -1 }),
+      });
+      return seen;
+    };
+
+    it('leaves everybody standing still on the first frame', () => {
+      // Before the cut nobody has taken a step, and a run cycle at 0 is the
+      // standing figure exactly.
+      for (const m of phases(0)) expect(m.phase, m.side).toBe(0);
+    });
+
+    it('has men running once the play is on', () => {
+      const moving = phases(1500).filter((m) => m.phase !== 0);
+      expect(moving.length).toBeGreaterThan(0);
+      expect(moving.some((m) => m.side === 'batting')).toBe(true);
+      expect(moving.some((m) => m.side === 'fielding')).toBe(true);
+    });
+
+    it('hands every figure a phase, never undefined', () => {
+      for (const m of phases(1500)) expect(m.phase).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  /**
    * ⚠️ THE PIPELINE'S HALF OF IT. `manned()` puts a Player on each spot so the
    * asset layer can ask for HIS drawing; if the figure callback does not receive
    * him, per-player art is unreachable and every club fields nine of the same
