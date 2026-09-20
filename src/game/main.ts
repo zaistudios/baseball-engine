@@ -277,6 +277,9 @@ import {
   isSwinging,
   REST_POSE,
   CHECK_PULL_MS,
+  ZONE_DY,
+  ZONE_HALF_W,
+  ZONE_HALF_H,
 } from './swing.ts';
 import {
   armBuild,
@@ -3154,7 +3157,37 @@ const PLATE_Y = 250;
 // The plate's centre line. swing.ts measures the whole swing from it, so it is
 // a name now rather than a 210 repeated down the file.
 const PLATE_X = 210;
-const ZONE = { x: 160, y: 118, w: 100, h: 108 };
+/**
+ * THE STRIKE ZONE, AND IT IS SWING.TS'S ZONE NOW — 2026-09-20.
+ *
+ * ⚠️ THERE WERE TWO OF THESE AND THEY DISAGREED BY THIRTY PIXELS. swing.ts has
+ * carried `ZONE_DY/ZONE_HALF_W/ZONE_HALF_H` since the pose table was written,
+ * and swing.test.ts asserts the graded barrel lands inside THAT rectangle —
+ * while this file drew a different one, hard-coded, thirty pixels higher. Both
+ * were called the strike zone. The suite was green the whole time, because the
+ * only zone it could reach was the one nothing was ever drawn against.
+ *
+ * What a person saw: the zone floated 24px above the plate, in-zone pitches
+ * crossed y148-196, and the barrel came through at y203 — under every strike in
+ * the game. The bat passed BENEATH the ball on a perfect swing and the banner
+ * said he had squared it up. That is the picture and the verdict coming apart,
+ * which is FAULT 5 one layer further down.
+ *
+ * Zane's call, 09-20: the zone moves. Everything hung off it comes with for
+ * free, because all of it already reads this rect — the reticle, spotXY, the
+ * call grid, the ball's whole flight path. The bottom edge now lands ON the
+ * plate line, which is where the roguelike has always had it and the reason the
+ * roguelike never had this problem.
+ *
+ * DERIVED, NOT COPIED. A second rectangle written out in canvas numbers here is
+ * precisely what cost this project thirty pixels.
+ */
+const ZONE = {
+  x: PLATE_X - ZONE_HALF_W,
+  y: PLATE_Y + ZONE_DY - ZONE_HALF_H,
+  w: ZONE_HALF_W * 2,
+  h: ZONE_HALF_H * 2,
+};
 
 /**
  * WHERE THE PEOPLE STAND — 2026-09-15, and until this there were none.
@@ -3173,12 +3206,13 @@ const ZONE = { x: 160, y: 118, w: 100, h: 108 };
  * in one commit on purpose.
  *
  * Geometry on the 420x340 canvas, which is tight and mostly decided for us:
- * the zone owns x 160-260, the bar owns y 296+ out to x 276, and the base
+ * the zone owns x 155-265 down to the plate line, the bar owns y 296+ out to
+ * x 276, and the base
  * widget owns the bottom right from x 315. What is left is a column either side
  * of the plate and the mound above it.
  */
 const BATTER_H = 96;
-/** Clear of the zone's left edge at 160, so he never stands in the strike zone. */
+/** Clear of the zone's left edge at 155, so he never stands in the strike zone. */
 const BATTER_X = 134;
 const BATTER_Y = PLATE_Y + 14;
 /**
@@ -3738,7 +3772,8 @@ function drawCall(): void {
  * here is how the picture and the verdict come apart.
  *
  * It sits bottom-left because that is the only quiet corner of this canvas:
- * the zone runs x160-260 down to y226, the plate to y270, and the bases live
+ * the zone runs x155-265 down to the plate line at y250, the plate's own point
+ * to y270, and the bases live
  * around x315-385. Nothing here overlaps any of them.
  */
 const BAR = { x: 24, y: 296, w: 252, h: 14 } as const;
