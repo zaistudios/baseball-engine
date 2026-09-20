@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Basedball Visual Filmstrip Suite</title>
+  <style>
+    body {
+      background: #0d1210;
+      color: #e8e8d8;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      margin: 0;
+      padding: 16px;
+    }
+    .strip-container {
+      margin-bottom: 24px;
+      background: #141b16;
+      border: 1px solid #2f3a2a;
+      padding: 12px;
+    }
+    .strip-title {
+      font-size: 15px;
+      font-weight: bold;
+      color: #d8b44a;
+      margin-bottom: 4px;
+    }
+    .strip-blurb {
+      font-size: 12px;
+      color: #7a8a6a;
+      margin-bottom: 12px;
+    }
+    .frames-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .frame-box {
+      background: #0d1210;
+      border: 1px solid #222c20;
+      padding: 4px;
+      text-align: center;
+    }
+    .frame-time {
+      font-size: 11px;
+      color: #d8b44a;
+      margin-bottom: 4px;
+    }
+    .frame-box img {
+      width: 210px;
+      height: 170px;
+      display: block;
+      border: 1px solid #1a241b;
+    }
+    .frame-sub {
+      font-size: 10px;
+      color: #7a8a6a;
+      margin-top: 4px;
+      max-width: 210px;
+    }
+  </style>
+</head>
+<body>
+  <div id="output"></div>
+  <canvas id="cvs" width="420" height="340" style="display:none;"></canvas>
+
+  <script>
+    window.addEventListener('error', e => console.error('Script error:', e.message, e.filename, e.lineno));
+  </script>
+  <script type="module">
+    import { battedAt, radiusAt, RELEASE_DY } from '/src/game/flight.ts';
+    import { ZONE_DY, ZONE_HALF_W, ZONE_HALF_H, poseAt, barrelOf, REST_POSE, CONTACT_POSE } from '/src/game/swing.ts';
+    import { drawOverhead, newReplay, makeCam } from '/src/game/overhead.ts';
+
+    const canvas = document.getElementById('cvs');
+    const ctx = canvas.getContext('2d');
+
+    const PLATE_X = 210;
+    const PLATE_Y = 250;
+    const ZONE = {
+      x: PLATE_X - ZONE_HALF_W,
+      y: PLATE_Y + ZONE_DY - ZONE_HALF_H,
+      w: ZONE_HALF_W * 2,
+      h: ZONE_HALF_H * 2,
+    };
+    const CATCHER_XY = { x: 210, y: 296, h: 30 };
+    const MITT_XY = { x: CATCHER_XY.x + CATCHER_XY.h * 0.23, y: CATCHER_XY.y - CATCHER_XY.h * 0.4 };
+    const MITT_MS = 140;
+
+    function drawBaseScene(batterSide = 'R', batPose = REST_POSE) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#101a12';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#16211a';
+      ctx.beginPath();
+      ctx.ellipse(210, 60, 92, 34, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Strike zone
+      ctx.strokeStyle = '#3d4a38';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ZONE.x, ZONE.y, ZONE.w, ZONE.h);
+      ctx.strokeStyle = '#222c20';
+      for (let i = 1; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(ZONE.x + (ZONE.w / 3) * i, ZONE.y);
+        ctx.lineTo(ZONE.x + (ZONE.w / 3) * i, ZONE.y + ZONE.h);
+        ctx.moveTo(ZONE.x, ZONE.y + (ZONE.h / 3) * i);
+        ctx.lineTo(ZONE.x + ZONE.w, ZONE.y + (ZONE.h / 3) * i);
+        ctx.stroke();
+      }
+
+      // Mound pitcher silhouette
+      ctx.fillStyle = '#4a5d45';
+      ctx.fillRect(206, 50, 8, 20);
+
+      // Home plate
+      ctx.fillStyle = '#cfd6c4';
+      ctx.beginPath();
+      ctx.moveTo(180, PLATE_Y);
+      ctx.lineTo(240, PLATE_Y);
+      ctx.lineTo(240, PLATE_Y + 10);
+      ctx.lineTo(210, PLATE_Y + 20);
+      ctx.lineTo(180, PLATE_Y + 10);
+      ctx.closePath();
+      ctx.fill();
+
+      // Catcher
+      ctx.fillStyle = '#3a4837';
+      ctx.fillRect(CATCHER_XY.x - 10, CATCHER_XY.y - 10, 20, 20);
+      // Catcher mitt
+      ctx.fillStyle = '#6b4f2c';
+      ctx.beginPath();
+      ctx.arc(MITT_XY.x, MITT_XY.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Batter silhouette
+      const bx = batterSide === 'L' ? 286 : 134;
+      ctx.fillStyle = '#456a42';
+      ctx.fillRect(bx - 8, PLATE_Y - 20, 16, 50);
+
+      // Bat
+      const flip = batterSide === 'L' ? -1 : 1;
+      const bOffset = barrelOf(batPose);
+      ctx.strokeStyle = '#a68249';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(bx, PLATE_Y - 10);
+      ctx.lineTo(PLATE_X + flip * bOffset.x, PLATE_Y + bOffset.y);
+      ctx.stroke();
+    }
+
+    function captureStrip(name, title, blurb, renderFn, times, subFn) {
+      const container = document.createElement('div');
+      container.className = 'strip-container';
+      container.id = 'strip-' + name;
+      container.innerHTML = `
+        <div class="strip-title">${title}</div>
+        <div class="strip-blurb">${blurb}</div>
+        <div class="frames-row" id="row-${name}"></div>
+      `;
+      document.getElementById('output').appendChild(container);
+
+      const row = container.querySelector('#row-' + name);
+      for (const t of times) {
+        renderFn(t);
+        const dataUrl = canvas.toDataURL('image/png');
+        const box = document.createElement('div');
+        box.className = 'frame-box';
+        box.innerHTML = `
+          <div class="frame-time">+${t}ms</div>
+          <img src="${dataUrl}" />
+          <div class="frame-sub">${subFn ? subFn(t) : ''}</div>
+        `;
+        row.appendChild(box);
+      }
+    }
+
+    // 1. Pulled line drive (RH): exit 102mph, LA 14, Dir -24
+    captureStrip(
+      'pulled-rh',
+      'ITEM: PULLED LINE DRIVE (Right-handed batter)',
+      '102 mph · 14° launch angle · -24° spray (LF). Ball leaves bat screen-left, shrinks toward mound vanishing point, vanishes at horizon.',
+      (t) => {
+        const contactBarrel = barrelOf(CONTACT_POSE);
+        drawBaseScene('R', CONTACT_POSE);
+        const p = battedAt({ exitVelocity: 102, launchAngle: 14, direction: -24 }, { x: contactBarrel.x, y: -48 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400],
+      (t) => t === 0 ? 'contact at plate' : (t >= 360 ? 'reached horizon' : `x=${(PLATE_X + (battedAt({exitVelocity:102,launchAngle:14,direction:-24},{x:3.4,y:-48},t)?.x??0)).toFixed(0)}, r=${battedAt({exitVelocity:102,launchAngle:14,direction:-24},{x:3.4,y:-48},t)?.r.toFixed(1)}`)
+    );
+
+    // 1b. Overhead for pulled line drive
+    captureStrip(
+      'overhead-pulled',
+      'ITEM: PULLED LINE DRIVE — OVERHEAD VIEW',
+      'Overhead replay of the same 102mph, -24° ball: lands in LEFT FIELD (screen-left) matching the at-bat view.',
+      (t) => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const rep = newReplay({
+          now: 1000,
+          outcome: 'double',
+          exitVelocity: 102,
+          launchAngle: 14,
+          direction: -24,
+          speed: 1,
+          safe: true,
+          wallFt: 330,
+        });
+        const cam = makeCam(420, 340);
+        drawOverhead(ctx, cam, rep, 1000 + t, {
+          field: '#1d2b1f',
+          dirt: '#3a2e20',
+          wall: () => 330,
+          figure: () => {},
+        });
+      },
+      [0, 200, 400, 600, 800, 1000, 1200, 1400],
+      (t) => t === 0 ? 'contact' : (t === 800 ? 'landing in left field' : 'fielded in LF')
+    );
+
+    // 2. Pop-up: exit 84mph, LA 68, Dir 4
+    captureStrip(
+      'popup',
+      'ITEM: POP-UP',
+      '84 mph · 68° launch angle · 4° spray. Climbs straight up, still climbing when leaving top of frame at ~200ms.',
+      (t) => {
+        drawBaseScene('R', CONTACT_POSE);
+        const p = battedAt({ exitVelocity: 84, launchAngle: 68, direction: 4 }, { x: 3.4, y: -48 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240, 280],
+      (t) => t === 0 ? 'contact' : (t >= 200 ? 'exited top of frame' : `y=${(PLATE_Y + (battedAt({exitVelocity:84,launchAngle:68,direction:4},{x:3.4,y:-48},t)?.y??0)).toFixed(0)}`)
+    );
+
+    // 3. Chopper: exit 68mph, LA -16, Dir -6
+    captureStrip(
+      'chopper',
+      'ITEM: CHOPPER',
+      '68 mph · -16° launch angle (into dirt). Hits ground floor and trickles low near plate line.',
+      (t) => {
+        drawBaseScene('R', CONTACT_POSE);
+        const p = battedAt({ exitVelocity: 68, launchAngle: -16, direction: -6 }, { x: 3.4, y: -48 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400],
+      (t) => t === 0 ? 'contact' : `y=${(PLATE_Y + (battedAt({exitVelocity:68,launchAngle:-16,direction:-6},{x:3.4,y:-48},t)?.y??0)).toFixed(0)} (ground level)`
+    );
+
+    // 4. Foul: exit 92mph, LA 32, Dir -72
+    captureStrip(
+      'foul',
+      'ITEM: FOUL BACK / ASIDE',
+      '92 mph · 32° launch angle · -72° spray. Comes back toward camera, expands, exits side/top of frame.',
+      (t) => {
+        drawBaseScene('R', CONTACT_POSE);
+        const p = battedAt({ exitVelocity: 92, launchAngle: 32, direction: -72 }, { x: 3.4, y: -48 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240],
+      (t) => t === 0 ? 'contact' : (t >= 160 ? 'exited left edge' : `r=${battedAt({exitVelocity:92,launchAngle:32,direction:-72},{x:3.4,y:-48},t)?.r.toFixed(1)} (growing)`)
+    );
+
+    // 5. Swing and miss / Take into catcher mitt
+    captureStrip(
+      'mitt',
+      'ITEM: SWING AND MISS / PITCH INTO CATCHER MITT',
+      'Ball carries past plate, decelerates into catcher mitt over 140ms, and stays there.',
+      (t) => {
+        drawBaseScene('R', REST_POSE);
+        // Crossing spot at middle (210, 202)
+        let x = 210;
+        let y = 202;
+        let r = radiusAt(1);
+        const past = Math.min(1, Math.max(0, t / MITT_MS));
+        if (past > 0) {
+          const e = 1 - (1 - past) * (1 - past);
+          x += (MITT_XY.x - x) * e;
+          y += (MITT_XY.y - y) * e;
+          r = radiusAt(1 + e * 0.2);
+        }
+        ctx.fillStyle = '#f0f0e2';
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      },
+      [0, 40, 80, 120, 140, 180, 220, 260],
+      (t) => t === 0 ? 'crossing plate' : (t >= 140 ? 'resting in mitt' : 'decelerating to mitt')
+    );
+
+    // 6. Left-handed batter pulled line drive: exit 100mph, LA 15, Dir +25
+    captureStrip(
+      'lefty-pulled',
+      'ITEM: LEFT-HANDED BATTER PULLED LINE DRIVE',
+      '100 mph · 15° launch angle · +25° spray (RF). Leaves bat screen-right, shrinking toward mound.',
+      (t) => {
+        drawBaseScene('L', CONTACT_POSE);
+        const p = battedAt({ exitVelocity: 100, launchAngle: 15, direction: 25 }, { x: -3.4, y: -48 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400],
+      (t) => t === 0 ? 'contact' : `x=${(PLATE_X + (battedAt({exitVelocity:100,launchAngle:15,direction:25},{x:-3.4,y:-48},t)?.x??0)).toFixed(0)} (screen-right)`
+    );
+
+    // 7. Check swing retreat
+    captureStrip(
+      'check-swing',
+      'ITEM: CHECK SWING RETREAT',
+      'Bat checked at 150ms of a 200ms swing, winds backwards toward load pose over 200ms.',
+      (t) => {
+        const swingTravel = 200;
+        const checkedAtSince = 150;
+        // Winding backwards
+        const retreat = Math.max(0, 1 - t / 200);
+        const since = checkedAtSince * retreat;
+        const pose = poseAt(since, swingTravel);
+        drawBaseScene('R', pose);
+      },
+      [0, 40, 80, 120, 160, 200, 240],
+      (t) => t === 0 ? 'check triggered' : (t >= 200 ? 'retreated to load' : 'winding backwards')
+    );
+
+    // 8. Bunt: exit 42mph, LA 2, Dir 10
+    captureStrip(
+      'bunt',
+      'ITEM: BUNT',
+      '42 mph exit velocity · 2° launch angle. Ball trickles forward slowly off the plate.',
+      (t) => {
+        drawBaseScene('R', REST_POSE);
+        const p = battedAt({ exitVelocity: 42, launchAngle: 2, direction: 10 }, { x: 0, y: 0 }, t);
+        if (p) {
+          const bx = PLATE_X + p.x;
+          const by = PLATE_Y + p.y;
+          if (bx >= -p.r && bx <= canvas.width + p.r && by >= -p.r && by <= canvas.height + p.r) {
+            ctx.fillStyle = '#f0f0e2';
+            ctx.beginPath();
+            ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      },
+      [0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400],
+      (t) => t === 0 ? 'bunted' : `trickling: d=${(battedAt({exitVelocity:42,launchAngle:2,direction:10},{x:0,y:0},t)?.x??0).toFixed(0)}px`
+    );
+
+    // 9. Zone confirmation (commit 0c5f478)
+    captureStrip(
+      'zone-meeting',
+      'ITEM: ZONE CONFIRMATION — PITCH & CONTACT BARREL AT SAME HEIGHT',
+      'In-zone pitch crossing at center (210, 202) meets the CONTACT barrel at (213.4, 202.6) — identical height.',
+      (t) => {
+        drawBaseScene('R', CONTACT_POSE);
+        // Draw the pitch at center
+        ctx.fillStyle = '#fff2b0';
+        ctx.beginPath();
+        ctx.arc(210, 202, radiusAt(1), 0, Math.PI * 2);
+        ctx.fill();
+      },
+      [0],
+      () => 'pitch (210, 202) meets barrel (213.4, 202.6)'
+    );
+
+    window.__ready = true;
+  </script>
+</body>
+</html>
