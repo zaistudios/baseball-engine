@@ -1,31 +1,14 @@
-Zane — this one is waiting on you, not on an agent. Four answers and it becomes a single Builder issue.
+Four answers, one issue. It's with Builder now: **ZAIS-6 — Pause at idle, a settings screen with two doors, and a reset button in the record book.**
 
-I re-checked the vault: nothing in it covers a pause screen, a settings screen, a mid-game quit, or clearing the record book. The nearest note, **The Three Pillars**, uses "accessible" to mean *no install, one HTML file, opens offline* — a different word than the one in your request, which is about controls you can reach on screen. So there is no spec to build from, and I am not inventing one.
+How I read you, so you can catch me if I read wrong:
 
-Re-verified against the code today:
+1. **Pause only at idle.** Taken literally — ESC between pitches works, ESC during a windup or a delivery does nothing.
+2. **"Similar to every other game"** → one confirm, then the book empties. Seasons and the barrel streak go. Your custom clubs and your saved season do not, and the confirm says so before you press it.
+3. **Two doors, one screen.** A SETTINGS card on the title menu next to CUSTOMIZE, and a SETTINGS button on the pause screen. Same screen both ways. The four hotkeys (`t` `f` `g` `p`) keep working everywhere — the screen lists them and shows each key rather than replacing them.
+4. **Quit just ends the game.** One thing worth your eyes: mid-franchise, "just ends the game" means nothing gets written, so CONTINUE puts you back on the same day and you play that game again from the top. A re-roll, in other words, not a forfeit. That's the simplest reading of what you said and it's what the existing Quit button already does — but if you meant the day should count as played, say so here and I'll get it changed before Builder commits that step.
 
-- No pause exists. `Phase` is `'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'throw' | 'over'` — `src/game/main.ts:337`.
-- No settings screen. The four knobs are live hotkeys in `press()` — `src/game/main.ts:2484`-`2519`: `t` auto, `f` speed, `g` difficulty, `p` pitch speed. The comments there say outright that the point is reaching them *without* going to a menu.
-- Quit exists only after the last out: `Quit to menu` / `Play again` is `location.reload()` inside the `phase === 'over'` branch — `src/game/main.ts:4285`. The `r` key is gated the same way (`:2530`). Mid-game there is no exit.
-- The record book ends in a lone `BACK` button — `src/game/main.ts:6247`.
-- Five storage keys exist and "stats" could mean any of them: `asb-career`, `asb-streak`, `asb-timing`, `asb.season.v1`, `asb-league`.
+Two things I found in the code that shape the job. The first: an overlay is not a pause. `#pre` covers the canvas and takes the keyboard, but the frame loop keeps running underneath it — with AUTO on, the computer would go on playing your half behind the pause screen. So the pause is a real flag that stops the loop, and the screen is just what you see once it's stopped. The second: the engine grades timing off the wall clock, so a pause has to hand back the time it took, or a between-innings card would vanish the instant you resumed.
 
-**The fact that keeps this small:** nothing new has to be computed or persisted. `newCareer()` / `saveCareer()`, `newStreak()` / `saveStreak()` and `clearSeason()` are all already exported — a reset is those calls behind a confirm. The settings screen has no new logic either; the four knobs already work and persist. They just have no door.
+What makes it small: five screens in the game are already built out of the same overlay, so the pause screen and the settings screen are two more of those — no new element, no new CSS, `game.html` untouched. And the reset is two function calls that already exist behind a confirm.
 
-**The rule that decides it:** the engine grades TIMING in milliseconds against `performance.now()`. Anything that stops the clock mid-pitch changes what a swing is worth. That is why question 1 is yours and not an implementation detail.
-
-## The four questions
-
-**1. What may be paused?** Pausing during `windup`/`throw` freezes a ball in flight; resuming either hands the batter a free second read or throws the pitch away.
-*I recommend: pause only at `idle`, between pitches. One guard, and it cannot corrupt a graded swing.*
-
-**2. Does "reset stats" mean the record book only, or everything?** `asb-career` and `asb-streak` are stats. `asb-league` is your custom clubs — wiping that destroys work that is not a stat.
-*I recommend: clear `asb-career` and `asb-streak` only, behind a confirm, with the screen saying out loud that the custom league and the saved season are untouched.*
-
-**3. Does the settings screen replace the hotkeys or document them?**
-*I recommend: it lists the same four knobs and shows each one's key. Nothing moves; the hotkeys keep working.*
-
-**4. What happens to a franchise game you quit mid-way?** The season persists separately, so a mid-game quit leaves a half-played game on the schedule.
-*I recommend: discard that game and return to the schedule with it unplayed — but this is the one I least want to guess. It is the difference between quit-as-exit and quit-as-re-roll, and a re-roll is a way to farm a good game.*
-
-Answer 1, 2, 3 with "yes to your rec" if you agree, and tell me your call on 4. Then this goes to Builder as one issue against `src/game/main.ts` and nothing else — `src/web` and `index.html` stay frozen.
+ZAIS-5 stays open as the parent until Builder and Eyes are through.
