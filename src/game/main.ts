@@ -38,8 +38,17 @@ import {
   type ReleaseGrade,
 } from '../core/delivery.ts';
 import type { PitchType, Outcome } from '../core/hitTables.ts';
-import { extend, loadStreak, saveStreak, type Streak } from './streak.ts';
-import { bestYear, file, loadCareer, records, saveCareer, totals, winPct } from './career.ts';
+import { extend, loadStreak, newStreak, saveStreak, type Streak } from './streak.ts';
+import {
+  bestYear,
+  file,
+  loadCareer,
+  newCareer,
+  records,
+  saveCareer,
+  totals,
+  winPct,
+} from './career.ts';
 import { clubValue, showScale, strengthLabel, strengthRank } from './value.ts';
 import {
   COMMAND,
@@ -6457,7 +6466,12 @@ function showCareer(back: () => void): void {
     summary +
     recordPanel +
     table +
-    `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button></div>`;
+    `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button>` +
+    // ⚠️ IT SITS UNDER THE WHOLE BOOK, not up beside the title. This is the one
+    // control in the game that destroys something, so it is reached by having
+    // scrolled past everything it would destroy.
+    `<button class="go" data-reset="1" style="opacity:.75">EMPTY THE RECORD BOOK</button>` +
+    `</div>`;
   el.style.display = 'flex';
   el.scrollTop = 0;
 
@@ -6475,6 +6489,31 @@ function showCareer(back: () => void): void {
   }
   addEventListener('keydown', onKey);
   el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => leave();
+
+  // ⚠️ THE RECORD BOOK AND NOTHING ELSE. Your clubs live in asb-league and a
+  // season in progress in asb.season.v1, and neither is touched here — the
+  // confirm says so out loud, because anybody reading the word "empty" assumes
+  // the worst and is right to.
+  el.querySelector<HTMLButtonElement>('[data-reset]')!.onclick = () => {
+    if (
+      !confirm(
+        'Empty the record book?\n\n' +
+          'Every season you have filed and your longest barrel streak go, for good.\n\n' +
+          'Your clubs and your saved season stay exactly where they are.',
+      )
+    ) {
+      return;
+    }
+    saveCareer(newCareer());
+    saveStreak(newStreak());
+    // ⚠️ AND THE MODULE'S COPY. `streak` is loaded once at module scope and this
+    // screen reads THAT rather than the store — wipe only the store and the
+    // book you just emptied goes on showing the old longest streak.
+    streak = newStreak();
+    // Re-draw in place, which means taking this screen's key handler off first.
+    removeEventListener('keydown', onKey);
+    showCareer(back);
+  };
 }
 
 /**
