@@ -23,7 +23,7 @@ import { makeRng } from '../core/rng.ts';
 import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
 import type { Player } from '../core/roster.ts';
 import { ALL_LOCATIONS, locationOffset } from '../core/hit.ts';
-import type { SwingInput, PitchLocation } from '../core/hit.ts';
+import type { SwingInput, PitchLocation, HitResult } from '../core/hit.ts';
 import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
 import {
   ARM_MS,
@@ -281,6 +281,7 @@ import {
   ZONE_HALF_W,
   ZONE_HALF_H,
 } from './swing.ts';
+import { battedAt, radiusAt, RELEASE_DY } from './flight.ts';
 import {
   armBuild,
   artSlots,
@@ -541,6 +542,56 @@ let bunting = false;
 /** The barrel's moment of truth, or null if no swing is on the way. */
 const contactAt = (): number | null =>
   swingStartedAt === null || checkedAt !== null ? null : swingStartedAt + swingTravel;
+
+/**
+ * THE BALL MET THE BAT — where, when, and the verdict that says what it did
+ * next. Null until it does, and null for ever on a whiff.
+ *
+ * ⚠️ IT CARRIES THE VERDICT, NOT A COPY OF IT. `hit` is the same `HitResult`
+ * object `atBat.lastSwing` holds and the box score is written from, so there is
+ * no second set of numbers to drift. The only things computed here are the two
+ * canvas coordinates of the contact POINT, which nothing downstream reads.
+ *
+ * ⚠️ AND IT IS COMPUTED ONCE, at the frame swingAt() returned, rather than per
+ * draw. The pose that gets read is the pose that was GRADED; asking again four
+ * frames later would be asking a bat that has moved on.
+ */
+let batted: { at: number; from: { x: number; y: number }; hit: HitResult } | null = null;
+
+/**
+ * Take the contact point off the swing that has just been graded.
+ *
+ * Called from all four contact sites — your swing, your bunt, his swing, his
+ * bunt — and it is one function rather than four because the whiff test is the
+ * part that must not be written out twice. A miss has a verdict like everything
+ * else; what it does not have is a picture.
+ */
+function markContact(): void {
+  const swing = atBat.lastSwing;
+  batted = null;
+  if (!swing || swing.timing === 'miss' || !pitch) return;
+
+  // The y is where the PITCH crossed — the ball is the thing being drawn, and
+  // after the zone move that height is where the barrel is.
+  const [spotX, spotY] = spotXY(pitch.location, pitch.inZone);
+
+  // ⚠️ THE X IS THE GRADED POSE'S BARREL, asked of poseAt() at this batter's
+  // own travel rather than read off CONTACT_POSE. They are the same pose today
+  // — linear interpolation hits its endpoints exactly — and asking the function
+  // is what keeps them the same pose if the table ever changes underneath.
+  //
+  // A BUNT HAS NO SWING TO READ. The bat is already out over the plate and
+  // there was never a press, so the ball is struck where it crossed.
+  const bunted = swing.bunted === true || swingStartedAt === null;
+  const barrel = bunted
+    ? spotX - PLATE_X
+    : // Mirrored for a left-hander exactly the way drawBat() mirrors him, so
+      // the ball leaves from the bat a person can see rather than from its
+      // reflection.
+      (currentBatter(game).bats === 'L' ? -1 : 1) * barrelOf(poseAt(swingTravel, swingTravel)).x;
+
+  batted = { at: performance.now(), from: { x: barrel, y: spotY - PLATE_Y }, hit: swing };
+}
 
 /**
  * THE PLAY, once the ball is in play.
@@ -1085,6 +1136,7 @@ function deliver(): void {
   arriveAt = launchAt + flight / (flightScale() * readScale());
   swingStartedAt = null;
   checkedAt = null;
+  batted = null;
 
   // Decide the computer's swing NOW, at release, exactly like a hitter does.
   //
@@ -1361,6 +1413,7 @@ function resolvePitch(): void {
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
         rng,
       );
+      markContact();
       lastGrade = 'BUNT';
       // ⚠️ READ OFF THE SWING, NOT THE COUNT. This asked whether the count moved,
       // and a bunt foul ALWAYS moves it — swingAt() has no free-foul branch for a
@@ -1445,6 +1498,7 @@ function resolvePitch(): void {
     };
     const before = atBat;
     atBat = swingAt(atBat, input, rng);
+    markContact();
     // A whiff for the book's purposes is a swing that produced no contact.
     const whiffed = g === 'miss';
     observePitch(book, pitch, true, offset, whiffed);
@@ -1751,6 +1805,7 @@ function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): v
   arriveAt = launchAt + flight / (flightScale() * readScale());
   swingStartedAt = null;
   checkedAt = null;
+  batted = null;
   autoSwingAt = null;
 
   // THE COMPUTER BUNTS ON YOU TOO, by the same rule the headless sim uses — a
@@ -1830,6 +1885,7 @@ function resolveTheirSwing(): void {
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
         rng,
       );
+      markContact();
       // Same unreachable test as the human bunt above — see the note there.
       flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'HE BUNTS';
       scored = atBat.lastSwing?.outcome === 'foul' ? 'bunt foul' : 'bunted';
@@ -1870,6 +1926,7 @@ function resolveTheirSwing(): void {
       };
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
+      markContact();
       const g = grade(offset, stats.contact * stuff, stats.vision);
       scored = g === 'miss' ? 'swinging strike' : 'in play';
       // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
@@ -3242,6 +3299,19 @@ const ARM_XY = { x: 210, y: 78, h: 58 };
  * bigger decisions than a catcher.
  */
 const CATCHER_XY = { x: 210, y: 296, h: 30 };
+/**
+ * WHERE THE BALL FINISHES when nothing hit it — the crouched mitt look.ts draws
+ * at `w * 0.52, torsoTop + torsoH * 0.5` on the figure above.
+ *
+ * ponytail: the offsets are written out here rather than asked of look.ts,
+ * because a mitt position is not something drawFigure() returns and one caller
+ * does not justify making it. Nothing is graded off this — it is where a drawn
+ * ball comes to rest — so the cost of it drifting is that the ball lands a
+ * pixel off a glove, which is a thing eyes catch immediately.
+ */
+const MITT_XY = { x: CATCHER_XY.x + CATCHER_XY.h * 0.23, y: CATCHER_XY.y - CATCHER_XY.h * 0.4 };
+/** How long the ball takes to settle into it, once it is past the plate. */
+const MITT_MS = 140;
 
 function drawField(now: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -3288,7 +3358,12 @@ function drawField(now: number): void {
 
   drawBases();
 
-  if (phase === 'windup' && pitch) drawBall(now);
+  // ⚠️ NOT GATED ON 'windup' ANY MORE, AND THAT IS THE STRUCTURAL CHANGE. The
+  // phase flips to 'resolve' the instant the ball reaches the plate, so gating
+  // the draw on it meant the ball stopped being drawn at the exact moment
+  // something happened to it. 'resolve' is the beat the crack of the bat lives
+  // in — see drawBall() and REPLAY_CUT_MS.
+  if (phase === 'windup' || phase === 'resolve') drawBall(now);
   // The call stays on the zone through the delivery. It is locked once the arm
   // starts, and taking the reticle away at the exact moment you are watching
   // the bar would hide what you are throwing at from the pitch you are throwing.
@@ -3556,7 +3631,24 @@ function drawHitter(now: number): void {
   // ⚠️ lookForExtra(), NOT A SPREAD OF THE PITCHER. That spread used to be
   // harmless and stopped being the moment an arm could carry a stored look —
   // it put the pitcher's chosen face on his own catcher. See lookForExtra().
-  const since = swingStartedAt === null ? -1 : now - swingStartedAt;
+  /**
+   * HOW FAR INTO THE SWING THE BAT IS — and it runs BACKWARDS on a check.
+   *
+   * ⚠️ THE CHECK SWING HAD NO PICTURE ON THE BAT. The retreat was drawn by the
+   * legacy yellow arc and only by it, so the real bat — the one a person is
+   * watching — completed a full swing on a pitch the game had already scored as
+   * a take. Deleting the arc made that visible; it was true beforehand, under a
+   * second bat drawn on top of it.
+   *
+   * Winding the pose clock back toward zero walks the table load-wards, which
+   * is a barrel being pulled in. Same CHECK_PULL_MS the arc used.
+   */
+  const since =
+    swingStartedAt === null
+      ? -1
+      : checkedAt === null
+        ? now - swingStartedAt
+        : (checkedAt - swingStartedAt) * Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS);
   const swinging = isSwinging(since, swingTravel);
   const pose = swinging ? poseAt(since, swingTravel) : REST_POSE;
   const lefty = man.bats === 'L';
@@ -3677,10 +3769,48 @@ const overheadFigure: FigureFn = (c, o) => {
   });
 };
 
+/**
+ * THE BALL, FOR AS LONG AS IT EXISTS IN THIS VIEW — 2026-09-20.
+ *
+ * ⚠️ IT USED TO VANISH IN MID-AIR, three ways, every single pitch. The draw was
+ * gated on `phase === 'windup'`, and the phase flips the instant the ball
+ * reaches the plate — so a ball hit fair disappeared on contact, a foul
+ * disappeared on contact, and a taken pitch and a swing-and-miss both winked
+ * out somewhere over the plate on their way to a catcher who never caught
+ * anything. Then the camera cut to an overhead where a ball already existed
+ * over the outfield.
+ *
+ * The comment on REPLAY_CUT_MS had been describing this feature since before it
+ * existed — "the crack of the bat and the ball starting to leave are worth
+ * seeing from behind the plate" — and nothing was drawn in the window it kept
+ * open. So this adds no hold time. It fills a beat that was already paid for.
+ *
+ * Three states, and the engine decided which one before any of this ran:
+ *   in flight   the pitch, on its way, with its break — unchanged
+ *   off the bat `batted`, projected from the verdict's three numbers, flight.ts
+ *   into the mitt  everything else: a take, a check, a swing and a miss
+ */
 function drawBall(now: number): void {
+  // OFF THE BAT. Nothing below applies: the pitch is over, and where this ball
+  // goes was decided by swingAt() before a pixel was drawn. See flight.ts.
+  if (batted) {
+    const p = battedAt(batted.hit, batted.from, now - batted.at);
+    if (!p) return;
+    const bx = PLATE_X + p.x;
+    const by = PLATE_Y + p.y;
+    // A foul comes back at the camera and grows; once it is off the frame it is
+    // gone, and the overhead has it. `p.r` keeps it drawn until it truly is.
+    if (bx < -p.r || bx > canvas.width + p.r || by < -p.r || by > canvas.height + p.r) return;
+    ctx.fillStyle = '#f0f0e2';
+    ctx.beginPath();
+    ctx.arc(bx, by, p.r, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
   if (!pitch) return;
   const flight = arriveAt - launchAt;
-  const t = Math.max(0, Math.min(1.15, (now - launchAt) / flight));
+  const t = Math.max(0, Math.min(1, (now - launchAt) / flight));
 
   const [tx, ty] = spotXY(pitch.location, pitch.inZone);
 
@@ -3696,43 +3826,54 @@ function drawBall(now: number): void {
     seed: Math.floor(launchAt),
   });
 
-  // Release point above the mound, arriving at the spot.
-  const x = 210 + (tx - 210) * t + m.dx * ZONE.w;
-  const y = 52 + (ty - 52) * t + m.dy * ZONE.h;
-  const r = 2.5 + t * t * 7;
+  // Release point above the mound, arriving at the spot. PLATE_X and
+  // RELEASE_DY are the vanishing point flight.ts projects a batted ball back
+  // toward, and `t` here IS its `k` — which is why a ball that is hit is the
+  // same size in the same place the frame after contact as the frame before.
+  let x = PLATE_X + (tx - PLATE_X) * t + m.dx * ZONE.w;
+  let y = PLATE_Y + RELEASE_DY + (ty - PLATE_Y - RELEASE_DY) * t + m.dy * ZONE.h;
+  let r = radiusAt(t);
 
-  ctx.fillStyle = swingStartedAt !== null && checkedAt === null ? '#fff2b0' : '#f0f0e2';
+  // ⚠️ AND THEN IT IS CAUGHT, which it never was. Past the plate with nothing
+  // having hit it — a take, a check, a swing and a miss — the ball went on for
+  // another 15% of its flight and then simply stopped existing in mid-air. The
+  // catcher has been drawn crouched behind the plate with a mitt since 09-15
+  // and nothing has ever arrived in it.
+  //
+  // It decelerates into the glove rather than stopping dead, and it STAYS there
+  // until the next delivery. A called strike and a ball are the same drawing:
+  // the umpire's word is a caption, not a trajectory.
+  //
+  // ⚠️ AND IT WAITS AT THE PLATE FOR A BAT THAT IS STILL COMING. A late swing
+  // is graded when the BARREL arrives, up to 80ms after the ball did, so
+  // starting for the mitt on arrival would carry the ball half way there and
+  // then snap it back to the contact point the moment it was hit. The ball
+  // hangs on the crossing spot instead, at its biggest, while the barrel closes.
+  const pending = contactAt();
+  const settling = pending !== null && now < pending ? 0 : now - arriveAt;
+  const past = Math.min(1, Math.max(0, settling / MITT_MS));
+  if (past > 0) {
+    const e = 1 - (1 - past) * (1 - past);
+    x += (MITT_XY.x - x) * e;
+    y += (MITT_XY.y - y) * e;
+    // Nearer the camera than the plate is, so a touch bigger.
+    r = radiusAt(1 + e * 0.2);
+  }
+
+  ctx.fillStyle =
+    phase === 'windup' && swingStartedAt !== null && checkedAt === null ? '#fff2b0' : '#f0f0e2';
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();
 
-  // The tell: a coloured ring on a pitcher who leaks it.
-  if (pitch.tell && (pitch.tell.timing === 'pre_pitch' || t > 0.12)) {
+  // The tell: a coloured ring on a pitcher who leaks it. It is a read on a
+  // pitch still coming, so it goes out at the plate with the pitch.
+  if (past === 0 && pitch.tell && (pitch.tell.timing === 'pre_pitch' || t > 0.12)) {
     ctx.strokeStyle = TELL_COLOR[pitch.tell.pitch];
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(x, y, r + 4, 0, Math.PI * 2);
     ctx.stroke();
-  }
-
-  // The bat, travelling. It used to be a 130ms flash AFTER the press, which is
-  // a picture of a decision already made; now the sweep IS the travel, so the
-  // barrel is visibly on its way and you can watch it get pulled back.
-  if (swingStartedAt !== null) {
-    const sweep =
-      checkedAt === null
-        ? Math.min(1.3, (now - swingStartedAt) / swingTravel)
-        : // Checked: the barrel retreats from wherever it had got to.
-          ((checkedAt - swingStartedAt) / swingTravel) *
-          Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS);
-
-    if (sweep > 0.02) {
-      ctx.strokeStyle = checkedAt === null ? '#d8b44a' : '#7a8a6a';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(210, PLATE_Y - 30, 62, Math.PI * (0.15 + sweep * 0.8), Math.PI * (0.25 + sweep * 0.8));
-      ctx.stroke();
-    }
   }
 }
 
