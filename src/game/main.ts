@@ -7497,7 +7497,12 @@ function pregame(): void {
         card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
         card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
         book +
-        card('league', 'CUSTOMIZE', leagueSub);
+        card('league', 'CUSTOMIZE', leagueSub) +
+        // The other door onto the pause screen's settings. Offered here with
+        // no conditions on it: the four knobs decide whether the game is
+        // playable at all for the person reading, and a door to them that
+        // only exists once a game is running is the wrong way round.
+        card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half');
       return;
     }
     if (mode === 'league') {
@@ -7746,6 +7751,12 @@ function pregame(): void {
       // The title screen stays underneath; the book hands control straight back
       // to it, so this is a look rather than a step.
       showCareer(() => drawn());
+      return;
+    }
+    // Same shape as the book, and for the same reason — the title screen is
+    // still underneath and BACK hands control straight back to it.
+    if (go === 'settings') {
+      showSettings(() => drawn());
       return;
     }
     if (go === 'resume') {
