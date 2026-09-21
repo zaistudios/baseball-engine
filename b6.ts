@@ -1,0 +1,8099 @@
+/**
+ * The playable screen. One nine-inning game, you against the computer.
+ *
+ * YOU PLAY BOTH HALVES, which is the whole point of the rebuild:
+ *
+ *   BOTTOM HALF — you hit.  The pitch is on a real clock and your swing is a
+ *                 real keypress. Timing is measured in milliseconds between
+ *                 the two, exactly as core/timing.ts wants it. This is the
+ *                 only path in the codebase where a swing is not a dice roll.
+ *   TOP HALF    — you pitch. You pick the pitch and the spot; the computer's
+ *                 hitter decides what to do with it. It is watching what you
+ *                 call, so a pattern will get punished.
+ *
+ * ⚠️ EDIT NOTES. This file is deliberately one screen with one state machine
+ * and no framework. The render is a full redraw every frame — at this size
+ * that is free, and it means there is no diffing layer to be wrong. If you
+ * want to change how it LOOKS, everything is in drawField() and the three
+ * render* functions. If you want to change how it PLAYS, none of that is
+ * here — it is in game.ts, ai.ts and the core.
+ */
+
+import { makeRng } from '../core/rng.ts';
+import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
+import type { Player } from '../core/roster.ts';
+import { ALL_LOCATIONS, locationOffset } from '../core/hit.ts';
+import type { SwingInput, PitchLocation } from '../core/hit.ts';
+import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
+import {
+  ARM_MS,
+  deliveryOf,
+  type Delivery,
+  tempoWord,
+  RELEASE_LABEL,
+  RELEASE_SHORT,
+  controlOf,
+  gradeRelease,
+  releaseWindowMs,
+  type ReleaseGrade,
+} from '../core/delivery.ts';
+import type { PitchType, Outcome } from '../core/hitTables.ts';
+import { extend, loadStreak, newStreak, saveStreak, type Streak } from './streak.ts';
+import {
+  bestYear,
+  file,
+  loadCareer,
+  newCareer,
+  records,
+  saveCareer,
+  totals,
+  winPct,
+} from './career.ts';
+import { clubValue, showScale, strengthLabel, strengthRank } from './value.ts';
+import {
+  COMMAND,
+  arsenalOf,
+  movementOf,
+  pitchToSpot,
+  ratingsOf,
+  scoutingReport,
+  stuffFactor,
+  type ThrownPitch,
+  type Situation,
+} from '../core/pitcher.ts';
+import {
+  callPitch,
+  aiSwing,
+  newRead,
+  observeCall,
+  observePitch,
+  chaseRate,
+  swingRate,
+  timingBias,
+  weakestPitch,
+  predictedCall,
+  hasTimingRead,
+  shouldBunt,
+  type Read,
+} from './ai.ts';
+import {
+  newGame,
+  recordPlay,
+  boxScore,
+  countPitch,
+  goToBullpen,
+  benchOf,
+  // ⚠️ ALIASED. `teamOf` in this file is franchise.ts's (a Season and an
+  // abbreviation); this one takes a GameState and a Side, and importing both
+  // under one name is a type error waiting to read as a logic bug.
+  teamOf as clubInGame,
+  pinchHit,
+  fieldingStaff,
+  fieldingAlignment,
+  battingSide,
+  fieldingSide,
+  currentBatter,
+  currentPitcher,
+  onDeck,
+  stateOf,
+  inningLabel,
+  type GameState,
+  type Side,
+} from './game.ts';
+import {
+  HOME,
+  AWAY,
+  LEAGUE,
+  LEAGUE_SOURCE,
+  parkFoulAngle,
+  parkPower,
+  wallAt,
+  DEEPEST_REACH_FT,
+  statsOf,
+  type Team,
+} from './teams.ts';
+import {
+  clearCustomLeague,
+  deleteSlot,
+  leagueStatus,
+  listSlots,
+  loadSlot,
+  MAX_SLOT_NAME,
+  saveCustomLeague,
+  saveSlot,
+  serialiseLeague,
+  storedLeagueProblems,
+  storedLeagueText,
+} from './league.ts';
+import {
+  DEFAULT_GAMES,
+  LENGTHS,
+  DEFAULT_RULES,
+  type Rules,
+  champion,
+  clearSeason,
+  dayLabel,
+  gameInRound,
+  gamesOn,
+  loadSeason,
+  newSeason,
+  playDay,
+  regularDays,
+  seasonEnd,
+  saveSeason,
+  seasonOver,
+  seeds,
+  roundName,
+  roundOn,
+  roundsOf,
+  rulesOf,
+  seriesOf,
+  matchupsInRound,
+  stillIn,
+  simTo,
+  clubsIn,
+  standings,
+  teamOf,
+  yourGame,
+  armFor,
+  starterFor,
+  restOf,
+  penRestOf,
+  workOf,
+  type Matchup,
+  type Standing,
+  type Result,
+  type Season,
+} from './franchise.ts';
+import { armCondition, fatigue, hasRelief, openedBy, ZONE_FATIGUE_PENALTY } from './bullpen.ts';
+import { autoCaller, manageBench, manageBullpen, rollLoose, runTheBases } from './sim.ts';
+import {
+  ARM_FIELDS,
+  ARSENAL_FIELDS,
+  CLUB_FIELDS,
+  GROUPS,
+  HITTER_FIELDS,
+  IDENTITY_FIELDS,
+  PARK_FIELDS,
+  UNIFORM_FIELDS,
+  addPerson,
+  buildOf,
+  coerce,
+  groupOf,
+  lookFields,
+  lookOf,
+  movePerson,
+  removePerson,
+  replaceClub,
+  valueOf,
+  withArsenalShare,
+  withClubField,
+  withIdentity,
+  withIdentityField,
+  withLookField,
+  withParkField,
+  withPersonField,
+  withRandomLook,
+  withUniformField,
+  withoutUniform,
+  workingCopy,
+  type Field,
+  type Group,
+} from './editor.ts';
+import { fieldBall, reachOf, manned } from './defense.ts';
+import { SHIFTS, SHIFT_WORDS, SHIFT_BLURB, SHIFT_ON, fieldersFor, pickShift, pullScore, type Shift } from './shift.ts';
+import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
+import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
+import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
+import {
+  halfBreak,
+  momentLine,
+  sceneFor,
+  sceneForTake,
+  situationOf,
+  TIER_COLOUR,
+  type HalfBreak,
+  type Scene,
+} from './scene.ts';
+import { momentOn, decide, valueShift, type Moment } from './moments.ts';
+import { formOf, formLabel, inForm } from './form.ts';
+import { BRACKET, OFFENCE, PARITY, SERIES, STREAK, cleanRules, roundsIn } from './rules.ts';
+import { restedStamina } from './rotation.ts';
+import type { StarterPick } from './game.ts';
+import { aiShouldSend, sendRunner, stealOpportunity, chanceFor } from './running.ts';
+import {
+  LEVELS,
+  MIN_SAMPLES,
+  PITCH_SPEEDS,
+  SANE_SAMPLE_MS,
+  calibrationLabel,
+  levelOf,
+  loadSettings,
+  observe as observeTiming,
+  pitchSpeedOf,
+  saveSettings,
+} from './difficulty.ts';
+import {
+  avg,
+  chances,
+  clubArms,
+  clubBatting,
+  clubGloves,
+  era,
+  fpct,
+  ip,
+  leaders,
+  ops,
+  rate,
+  whip,
+  type ArmLine,
+  type BatLine,
+  type FieldLine,
+  type StatBook,
+} from './stats.ts';
+import {
+  forcedRunners,
+  heldRunners,
+  isSacrificeFly,
+  runnerMoves,
+  scorersFrom,
+} from '../core/inning.ts';
+import {
+  CLEAN_THROW,
+  THROW_AT_MS,
+  THROW_EFFECT,
+  THROW_SWEEP_MS,
+  isClosePlay,
+  type ForceBag,
+  type ThrowEffect,
+} from '../core/fielding.ts';
+import {
+  travelMs,
+  canCheck,
+  barrelOf,
+  batSpeedLabel,
+  BAT_POSES,
+  poseAt,
+  isSwinging,
+  REST_POSE,
+  CHECK_PULL_MS,
+} from './swing.ts';
+import {
+  armBuild,
+  artSlots,
+  clubBuild,
+  armPoseAt,
+  drawBat,
+  drawFigure,
+  runCycle,
+  idForFilename,
+  lookFor,
+  lookForArm,
+  lookForExtra,
+  uniformFor,
+} from './look.ts';
+import { MAX_ART_BYTES, clearArt, hasArt, loadArt, putArt, removeArt, sprite } from './art.ts';
+import {
+  makeCam,
+  newReplay,
+  drawOverhead,
+  overheadAlpha,
+  replayLength,
+  type Replay,
+  type FigureFn,
+} from './overhead.ts';
+
+// --------------------------------------------------------------- the setup
+
+/**
+ * Which dugout you are in. An exhibition puts you at home so you bat last; a
+ * franchise game puts you where the schedule says. Set by kickOff().
+ */
+let YOU: Side = 'home';
+
+/**
+ * The season, or null in an exhibition. Everything franchise-shaped in this
+ * file is guarded on this being non-null — the engine below knows nothing
+ * about it, and a one-off game is still a one-off game.
+ */
+let season: Season | null = null;
+
+const rng = makeRng(Date.now() >>> 0);
+
+let game: GameState = newGame(HOME, AWAY, 9);
+
+/** What the computer has learned about you. One book, both roles. */
+const book: Read = newRead();
+
+// ------------------------------------------------------------- the machine
+
+/**
+ * Where the screen is. Everything the render and the input handler do is a
+ * function of this — there is no other mode flag anywhere.
+ *
+ *  idle      between at-bats / waiting for you to start the pitch
+ *  windup    the ball is in flight; a swing is legal if you are the hitter
+ *  resolve   showing what just happened, briefly
+ *  calling   you are pitching and choosing what to throw
+ *  winding   you are pitching, the delivery is running, a release is legal
+ *  over      final
+ *
+ * ⚠️ 'winding' IS THE MOUND'S 'windup', and the symmetry is the point. Both are
+ * the window between a press that STARTS something with a duration and the
+ * later moment that gets graded — the barrel reaching the plate on one side,
+ * the ball leaving the hand on the other. See core/delivery.ts.
+ */
+type Phase = 'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'throw' | 'over';
+
+let phase: Phase = 'idle';
+
+/**
+ * THE CLOCK IS STOPPED.
+ *
+ * ⚠️ AN OVERLAY IS NOT A PAUSE — the note over dpadOffPre() says it about the
+ * five screens that came before this one. #pre covers the canvas and takes the
+ * keyboard, and the frame loop goes right on running underneath it, autoStep()
+ * included. This flag is what actually stops the game. The screen is only what
+ * you look at once it has.
+ */
+let paused = false;
+/** When it stopped, so resume() can hand back every millisecond it took. */
+let pausedAt = 0;
+
+/**
+ * STOP THE GAME BETWEEN PITCHES, AND ONLY THERE.
+ *
+ * ⚠️ IDLE ONLY, AND THAT IS THE WHOLE DESIGN. This engine grades TIMING against
+ * performance.now(), never geometry, so a pause taken with a delivery, a swing
+ * or a throw in the air would leave a graded deadline sitting in the past and
+ * measure the next press against a clock that moved while nobody was playing.
+ * At idle nothing graded is in flight, so there is nothing to corrupt.
+ *
+ * `looping` because the title screen has a keyboard and no game behind it: ESC
+ * before kickoff must not drop a pause screen over the mode cards.
+ */
+function pause(): void {
+  if (paused || !looping || phase !== 'idle') return;
+  paused = true;
+  pausedAt = performance.now();
+  showPause();
+}
+
+/**
+ * Start it again, and give the time back.
+ *
+ * ⚠️ EVERY ABSOLUTE TIMESTAMP STILL LIVE AT IDLE MOVES FORWARD, and these two
+ * are the entire list — the caption's clock and the break card's. Without the
+ * shift, a half-time card you paused on would be gone the instant you came
+ * back, expired by a stretch of wall clock nothing was playing through. The
+ * file's other deadlines — arriveAt, deliveryAt, throwAt, flashUntil — cannot
+ * be live at idle, which is the other half of why pause() is idle-only.
+ */
+function resume(): void {
+  if (!paused) return;
+  const held = performance.now() - pausedAt;
+  sceneAt += held;
+  breakFrom += held;
+  paused = false;
+}
+
+let atBat: AtBatState = newAtBat();
+let previous: PitchType[] = [];
+
+/**
+ * The season ran past the game still loaded in `game`. Set by nextGame() when
+ * the year ends without you on the card, cleared by kickOff().
+ *
+ * ⚠️ WITHOUT IT THE WHOLE GAME SCREEN LIES. `game` is whatever you played last
+ * — or, if you started a franchise and simmed straight to the bracket, the
+ * empty one this module is born holding. Either way the season-over branch of
+ * nextGame() does not call kickOff(), so the marquee, the line score, the
+ * situation strip and the pitch-and-spot grid all went on describing that game
+ * underneath the champion's name. A club that missed the bracket got
+ * `GAME 4 OF 14` over a game-four box score; a club that simmed from day one
+ * got a live PITCH panel and `T1 0-0` under `CHI TAKE THE TITLE`.
+ */
+let lastGameIsStale = false;
+
+/**
+ * Is the screen showing a finished thing rather than a live one? True for a
+ * game that ended, and for a season that ended without this game ever being
+ * the last one played. The final-screen branch of every panel asks this.
+ */
+const showingFinal = (): boolean => game.over || lastGameIsStale;
+
+/** Live pitch, only meaningful in 'windup'. */
+let pitch: ThrownPitch | null = null;
+let launchAt = 0;
+let arriveAt = 0;
+
+/**
+ * THE SWING, which is a thing with a duration rather than an instant.
+ *
+ * The press STARTS the bat; the barrel reaches the plate `swingTravel` later
+ * and THAT is the moment graded. The press decides nothing on its own, and the
+ * gap between the two is a window you are inside of — which is where the check
+ * swing lives: a second press early in it pulls the bat back and the pitch
+ * becomes a take, ball or called strike by `inZone` like any other take.
+ *
+ * ⚠️ THIS MAKES YOU COMMIT BEFORE THE BALL REACHES THE PLATE, and that is a
+ * real difficulty change, not a tuning one. The timing windows did not move —
+ * still ±12/±35/±80 — they just apply at CONTACT instead of at the press, so
+ * every press moves a bat's length earlier. Waiting to see it at the plate and
+ * then reacting is no longer a swing, it is a late one.
+ */
+let swingStartedAt: number | null = null;
+/**
+ * How long THIS swing's barrel takes, captured at the press rather than
+ * recomputed. The frame loop grades at `swingStartedAt + swingTravel` and
+ * drawBall draws the bat from the same pair, so there is exactly one number
+ * behind the picture and the verdict.
+ */
+let swingTravel = 0;
+/** When it was pulled back, or null while it is still coming. */
+let checkedAt: number | null = null;
+
+/**
+ * Squared up in a row, and the best you have ever run. See streak.ts.
+ *
+ * Loaded once at module scope rather than per game: the record is yours, not
+ * the game's, and starting a new one must not reset it.
+ */
+let streak: Streak = loadStreak();
+
+/**
+ * HOW HARD THE SWING IS, and what this monitor's lag has been measured at.
+ * See difficulty.ts. Module scope, like the streak, and for the same reason:
+ * both belong to the person at the keyboard rather than to any one ball game.
+ */
+let settings = loadSettings();
+
+/**
+ * The timing-window multiplier for a swing YOU are taking.
+ *
+ * ⚠️ ONE IN AUTO MODE, ALWAYS. Watch mode is the computer playing your half,
+ * and a difficulty setting that made the CPU a better hitter while you were
+ * away is not a difficulty setting. Same rule as the calibration below.
+ */
+const assist = (): number => (auto ? 1 : levelOf(settings.level).assist);
+
+/**
+ * Ball arrival as the PLAYER experienced it, which is the clock a swing has to
+ * be graded against — see FAULT 4 in timing.ts and the header of difficulty.ts.
+ *
+ * ⚠️ THE DRAWN BALL IS NOT MOVED. `arriveAt` stays exactly what it was for
+ * every renderer and for contactAt()'s own deadline; only the grading reads
+ * this. The correction is a statement about the display pipeline, not about
+ * where the ball is, and shifting the picture to match would re-introduce the
+ * same lag one layer down.
+ */
+const gradedArrival = (): number => arriveAt + (auto ? 0 : settings.calibration.shift);
+
+/**
+ * SQUARED TO BUNT. Armed between pitches, and it stays armed until it resolves.
+ *
+ * ⚠️ IT IS NOT TIMED, and that is the whole reason it is a separate control
+ * rather than a modifier on SPACE. A bunt has no swing in it — you get the bat
+ * out over the plate and the ball hits it — so grading one against the ±12ms
+ * window would be asking for a skill the act does not contain. What it costs
+ * instead is the count: a bunt only offers at STRIKES, and a foul bunt with two
+ * strikes rings you up (atBat.ts). That is the trade, and it is the real one.
+ */
+let bunting = false;
+
+/** The barrel's moment of truth, or null if no swing is on the way. */
+const contactAt = (): number | null =>
+  swingStartedAt === null || checkedAt !== null ? null : swingStartedAt + swingTravel;
+
+/**
+ * THE PLAY, once the ball is in play.
+ *
+ * The camera cuts to an overhead of the field and the nine go to work. It is a
+ * REPLAY of a result the engine already decided — see overhead.ts — so nothing
+ * you watch here can change what the scorer already wrote.
+ */
+let replay: Replay | null = null;
+
+/** What to draw in 'resolve'. */
+let flash = '';
+let flashUntil = 0;
+
+/**
+ * WHAT THE BROADCAST IS SAYING ABOUT THE PLAY ON THE SCREEN — see scene.ts.
+ *
+ * Lives exactly as long as `replay` does: built beside it in finishAtBat, drawn
+ * over it in drawField, and dropped with it in the frame loop.
+ */
+let scene: Scene | null = null;
+
+/**
+ * WHEN THE CAPTION WENT UP AND HOW LONG IT IS UP FOR.
+ *
+ * ⚠️ ONLY A SCENE WITH NO REPLAY UNDER IT READS THESE. A ball in play rides the
+ * overhead's clock — the caption is a lower third anchored to the END of the
+ * replay, so it lands once the ball has finished doing whatever it was going to
+ * do (see drawScene). A strikeout has no ball to wait on, so it gets its own
+ * two numbers instead of being given a replay it does not deserve.
+ */
+let sceneAt = 0;
+let sceneMs = 0;
+
+/**
+ * HOW LONG A CAPTION WITH NO REPLAY UNDER IT STAYS UP.
+ *
+ * ⚠️ LONGER THAN CAPTION_MS ON PURPOSE, and this is the other half of Zane's
+ * "PROMPTS ARE TOO FAST". A ball in play gives you the caption on top of two
+ * seconds of watching the ball, so nine hundred milliseconds of words is plenty
+ * — you already know what happened and the line is confirming it. A strikeout
+ * gives you nothing but the words. They have to be up long enough to read cold,
+ * and long enough that the punch-out registers as an event rather than as the
+ * count quietly resetting.
+ *
+ * It does NOT block: the next pitch is yours to throw straight through it, the
+ * same rule drawMoment() follows. So this is a floor on how long you CAN look,
+ * never a wait you have to sit out.
+ */
+const TAKE_SCENE_MS = 1600;
+
+/** Put a caption on the screen, with the clock a replay-less one needs. */
+function showScene(s: Scene | null, now = performance.now()): void {
+  scene = s;
+  sceneAt = now;
+  // Speed-scaled like every other beat in the file — at 4x the replay is 4x
+  // faster and the words have to be too, or watch mode stacks captions.
+  sceneMs = s ? (TAKE_SCENE_MS + s.hold) / speed() : 0;
+}
+
+/**
+ * DID HE OFFER AT THE LAST PITCH — the one bit "STRIKE THREE" needs and
+ * AtBatResult does not carry. `{ kind: 'strikeout' }` says he is out and not
+ * whether he went down looking, and those are two different things to watch.
+ */
+let lastWasSwing = false;
+
+/**
+ * THE HIGH-LEVERAGE CARD, and its two-step life.
+ *
+ * `momentPending` is set when the next hitter's spot is worth announcing, and
+ * `momentText` is it actually on the screen — the frame loop moves one to the
+ * other when the previous play's replay cuts away, because a moment card
+ * competing with a replay is two things nobody reads. `lastMoment` is the line
+ * already used, so the same sentence cannot fire four hitters running.
+ */
+let momentPending: string | null = null;
+let momentText: string | null = null;
+let momentFrom = 0;
+let lastMoment = '';
+
+/** How long the high-leverage card stays up. Long enough to read once. */
+const MOMENT_MS = 1700;
+
+/**
+ * THE BREAK BETWEEN HALVES — see halfBreak() in scene.ts for what it is for.
+ *
+ * Two-step like the moment card and for the same reason: it is queued when the
+ * half rolls over — which is DURING the replay of the out that ended it — and
+ * put up when the replay cuts away.
+ */
+let breakPending: HalfBreak | null = null;
+let breakCard: HalfBreak | null = null;
+let breakFrom = 0;
+
+/**
+ * WHICH HALF THE BREAK CARD HAS ALREADY MARKED, as a half-index that only ever
+ * counts up: `inning * 2 + (bottom ? 1 : 0)`.
+ *
+ * ⚠️ THE ROLL-OVER IS WATCHED RATHER THAN ANNOUNCED, and that is deliberate.
+ * THREE places in this file can be the third out — finishAtBat(), steal() and
+ * runnersGoOnThePitch(), because a man can be caught stealing mid-count — and a
+ * break card wired into one of them is a break card that silently does not
+ * happen on the other two. Reading the state in the frame loop is one site that
+ * cannot be forgotten by the fourth one.
+ *
+ * ⚠️ ONLY A STEP OF EXACTLY ONE FIRES IT. That is what makes the start of a
+ * game and the start of the NEXT game of a season not break cards: a fresh
+ * GameState jumps from the 9th back to the 1st, which is not a half ending.
+ */
+let markedHalf = -1;
+
+/**
+ * How long the break card stays up before the game comes back from it.
+ *
+ * ⚠️ SPEED-SCALED, LIKE EVERY OTHER BEAT IN THE FILE. A full two and a half
+ * seconds of stop every half inning is the point at 1x and unbearable at 8x,
+ * where eighteen of them are most of what you would be watching.
+ */
+const BREAK_MS = 2400;
+const breakLen = (): number => BREAK_MS / speed();
+let lastGrade = '';
+
+/**
+ * YOUR LAST SWING, IN THE NUMBERS THAT GRADED IT.
+ *
+ * ⚠️ THE GAME KNEW THIS THE WHOLE TIME AND TOLD THE WRONG PERSON. Every swing
+ * already computes a signed millisecond offset; resolvePitch() graded it, threw
+ * the number away and left one word — LATE — on the screen. The number itself
+ * went to ai.ts, got averaged over the at-bats, and came back out at the bottom
+ * of the page as `timing BEHIND IT (+42ms)` in the scouting panel: the measure
+ * of how the HITTER is timing this arm, handed to the man on the mound. The
+ * hitter, trying to learn a ±35ms window, had one adjective.
+ *
+ * So: what was measured, and the exact band edges it was measured against.
+ *
+ * ⚠️ THE SCALE AND THE EYES ARE SNAPSHOTTED, NOT RECOMPUTED. The multiplier
+ * grade() saw is the batter's contact times the pitcher's STUFF times the
+ * difficulty assist — and stuff belongs to the pitch that was thrown, so it is
+ * gone by the time anything draws. A bar that reached for a fresh number would
+ * draw one at-bat's windows under another at-bat's verdict. See bandsFor().
+ *
+ * Null whenever the last thing that happened was not a swing — a take, a
+ * check, a bunt — so the word beside it and the bar under it are never
+ * describing different pitches. Cleared when a new hitter walks up.
+ */
+interface SwingRead {
+  /**
+   * Signed ms. Negative early, positive late — core/timing.ts's convention.
+   *
+   * ⚠️ NULL WHEN THE NUMBER IS NOT A MEASUREMENT OF A SWING, and that is not a
+   * hypothetical: it showed up on the first at-bat this read-out was ever drawn
+   * on, as `+10732ms`. A background tab stops getting animation frames, the
+   * ball's arrival goes by while the loop is asleep, and the press that wakes
+   * it is stamped ten seconds late. difficulty.ts has kept those out of the
+   * CALIBRATION since it was written — see SANE_SAMPLE_MS — and putting the
+   * same number on the screen handed the player the exact garbage the engine
+   * had been carefully throwing away.
+   *
+   * The grade and the outcome are still true on that pitch: the at-bat really
+   * did resolve, and it really was a swing and a miss. Only the clock is
+   * lying, so only the clock is withheld.
+   */
+  offsetMs: number | null;
+  /** Contact multiplier as grade() saw it. */
+  scale: number;
+  /** Vision multiplier as grade() saw it. */
+  eyes: number;
+  /** The verdict, already upper-cased. */
+  grade: string;
+  /** What the swing came to, when that is a different fact: FOUL, and so on. */
+  outcome: string;
+}
+let swingRead: SwingRead | null = null;
+
+/**
+ * WHAT THE COMPUTER’S HITTER DECIDED, held while your pitch is in the air.
+ *
+ * Decided at release and read at the plate, because that is when a hitter
+ * actually decides — see pitchToThem(). Null whenever you are the one batting.
+ */
+let theirCall: { bunt: boolean; guess: PitchType | null } | null = null;
+
+/**
+ * THE PEN IS ARMED, waiting on a second press.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE PITCHING CHANGE WAS A ONE-KEY MISTAKE. Going to
+ * the bullpen was a full-width button sitting directly under THROW IT and a
+ * single unguarded press of B — the same key that squares you to bunt when you
+ * are hitting. It is also the one control on this screen you cannot take back:
+ * the starter is done the instant it fires, and there is no undo in baseball.
+ * A control that is irreversible, adjacent to the one you press every pitch,
+ * and one keystroke deep is a control that gets pressed by accident, and it
+ * did — repeatedly.
+ *
+ * Disarmed by anything that changes what you are looking at: throwing a pitch,
+ * the half rolling over, actually going to the pen. Nothing here is a timer.
+ */
+let penArmed = false;
+
+/** Your current pitch call, in 'calling'. */
+let callType: PitchType = 'fastball';
+let callSpot: PitchLocation = 'middle';
+
+/**
+ * THE DELIVERY, which is a thing with a duration rather than an instant.
+ *
+ * `deliveryAt` is when the arm started, on the same clock everything else in
+ * this file is read off. The release point is RELEASE_AT_MS into it and the
+ * press is graded against that — see core/delivery.ts for why the grade is a
+ * `control` multiplier and nothing else.
+ *
+ * ⚠️ NOT SCALED BY speed(), EVER, and it is the same rule flightScale() states
+ * for the ball: the part somebody is TIMING runs on the real clock. Dead time
+ * compresses at 8x because nobody is playing it; a delivery you are trying to
+ * release inside is not dead time. Watch mode never enters this phase at all,
+ * so there is nothing for a speed setting to be tempted by.
+ */
+let deliveryAt = 0;
+
+/**
+ * THE TEMPO THIS DELIVERY IS BEING GRADED AGAINST, snapshotted when the arm
+ * starts for the same reason `deliveryAt` is.
+ *
+ * ⚠️ NOT READ OFF `callType` AT RELEASE TIME. The pitch buttons are disabled
+ * through 'winding' so it cannot currently change mid-sweep — but the whole
+ * point of the lock note above is that two inputs to one control disagreeing
+ * about when it is live is the bug nobody finds. A snapshot cannot disagree.
+ */
+let deliveryPitch: PitchType = 'fastball';
+
+/**
+ * How the last one left the hand, or null before the first pitch of an at-bat.
+ *
+ * Kept after the release so the bar can show the verdict for the length of the
+ * flight — the swing's grade appears in the same breath as the swing, and the
+ * mound had nothing at all until this.
+ */
+let releaseGrade: ReleaseGrade | null = null;
+
+/** When it left the hand, so the bar can freeze the mark where you let go. */
+let releasedAt: number | null = null;
+
+/**
+ * WHAT YOU HAVE THROWN THIS HITTER — one row per pitch, the call, whether it
+ * got there, and what it came to.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE ONLY RECORD WAS A ONE-SECOND FLASH. drawFlash()
+ * names the outcome of a pitch for 1000ms on the canvas and then it is gone;
+ * the play log below only ever gets the at-bat's RESULT. So the sequence you
+ * had just thrown a man — the thing every real battery in the sport writes
+ * down — was unreadable by the time you called the next one, and the miss
+ * between where you aimed and where it went was never on the screen at all.
+ *
+ * ⚠️ REPLACED, NEVER MUTATED. render()'s memo key compares by identity, so a
+ * row edited in place would never redraw — that is the same trap the warning
+ * on render() describes. resolveTheirSwing() rewrites the last row into a new
+ * array rather than assigning into it.
+ *
+ * ponytail: this at-bat only, and only while YOU are the one pitching. A
+ * whole-game chart is a screen rather than a panel, and the hitter's half
+ * already has the scouting book.
+ */
+interface ChartRow {
+  type: PitchType;
+  /** Where you called it. */
+  called: PitchLocation;
+  /** Where it actually crossed — the same field the renderer draws it at. */
+  actual: PitchLocation;
+  inZone: boolean;
+  release: ReleaseGrade;
+  /** What it came to. Empty while the ball is still in the air. */
+  result: string;
+}
+let chart: readonly ChartRow[] = [];
+
+/**
+ * WATCH MODE. The computer takes both of your jobs and the game plays itself.
+ *
+ * Almost none of this is new code. autoCaller() already picks a pitch and
+ * aiSwing() already decides a swing — they are what the headless sim in sim.ts
+ * has always used. Auto mode just points them at the two decisions YOU
+ * normally make, so the same engine drives the screen with nobody watching it.
+ */
+let auto = false;
+
+/** When the computer is batting for you, the moment it starts the swing. */
+let autoSwingAt: number | null = null;
+
+/** 8x is a real setting, not a joke — it is how you leave a game running. */
+const SPEEDS = [1, 2, 4, 8] as const;
+let speedIdx = 0;
+const speed = (): number => SPEEDS[speedIdx]!;
+
+/**
+ * Dead time between pitches, divided by the speed. Always applies.
+ *
+ * ⚠️ THE BALL FLIGHT IS SCALED ONLY IN AUTO — see deliver(). Speeding up the
+ * pitch while YOU are swinging is not a speed setting, it is a difficulty
+ * change: the timing windows are ±12/±35/±80ms, and at 4x the ball crosses in
+ * about a tenth of a second, which no human hits. Dead time is the part
+ * nobody is playing, so dead time is the part that gets cut.
+ */
+const pauseFor = (ms: number): number => performance.now() + ms / speed();
+
+/**
+ * Ball flight compresses only when nobody is timing it — which is watch mode,
+ * and now also YOUR HALF ON THE MOUND. The ±12/±35/±80 windows belong to the
+ * hitter, and when the hitter is the computer its offset is unscaled (see
+ * pitchToThem), so the grade at 8x is the grade at 1x and the only thing speed
+ * buys you is a shorter afternoon.
+ */
+const flightScale = (): number => (auto || !youBat() ? speed() : 1);
+
+/**
+ * THE PRACTICE SPEED, and it is the exact opposite end of the same lever.
+ *
+ * speed() compresses the parts nobody is playing. This STRETCHES the one part
+ * somebody is — the flight of a pitch a human is trying to read — and it is
+ * the only setting in the game that does. See PITCH_SPEEDS in difficulty.ts
+ * for why that is a cage and not a cheat: the ±12/±35/±80ms windows are real
+ * milliseconds and do not move, so the swing is precisely as precise an act as
+ * it ever was. You just get longer to decide what you are swinging at.
+ *
+ * ⚠️ IT IS 1 ON EVERY PATH THAT IS NOT YOUR OWN AT-BAT, and that is what keeps
+ * flightScale()'s invariant intact rather than negotiated with. In watch mode
+ * and on your half in the field this returns exactly 1, so `flight /
+ * (flightScale() * readScale())` is the expression that was already there,
+ * unchanged, on both of those paths. Watch mode cannot see this setting and
+ * neither can the computer's hitters.
+ *
+ * ⚠️ AND THE BAT IS NOT SCALED BY IT. batTravel() divides by flightScale()
+ * alone — deliberately, and it is the one place these two multipliers must
+ * part company. flightScale()'s note says the bat has to move with the ball,
+ * and that rule is about the AI swinging on an unscaled offset at 8x. A human's
+ * reflexes are the length they are: slowing his bat down with the pitch would
+ * hand straight back the reading time this exists to buy him.
+ */
+const readScale = (): number => (auto || !youBat() ? 1 : settings.pitchSpeed);
+
+/**
+ * This batter's bat, on the clock the ball is actually flying on.
+ *
+ * ⚠️ THE BAT IS SCALED BY EXACTLY WHAT THE FLIGHT IS SCALED BY, and it has to
+ * be. deliver() keeps the AI's timing offset unscaled so a swing grades the
+ * same at 1x and at 8x — that is the whole promise of watch mode. A bat that
+ * stayed 120ms while the flight compressed to 55ms would break it in the worst
+ * possible direction: at 8x the barrel could not physically arrive before the
+ * ball was past, so every computer swing would grade late and the game you
+ * left running would stop being the game you would have played.
+ *
+ * At 1x, and any time you are the one hitting, this is just travelMs().
+ */
+const batTravel = (): number =>
+  travelMs(statsOf(currentBatter(game)).power) / flightScale();
+
+
+const youBat = (): boolean => battingSide(game) === YOU;
+
+/**
+ * WHAT THE DEFENCE IS IN, RIGHT NOW.
+ *
+ * ⚠️ DERIVED, NOT STORED, and that is the whole reason it cannot go stale. An
+ * at-bat ends in several places in this file and a `let currentShift` would
+ * have to be reset in every one of them — which is exactly the bug the moment
+ * card and the bunt flag have each shipped once already. This is a pure
+ * function of the game state, so there is nothing to reset.
+ *
+ * When YOU are hitting, the computer picks its alignment off the man in the
+ * box. When you are in the field it is whatever you called — see GameState.shift.
+ */
+const shiftNow = (): Shift =>
+  youBat()
+    ? pickShift(currentBatter(game), {
+        outs: game.outs,
+        runnerOnThird: game.bases[2] !== null,
+        late: game.inning >= 7,
+      })
+    : game.shift ?? 'straight';
+
+/**
+ * WHICH RELIEVER IS COMING IN, an index into what is left in the pen.
+ *
+ * ⚠️ IT IS A SELECTION, NOT A QUEUE. The pen used to hand you `bullpen[0]` and
+ * nothing else, which made a three-man pen a formality — you could not save
+ * your best arm for the ninth because you were never asked. Now you pick, and
+ * so does the computer (pickReliever() in rotation.ts).
+ */
+let penPick = 0;
+
+/**
+ * WHICH BENCH MAN IS SELECTED, and whether the button has been pressed once.
+ *
+ * Two locals rather than one, exactly like penPick and penArmed — and for the
+ * reason those two exist: picking who is a different act from deciding to do
+ * it, and a substitution that happened on the first click was how pitchers kept
+ * getting changed by accident. See benchPanel().
+ */
+let benchPick = 0;
+let benchArmed = false;
+
+/** Which of your three starters takes the ball in the NEXT franchise game. */
+let myStarter = 0;
+
+/**
+ * THE MAN YOU HAVE PICKED UP OUT OF YOUR LINEUP, or nobody.
+ *
+ * ⚠️ CLICK TWO, NOT DRAG. Dragging nine rows needs pointer capture, an
+ * insertion marker, an autoscroll while the list runs off a phone screen, and
+ * a keyboard path bolted on afterwards for anyone who cannot drag — for a
+ * gesture that is used nine times a season. Two clicks is the same edit, works
+ * on a touchscreen, and is already how the rotation picker and the pen behave,
+ * so it is the gesture this screen has taught you.
+ */
+let lineupPick: number | null = null;
+
+/**
+ * WHICH CARD myStarter WAS LAST SEEDED FOR — club and day.
+ *
+ * ⚠️ WITHOUT THIS THE PICKER DOES NOT WORK, and it looked like it did. The
+ * card seeds myStarter from pickStarter() so a player who never opens the
+ * panel still turns his rotation over; clicking a row redraws the card so the
+ * marquee can rename the starter. Those two together meant every click was
+ * overwritten by the default on the way back in — the row highlighted for a
+ * frame and snapped back. Seed once per CARD, not once per draw.
+ */
+let starterSeededFor = '';
+
+/**
+ * THE OTHER CLUB'S PERSONALITY — see identity.ts.
+ *
+ * ⚠️ ALWAYS THEIRS, NEVER YOURS, and that is the difference between this and
+ * sim.ts's battingKnob(). The sim reads the identity of whichever side is
+ * batting because both sides are the computer. Here exactly one side is, so
+ * the only club whose manager these knobs describe is the one across the
+ * field. Your own identity is a fact about your ROSTER — it shows on the
+ * pre-game card — and it does not reach in and swing the bat for you.
+ */
+const theirKnob = (k: 'aggression' | 'running' | 'bunt'): number =>
+  knob((YOU === 'home' ? game.away : game.home).identity, k);
+
+/**
+ * The crowd, against you — so it applies exactly when THEY are the home club,
+ * which is exactly when you are on the road. See HOME_EDGE in tuning.ts.
+ *
+ * ⚠️ The other half of it — your own crowd helping YOU — is not here and
+ * cannot be. You are the one swinging the bat, and a hidden multiplier on a
+ * human's timing is not a home-field advantage, it is the game lying about
+ * what your swing did. Yours is the schedule: at home you bat last.
+ */
+const theirCrowd = (): number => (YOU === 'away' ? HOME_EDGE : 1);
+
+/**
+ * WHAT THIS ARM CAN THROW. The buttons, the number keys and the clamp all read
+ * it, so there is one answer to the question on screen and in the handler.
+ *
+ * ⚠️ THE PANEL USED TO OFFER ALL SIX to everybody, so you could call a
+ * knuckleball with a fireballer who has never thrown one. The arsenal is the
+ * first rating a pitcher has and it was the one the mound ignored.
+ */
+const myArsenal = (): PitchType[] => arsenalOf(currentPitcher(game));
+
+// ------------------------------------------------------------------- dom
+
+const $ = <T extends HTMLElement>(id: string): T => {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`missing #${id}`);
+  return el as T;
+};
+
+const canvas = $<HTMLCanvasElement>('field');
+const ctx = canvas.getContext('2d')!;
+const elScore = $('scoreboard');
+const elSit = $('situation');
+const elMeta = $('meta');
+const elControls = $('controls');
+const elLog = $('log');
+const elBanner = $('banner');
+const elBook = $('book');
+/** The masthead, which says which mode you are in. */
+const elTitle = document.querySelector('h1')!;
+
+function say(text: string, cls = ''): void {
+  const div = document.createElement('div');
+  div.textContent = text;
+  if (cls) div.className = cls;
+  elLog.prepend(div);
+  while (elLog.childElementCount > 80) elLog.lastElementChild?.remove();
+}
+
+// ------------------------------------------------------------- your at-bat
+
+/** Throw the next pitch TO you. The computer is on the mound. */
+function deliver(): void {
+  if (game.over) return;
+  const sit: Situation = {
+    previous,
+    firstBaseOpen: game.bases[0] === null,
+    batterPower: statsOf(currentBatter(game)).power,
+    outs: game.outs,
+  };
+  pitch = callPitch(currentPitcher(game), atBat, sit, book, rng, {
+    fatigue: fatigue(fieldingStaff(game)),
+  });
+  previous.push(pitch.type);
+  game = countPitch(game);
+
+  launchAt = performance.now();
+  const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
+  // readScale() is 1 on every path but your own at-bat, so this is the same
+  // expression it has always been everywhere else. See readScale().
+  arriveAt = launchAt + flight / (flightScale() * readScale());
+  swingStartedAt = null;
+  checkedAt = null;
+
+  // Decide the computer's swing NOW, at release, exactly like a hitter does.
+  //
+  // ⚠️ The offset is deliberately NOT scaled. computeOffsetMs() grades
+  // (swing - arrival) directly, so an unscaled offset lands on the same grade
+  // whatever the flight is doing. Scaling it here would quietly make auto mode
+  // a BETTER hitter at 8x than at 1x, and the whole point of watch mode is
+  // that the game you leave running is the game you would have played.
+  autoSwingAt = null;
+  if (auto) {
+    const decision = aiSwing(
+      pitch,
+      {
+        count: atBat,
+        stats: statsOf(currentBatter(game)),
+        pitcherFatigue: fatigue(fieldingStaff(game)),
+      },
+      book,
+      rng,
+    );
+    // The AI's offset is where it wants the BARREL, so it has to press a bat's
+    // travel earlier — same as you do. Without this subtraction watch mode
+    // would be systematically late by 100–155ms and stop being the game you
+    // would have played, which is the only thing watch mode is for.
+    if (decision.swing) autoSwingAt = arriveAt + decision.offsetMs - batTravel();
+  }
+
+  phase = 'windup';
+}
+
+/**
+ * SPACE / click during the flight. The FIRST press starts the bat; a SECOND
+ * one, early enough, takes it back.
+ *
+ * One verb doing both is the R.B.I. discipline: it ran the whole sport on two
+ * buttons, and a check swing on its own key would be the sixth thing this
+ * screen asks you to remember. Tap it again — that is the whole control.
+ */
+/**
+ * Square up, or stand back down. Between pitches only — a hitter who could
+ * drop the bat mid-flight would be getting the read for free.
+ */
+function toggleBunt(): void {
+  if (!youBat() || game.over || phase !== 'idle') return;
+  bunting = !bunting;
+  render();
+}
+
+function swing(): void {
+  // Squared to bunt: the bat is already out there and there is nothing to
+  // start. Deliberately silent — the button did what the stance says.
+  if (bunting) return;
+  if (phase !== 'windup') return;
+  const now = performance.now();
+
+  if (swingStartedAt === null) {
+    swingStartedAt = now;
+    // Read off THIS batter's power: the heavy bat is slower to get around, and
+    // being slower is exactly what buys it a longer look at the pitch.
+    swingTravel = batTravel();
+    return;
+  }
+
+  // Too late to change your mind means the swing stands — nothing to do, and
+  // deliberately no error: the button did what a button does.
+  if (checkedAt === null && canCheck(now - swingStartedAt, swingTravel)) checkedAt = now;
+}
+
+/**
+ * Send the runner. Legal only between pitches while YOU are batting.
+ *
+ * ponytail: between pitches, not mid-flight. A steal that resolves while a
+ * pitch is in the air needs the two to be interleaved on one clock, and the
+ * whole running game is one decision — see running.ts.
+ */
+/**
+ * CUT TO THE FIELD ON A STOLEN BASE.
+ *
+ * ⚠️ THE ONE PLAY IN THE GAME THAT RESOLVED WITH NOTHING TO WATCH. A steal was
+ * a die, a flash and a line of text; the base HUD simply showed the man one bag
+ * further along or gone. It is a throw and a tag — the most recognisable tag
+ * play there is — and every piece needed to draw it was already in overhead.ts.
+ *
+ * ⚠️ BOTH HALVES CALL THIS. Yours and theirs are the same event, and drawing
+ * only one of them is the two halves of the game disagreeing about what a steal
+ * looks like — the mistake the foul replay made before showFoul() was shared.
+ *
+ * The bag numbering is runnerPoint()'s: 1 first, 2 second, 3 third. sendRunner
+ * counts its own to from zero, so it is one less.
+ */
+function showSteal(to: number, safe: boolean, speed: number): void {
+  showScene(null);
+  replay = newReplay({
+    now: performance.now(),
+    // Nothing was hit. The outcome is only here because a Replay has one, and
+    // drawOverhead() returns before it can read the plot — see drawSteal().
+    outcome: 'ground_out',
+    exitVelocity: 0,
+    launchAngle: 0,
+    direction: 0,
+    speed,
+    safe,
+    steal: { from: to, to: to + 1, safe, speed },
+  });
+}
+
+function steal(): void {
+  if (phase !== 'idle' || !youBat() || game.over) return;
+  const op = stealOpportunity(game);
+  if (!op) return;
+
+  const defence = fieldingAlignment(game);
+  const odds = Math.round(chanceFor(game, op, defence) * 100);
+  const out = sendRunner(game, defence, rng);
+  if (!out) return;
+
+  game = out.game;
+  const bag = out.to === 1 ? 'second' : 'third';
+  say(
+    out.safe
+      ? `${out.runner.name} steals ${bag}! (${odds}%)`
+      : `${out.runner.name} caught stealing ${bag}. (${odds}%)`,
+    out.safe ? 'big' : 'out',
+  );
+  showSteal(out.to, out.safe, out.runner.speed);
+  flash = '';
+  flashUntil = performance.now() + replayLength(replay!) / speed();
+
+  // Caught stealing can be the third out, which ends the half — and may end
+  // the game. Route through the same finish path the at-bat uses.
+  if (game.over) {
+    finalize();
+    return;
+  }
+  if (!out.safe && game.outs === 0) {
+    // The half rolled over: reset the count and hand the ball over.
+    atBat = newAtBat();
+    bunting = false;
+    penArmed = false;
+    previous = [];
+    phase = youBat() ? 'idle' : 'calling';
+  }
+  render();
+}
+
+/**
+ * ⚠️ EVERYTHING THAT MOVES A RUNNER NOW HAPPENS ON A PITCH — 2026-09-12.
+ *
+ * THE DEFECT, in Zane's words: "Pop up first base foul line and runner from
+ * second advanced to third. THIS DOES NOT PLAY LIKE BASEBALL", and "SOMEONE
+ * FROM SECOND JUST SCORED ON A GROUNDOUT". Neither was a baserunning bug —
+ * core/inning.ts moves nobody more than the play is worth, and it is right.
+ * Both were THIS: rollLoose() and runTheBases() were called from
+ * finishAtBat(), BETWEEN plate appearances, with no ball anywhere on the
+ * screen. A runner appeared one bag further along, a run came in behind an
+ * out, and nothing the player had watched could account for either. That is
+ * the whole of what "scripted, not fluid" means — a state change with no
+ * visible cause. The play-by-play did print a line; a line of text arriving
+ * after the fact is not the same as seeing it happen.
+ *
+ * THE RULE NOW. One roll per plate appearance, exactly as before — the rates
+ * in running.ts are per-at-bat numbers and the run environment was measured
+ * against them, so moving them per-pitch would quietly quadruple the running
+ * game — but taken on the FIRST pitch of the at-bat the batter does not put in
+ * play. There is a ball in the air when the runner goes, and the flash says so
+ * over the pitch that caused it.
+ *
+ * ⚠️ THE HEADLESS SIM IS UNTOUCHED. sim.ts keeps its own call sites and the
+ * same per-at-bat odds; nothing about how often either event happens has moved,
+ * only where in the at-bat it is asked. scripts/balance.ts is unaffected by
+ * construction, which is the reason it was done this way round rather than by
+ * dividing the rates through.
+ */
+let looseRolled = false;
+
+function runnersGoOnThePitch(): void {
+  // A ball in play is not a pitch anybody steals on, and the at-bat is over.
+  if (game.over || looseRolled || atBat.result?.kind === 'in_play') return;
+  looseRolled = true;
+
+  const outsBefore = game.outs;
+
+  // One gets away from the catcher. It can happen in EITHER half — you are
+  // behind the plate for one of them and at it for the other, and a backstop
+  // that only leaked while you batted would read as the game cheating.
+  const loose = rollLoose(game, rng);
+  game = loose.game;
+  if (loose.wild) {
+    const who = loose.wild.advanced.map((r) => r.name).join(' and ');
+    say(
+      loose.wild.runs > 0
+        ? `Ball gets away — ${who} moves up, and a run scores.`
+        : `Ball gets away — ${who} moves up.`,
+      loose.wild.runs > 0 ? 'big' : 'out',
+    );
+    // ⚠️ IT TAKES THE FLASH OVER FROM THE PITCH, and that is the right order:
+    // "BALL" is what the umpire said, and the ball rolling to the backstop is
+    // what the player needs to look at. It also holds longer than an ordinary
+    // pitch, because two things happened on it.
+    flash = loose.wild.runs > 0 ? 'BALL GETS AWAY — A RUN SCORES' : 'BALL GETS AWAY';
+    flashUntil = pauseFor(1500);
+  }
+
+  // ...and THEY run on you while you are the one on the mound. Your own
+  // running game is the STEAL button and stays where it is — see steal().
+  if (!game.over && !youBat()) {
+    const op = stealOpportunity(game);
+    const basesBefore = game.bases;
+    game = runTheBases(game, rng);
+    if (op && game.bases !== basesBefore) {
+      const caught = game.outs > outsBefore;
+      say(
+        caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
+        caught ? 'out' : 'big',
+      );
+      showSteal(op.to, !caught, op.runner.speed);
+      flash = '';
+      flashUntil = performance.now() + replayLength(replay!) / speed();
+    }
+  }
+
+  if (game.over) {
+    finalize();
+    return;
+  }
+  // ⚠️ CAUGHT STEALING CAN BE THE THIRD OUT, and it lands MID-AT-BAT now. The
+  // half rolls over underneath a count that is still 2-1, so the count has to
+  // go with it — the same reset steal() does on your half, and without it the
+  // next hitter walks up already behind.
+  if (game.outs === 0 && outsBefore > 0) {
+    atBat = newAtBat();
+    // A fresh hitter, so a fresh roll — finishAtBat() never ran on this one.
+    looseRolled = false;
+    bunting = false;
+    penArmed = false;
+    previous = [];
+    chart = [];
+    pitch = null;
+  }
+  render();
+}
+
+/**
+ * The ball got to the plate. Resolve whatever you did about it.
+ *
+ * Called from the frame loop rather than a timer, so the resolution uses the
+ * same clock the swing was stamped against.
+ */
+function resolvePitch(): void {
+  if (!pitch) return;
+  const batter = currentBatter(game);
+  const stats = statsOf(batter);
+  const risp = game.bases[1] !== null || game.bases[2] !== null;
+  // What his break and his clutch are worth against this pitch. One dial, same
+  // one the platoon split and the hitter's own contact turn — see stuffFactor.
+  const stuff = stuffFactor(currentPitcher(game), pitch.type, {
+    runnersInScoringPosition: risp,
+  });
+
+  // THE BUNT resolves before anything else and shares none of the swing path.
+  if (bunting) {
+    observePitch(book, pitch, false);
+    // Squared and the ball was there: that is an offer. See lastWasSwing.
+    lastWasSwing = pitch.inZone;
+    if (!pitch.inZone) {
+      // You do not chase with the bat out over the plate. Pull it back.
+      atBat = takePitch(atBat, false, pitch.hitBatter);
+      lastGrade = 'BUNT — TOOK IT';
+      flash = pitch.hitBatter ? 'HIT BY PITCH' : 'BALL';
+    } else {
+
+      atBat = swingAt(
+        atBat,
+        { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
+        rng,
+      );
+      lastGrade = 'BUNT';
+      // ⚠️ READ OFF THE SWING, NOT THE COUNT. This asked whether the count moved,
+      // and a bunt foul ALWAYS moves it — swingAt() has no free-foul branch for a
+      // bunt — so 'BUNT FOUL' was unreachable long before lastSwing existed.
+      flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'BUNT';
+      // Two strikes and he fouled it off: the count already rang him up, and
+      // the banner should say so rather than reading like a live at-bat.
+      if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
+    }
+    bunting = false;
+    // A bunt is not a swing at a window and has no offset to read out. See
+    // SwingRead: the word and the bar must never describe different pitches.
+    swingRead = null;
+    flashUntil = pauseFor(1000);
+    phase = 'resolve';
+    return;
+  }
+
+  const contact = contactAt();
+  lastWasSwing = contact !== null;
+
+  if (contact === null) {
+    // Took it — and a swing pulled back in time IS a take, which is the whole
+    // reason the check swing needed no new rule. `inZone` decides it either
+    // way; an umpire ruling the check a strike is simply what a called strike
+    // already is.
+    //
+    // ponytail: the book is told this was a take, not an offer. Recording a
+    // check as a swing-and-no-contact would push the computer to feed you more
+    // junk out of the zone, which is a real and defensible read — it is just a
+    // difficulty change nobody asked for yet. One argument to observePitch()
+    // if that turns out to be the better game.
+    observePitch(book, pitch, false);
+    atBat = takePitch(atBat, pitch.inZone, pitch.hitBatter);
+    const call = pitch.inZone ? 'STRIKE' : 'BALL';
+    lastGrade = checkedAt !== null ? `CHECKED — ${call}` : call;
+    flash = pitch.hitBatter ? 'HIT BY PITCH' : lastGrade;
+    // ⚠️ swingRead IS DELIBERATELY LEFT ALONE HERE. A take is not a swing, and
+    // the last swing of this at-bat is still the last swing of this at-bat —
+    // it is also the reference a hitter most wants in front of him while he
+    // watches the next one come in. The two are kept apart by being labelled
+    // apart: `last pitch` is this, `last swing` is that. See SwingRead.
+  } else {
+    // ⚠️ TWO OFFSETS, AND THE DIFFERENCE BETWEEN THEM IS THE WHOLE FEATURE.
+    // `raw` is measured against the ball's real arrival and is the only thing
+    // the calibration may ever learn from — medianOffset() says so in its own
+    // signature, and feeding it corrected samples makes the correction chase
+    // itself to zero. `offset` is measured against arrival as the player saw
+    // it, and is what the at-bat is actually graded on.
+    const raw = computeOffsetMs(contact, arriveAt);
+    const offset = computeOffsetMs(contact, gradedArrival());
+    // ⚠️ AND IT STOPS WHEN THE PLAYER SAYS STOP. Without holdCalibration this
+    // folds a sample in on every swing for ever, so the shift somebody has just
+    // learned to hit against goes on walking — see the note on LOCK in
+    // difficulty.ts. Holding it changes nothing else: the samples already taken
+    // stay, and the shift they produced goes on being applied.
+    if (!auto && !settings.holdCalibration) {
+      settings = { ...settings, calibration: observeTiming(settings.calibration, raw) };
+      saveSettings(settings);
+    }
+    // Graded with the SAME multipliers resolveSwing() will use, the assist
+    // included, or the word on screen and the outcome in the book come from
+    // different at-bats.
+    const scale = stats.contact * stuff * assist();
+    const g = grade(offset, scale, stats.vision);
+    lastGrade = g.toUpperCase();
+
+    const input: SwingInput = {
+      offsetMs: offset,
+      pitchType: pitch.type,
+      location: pitch.location,
+      stats,
+      batterHand: batter.bats,
+      pitcherHand: currentPitcher(game).throws,
+      twoStrikes: atBat.strikes >= 2,
+      runnersInScoringPosition: risp,
+      stuff,
+      foulBoost: FOUL_BOOST,
+      // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
+      foulPopAngle: parkFoulAngle(game.home.park),
+      assist: assist(),
+    };
+    const before = atBat;
+    atBat = swingAt(atBat, input, rng);
+    // A whiff for the book's purposes is a swing that produced no contact.
+    const whiffed = g === 'miss';
+    observePitch(book, pitch, true, offset, whiffed);
+    flash = g === 'miss' ? 'SWING AND MISS' : `${g.toUpperCase()}`;
+    // ⚠️ showFoul() IS A DRAW CALL THAT ALSO ANSWERS A QUESTION, so it still
+    // runs on every swing whatever the flash says. Both tests are taken into
+    // locals rather than asked twice: the read-out below needs the same two
+    // answers, and a second showFoul() would build a second replay.
+    const freeFoul = wasFreeFoul(before, atBat);
+    const drewFoul = showFoul(batter.speed);
+    if (freeFoul) flash = 'FOUL';
+    if (drewFoul) flash = 'FOUL';
+
+    // ⚠️ THE GRADE AND THE OUTCOME ARE TWO DIFFERENT FACTS, and the screen used
+    // to carry only the first. Three straight 0-2 fouls read `last swing: LATE`
+    // three times over a count that never moved and a play log that never got
+    // a line — from the batter's box, a frozen game. LATE is how the swing was
+    // TIMED; FOUL is what it CAME TO, and the second one is the one that
+    // explains why nothing happened.
+    //
+    // Read off the swing rather than off the flash: `flash` carries the streak
+    // decoration by the time anything else looks at it.
+    const outcome = swingWord(freeFoul, drewFoul);
+
+    // ⚠️ NOT IN WATCH MODE, same rule as the streak below. That offset belongs
+    // to aiSwing(), and a bar drawn from the computer's timing would teach a
+    // watching player nothing about his own.
+    //
+    // ⚠️ AND THE CLOCK IS HELD TO THE SAME BAR THE CALIBRATION IS. `raw` is the
+    // uncorrected measurement, which is what SANE_SAMPLE_MS is stated against —
+    // asking it of the corrected `offset` would move the bar by the shift. See
+    // SwingRead.offsetMs for the ten-second swing that made this necessary.
+    const timed = Math.abs(raw) <= SANE_SAMPLE_MS;
+    swingRead = auto
+      ? null
+      : {
+          offsetMs: timed ? offset : null,
+          scale,
+          eyes: stats.vision,
+          grade: g.toUpperCase(),
+          outcome,
+        };
+    if (outcome === 'FOUL') say(`${batter.name} fouls one off.`, 'out');
+
+    // The streak, and the loud version of it. Only a SWING moves this — a take
+    // is left alone deliberately, see streak.ts.
+    //
+    // ⚠️ NOT IN WATCH MODE. aiSwing() takes this swing when auto is on, and a
+    // record the computer set at 8x while you were in a meeting would empty the
+    // number of everything it means. The whole point is that YOU squared it up.
+    if (!auto) {
+      const run = extend(streak, g);
+      streak = run.streak;
+      // A record is only worth announcing once there is something to beat.
+      // Without the floor, the first swing on a fresh install is a "new best".
+      if (run.record && streak.current >= 3) {
+        flash = `${streak.current} IN A ROW — NEW BEST`;
+        say(`New best: ${streak.current} squared up in a row.`, 'big');
+      } else if (streak.current >= 3) {
+        flash = `${flash} — ${streak.current} IN A ROW`;
+      }
+      // Saved on every record, loud or quiet — the number on disk must be the
+      // real one even when nobody was told about it.
+      if (run.record) saveStreak(streak);
+    }
+  }
+
+  // ⚠️ THE FOUL'S BEAT IS THE REPLAY'S, not the flat second every other pitch
+  // gets. Without this the next pitch is thrown while the ball is still in the
+  // air on the overhead — the pause and the replay are two clocks and they have
+  // to agree about how long a foul takes. Speed-scaled for the same reason
+  // finishAtBat's is: at 8x the replay is 8x faster and the wait must be too.
+  flashUntil =
+    replay && replay.outcome === 'foul'
+      ? performance.now() + replayLength(replay) / speed()
+      : pauseFor(1000);
+  phase = 'resolve';
+}
+
+// --------------------------------------------------------------- your half
+//                                                        (you on the mound)
+
+/**
+ * Go to your bullpen. Only legal between batters, same as the real rule, and
+ * enforced by only ever being reachable from the 'calling' phase.
+ */
+/**
+ * Move the defence. Only meaningful while YOU are the one in the field, which
+ * is the only phase the key and the panel are live in.
+ *
+ * ⚠️ IT IS A GAME-STATE CHANGE, not a UI toggle, because sim.ts reads it when
+ * it plays out the computer's half — see GameState.shift. Setting it on a
+ * local would move the dots and change nothing about the baseball.
+ */
+function cycleShift(step = 1): void {
+  const at = SHIFTS.indexOf(game.shift ?? 'straight');
+  game = { ...game, shift: SHIFTS[(at + step + SHIFTS.length) % SHIFTS.length]! };
+  render();
+}
+
+function relieve(): void {
+  if (phase !== 'calling' || youBat()) return;
+  const staff = fieldingStaff(game);
+  if (!hasRelief(staff)) return;
+
+  // FIRST PRESS ARMS IT, SECOND PRESS MAKES THE CHANGE. See penArmed — this is
+  // the whole fix for pitchers being changed by accident, and it is deliberately
+  // the same shape as the check swing: one verb, pressed twice, no new key to
+  // remember. The panel says out loud that it is waiting.
+  if (!penArmed) {
+    penArmed = true;
+    render();
+    return;
+  }
+
+  penArmed = false;
+  const going = staff.current.pitcher.name;
+  game = goToBullpen(game, penPick);
+  // The list just got shorter. Anything past the end would silently become the
+  // top of the pen on the next press.
+  penPick = 0;
+  say(`You go to the pen: ${going} → ${currentPitcher(game).name}.`, 'half');
+  render();
+}
+
+/** Move the selection inside the pen. Only meaningful while it is armed. */
+function cyclePen(by: number): void {
+  const n = fieldingStaff(game).bullpen.length;
+  if (n === 0 || youBat()) return;
+  penPick = ((penPick + by) % n + n) % n;
+  render();
+}
+
+/**
+ * THIS ARM'S RELEASE WINDOW, at whatever the difficulty has done to it.
+ *
+ * ⚠️ ONE CALL FOR THE VERDICT AND FOR THE PICTURE. Both release() and
+ * drawDelivery() come through here, so the band drawn on the bar is the band
+ * the press is graded against — including the two things that move it, the
+ * signature on the card and the level in the menu. A meter with its own copy of
+ * the numbers is a meter that lies the first time either one changes.
+ *
+ * COMMAND[signature] and not zoneRate: see the note on COMMAND in pitcher.ts,
+ * which is emphatic about why reading zone rate as precision would hand the
+ * worst command in the league to your best arm.
+ */
+/**
+ * THE THROW — the third graded press in the game, and the only one you make
+ * with a glove on. See THROW_EFFECT in core/fielding.ts for what it buys.
+ *
+ * ⚠️ IT IS THE SAME INSTRUMENT AS THE OTHER TWO, deliberately. gradeRelease()
+ * does the grading and RELEASE_WINDOWS_MS supplies the widths, so a throw is
+ * measured the way a pitch and a swing are and there is not a third set of
+ * numbers to keep in step. What differs is the geometry it is measured against
+ * (a much quicker sweep) and the table it pays out into.
+ */
+let throwAt = 0;
+let thrownAt: number | null = null;
+let throwGrade: ReleaseGrade | null = null;
+
+/**
+ * The window widths for a throw, at this difficulty.
+ *
+ * ⚠️ COMMAND IS DELIBERATELY NOT IN IT. That is the PITCHER's precision, and
+ * the man making this throw is an infielder — reading the arm's signature here
+ * would mean going to a knuckleballer made your shortstop worse with the glove.
+ * The difficulty assist is in it, by the same rule every window follows: it
+ * applies to you and never to the computer, and structurally so, because watch
+ * mode never reaches this press at all.
+ */
+const throwWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
+  releaseWindowMs(kind, 1, assist(), 1);
+
+const releaseWindow = (kind: Parameters<typeof releaseWindowMs>[0]): number =>
+  releaseWindowMs(
+    kind,
+    COMMAND[currentPitcher(game).signature],
+    assist(),
+    deliveryOf(deliveryPitch).scale,
+  );
+
+/**
+ * START THE DELIVERY. The press that used to throw the pitch now only begins
+ * it — see core/delivery.ts for what the second press is worth.
+ */
+function startDelivery(): void {
+  if (game.over || youBat() || phase !== 'calling') return;
+  deliveryAt = performance.now();
+  deliveryPitch = callType;
+  releaseGrade = null;
+  // The pen is disarmed by anything that changes what you are looking at, and
+  // the arm coming set is exactly that. Same rule as throwing the pitch was.
+  penArmed = false;
+  phase = 'winding';
+  render();
+}
+
+/**
+ * LET GO OF IT AT A GRADE SOMEBODY ELSE DECIDED.
+ *
+ * Two callers, and they want opposite things, which is why the grade is an
+ * argument rather than a flag: the sweep running out is 'wild' — a pitch that
+ * got away, not a pitch that never happened — and watch mode taking over
+ * mid-delivery is 'good', because the computer plays your half at the league's
+ * numbers and must not be charged for a press you were in the middle of.
+ */
+function releaseAs(graded: ReleaseGrade): void {
+  if (phase !== 'winding') return;
+  // No `at`: neither caller is a press, so there is no mark to freeze on the
+  // bar — only a verdict. See pitchToThem().
+  pitchToThem(graded);
+}
+
+/** LET GO OF IT. `at` is when the press landed, on the delivery's own clock. */
+function release(at: number): void {
+  if (phase !== 'winding') return;
+  // The arm is not forward yet. Deliberately silent and deliberately not a
+  // pitch — see ARM_MS, which exists because the second half of a double-tap
+  // lands here and used to cost one.
+  if (at - deliveryAt < ARM_MS) return;
+  const tempo = deliveryOf(deliveryPitch);
+  pitchToThem(
+    gradeRelease(
+      // Same clock, same sign convention as the swing: negative is early.
+      at - (deliveryAt + tempo.releaseAtMs),
+      COMMAND[currentPitcher(game).signature],
+      assist(),
+      tempo.scale,
+    ),
+    at,
+  );
+}
+
+/**
+ * DELIVER THE PITCH YOU CALLED — and then let go of it.
+ *
+ * ⚠️ THIS USED TO RESOLVE THE WHOLE PITCH ON THE PRESS. You picked a spot, hit
+ * THROW, and a banner told you what had already happened: the ball was never in
+ * the air, the computer's hitter never took a swing anybody could see, and your
+ * half of the game was a menu with a scoreboard attached. Everything past the
+ * release now happens at the plate, in resolveTheirSwing(), on the same clock
+ * your own at-bat runs on. One loop, one picture, both directions.
+ *
+ * WHAT IS STILL DECIDED HERE, AT RELEASE: what the arm actually threw, and what
+ * the hitter has decided to do about it. Both are release-time facts — a hitter
+ * has to commit before he can see the ball arrive, which is the whole reason
+ * hitting is hard — so deciding them now and SHOWING them later is not a cheat.
+ * It is the order deliver() already puts them in when you are the one batting.
+ *
+ * @param graded how it left the hand. Watch mode passes 'good' and never goes
+ *        near the meter — that is control 1.0, which is what every arm in
+ *        sim.ts throws at, so the game you leave running is still the game.
+ * @param at when the press that released it landed, or null when there was no
+ *        press: the arm emptying at the end of the sweep, and every pitch watch
+ *        mode throws. The bar draws a verdict either way and a frozen mark only
+ *        when there is a moment to freeze.
+ */
+function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): void {
+  if (game.over) return;
+  const stats = statsOf(currentBatter(game));
+  const tired = fatigue(fieldingStaff(game));
+
+  // Your call is where he AIMS. Whether the ball gets there is his control
+  // rating — see pitchToSpot(), which is where the flat 0.72 that every arm in
+  // the game used to share has gone.
+  //
+  // ⚠️ TWO INDEPENDENT THINGS, MULTIPLIED, which is what `control` is for. The
+  // arm's fatigue was already here; the release is new and comes off YOUR
+  // press. 'good' is exactly 1, so this line still evaluates to what it always
+  // did for a competent pitch and for every pitch watch mode throws — see the
+  // invariant at the top of core/delivery.ts.
+  pitch = pitchToSpot(currentPitcher(game), callType, callSpot, rng, {
+    control: controlOf(graded) * (1 - ZONE_FATIGUE_PENALTY * tired),
+  });
+  // ⚠️ SET HERE AND NOT IN release(), so that EVERY path that throws a pitch
+  // leaves the bar telling the truth — including the two that never touch the
+  // meter. autoStep() calls straight through to this function, and before this
+  // line lived here watch mode pitched under a bar still offering you the
+  // keyboard hint for a control that was not yours at the time.
+  releaseGrade = graded;
+  releasedAt = at;
+  // Written now, completed at the plate by resolveTheirSwing(). The call and
+  // where it actually crossed are both known here; what it came to is not.
+  chart = [
+    ...chart,
+    {
+      type: callType,
+      called: callSpot,
+      actual: pitch.location,
+      inZone: pitch.inZone,
+      release: graded,
+      result: '',
+    },
+  ];
+  penArmed = false;
+  observeCall(book, callType, atBat.strikes >= 2);
+  previous.push(callType);
+  game = countPitch(game);
+
+  launchAt = performance.now();
+  const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
+  // readScale() is 1 on every path but your own at-bat, so this is the same
+  // expression it has always been everywhere else. See readScale().
+  arriveAt = launchAt + flight / (flightScale() * readScale());
+  swingStartedAt = null;
+  checkedAt = null;
+  autoSwingAt = null;
+
+  // THE COMPUTER BUNTS ON YOU TOO, by the same rule the headless sim uses — a
+  // sacrifice that only ever happened in sim.ts would be a mechanic the player
+  // never actually meets. It is untimed exactly like yours: the bat is already
+  // out over the plate, so there is no swing to schedule.
+  const bunt = shouldBunt(stats, {
+    count: atBat,
+    outs: game.outs,
+    bases: game.bases.map((b) => b !== null),
+    deficit: stateOf(game, fieldingSide(game)).runs - stateOf(game, battingSide(game)).runs,
+    inning: game.inning,
+    bunt: theirKnob('bunt'),
+  });
+
+  if (bunt) {
+    theirCall = { bunt: true, guess: null };
+  } else {
+    const decision = aiSwing(
+      pitch,
+      {
+        count: atBat,
+        stats,
+        pitcherFatigue: tired,
+        aggression: theirKnob('aggression'),
+        barrel: theirCrowd(),
+      },
+      book,
+      rng,
+    );
+    theirCall = { bunt: false, guess: decision.guess };
+    // He wants the BARREL there at that offset, so the bat has to start a
+    // travel earlier — the same subtraction watch mode makes, for the same
+    // reason, off the same clock.
+    if (decision.swing) autoSwingAt = arriveAt + decision.offsetMs - batTravel();
+  }
+
+  phase = 'windup';
+}
+
+/**
+ * The ball reached the plate and YOU are the one who threw it. Resolve what he
+ * did about it.
+ *
+ * ponytail: a separate function from resolvePitch() rather than a youBat()
+ * branch inside it. The two share the flight, the clock and the swing state,
+ * and they differ in exactly three things that all point the same way — the
+ * book is only ever told about pitches thrown AT you, the streak only counts
+ * swings YOU took, and the bunt arrives as his decision rather than your
+ * stance. Three guards inside one function is a function that is really two.
+ */
+function resolveTheirSwing(): void {
+  if (!pitch || !theirCall) return;
+  const batter = currentBatter(game);
+  const stats = statsOf(batter);
+  const twoStrikes = atBat.strikes >= 2;
+  const risp = game.bases[1] !== null || game.bases[2] !== null;
+  // What his break and his clutch are worth against this pitch — the same one
+  // dial your own at-bat is graded through.
+  const stuff = stuffFactor(currentPitcher(game), pitch.type, {
+    runnersInScoringPosition: risp,
+  });
+
+  // What the chart calls it. Set on every branch below, next to the flash it
+  // shortens, so the two cannot describe different pitches.
+  let scored = '';
+
+  if (theirCall.bunt) {
+    if (!pitch.inZone) {
+      atBat = takePitch(atBat, false, false);
+      flash = 'BALL — he had it squared';
+      scored = 'ball';
+    } else {
+
+      atBat = swingAt(
+        atBat,
+        { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
+        rng,
+      );
+      // Same unreachable test as the human bunt above — see the note there.
+      flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'HE BUNTS';
+      scored = atBat.lastSwing?.outcome === 'foul' ? 'bunt foul' : 'bunted';
+      if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
+    }
+  } else {
+    const contact = contactAt();
+    lastWasSwing = contact !== null;
+    if (contact === null) {
+      atBat = takePitch(atBat, pitch.inZone, pitch.hitBatter);
+      // ⚠️ THE PLUNKING USED TO READ 'BALL'. takePitch() has taken hitBatter
+      // since interactive pitching shipped and this line only ever asked about
+      // the zone, so the one pitch that ENDS the at-bat and puts a man on first
+      // announced itself as ball three. The batting half has said HIT BY PITCH
+      // all along — see resolvePitch() — so this was the two halves of the same
+      // event disagreeing, which is the defect and not a wording preference.
+      flash = pitch.hitBatter ? 'HIT BY PITCH' : pitch.inZone ? 'CALLED STRIKE' : 'BALL';
+      scored = pitch.hitBatter ? 'hit batter' : pitch.inZone ? 'called strike' : 'ball';
+    } else {
+      // Graded off where the barrel ACTUALLY arrived, not off the offset he
+      // asked for. The frame the bat is drawn crossing the plate is the frame
+      // that decides it — the same rule your swing is held to.
+      const offset = computeOffsetMs(contact, arriveAt);
+      const input: SwingInput = {
+        offsetMs: offset,
+        pitchType: pitch.type,
+        location: pitch.location,
+        stats,
+        batterHand: batter.bats,
+        pitcherHand: currentPitcher(game).throws,
+        twoStrikes,
+        runnersInScoringPosition: risp,
+        stuff,
+        foulBoost: FOUL_BOOST,
+        // The building both clubs are hitting in. Same park for the computer's
+        // swings as for yours — see parkFoulAngle() in teams.ts.
+        foulPopAngle: parkFoulAngle(game.home.park),
+      };
+      const before = atBat;
+      atBat = swingAt(atBat, input, rng);
+      const g = grade(offset, stats.contact * stuff, stats.vision);
+      scored = g === 'miss' ? 'swinging strike' : 'in play';
+      // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
+      // `atBat === before` and so started calling every two-strike foul the
+      // computer hit "IN PLAY".
+      const freeFoul = wasFreeFoul(before, atBat);
+      // Their fouls are drawn too. Same event, same picture.
+      const drewFoul = showFoul(batter.speed);
+      // ⚠️ THE SAME WORD YOUR HALF GETS, off the same function. See swingWord().
+      flash = g === 'miss' ? 'SWING AND MISS' : swingWord(freeFoul, drewFoul);
+      // ⚠️ ASKED OF THE SWING, NOT OF THE TWO LINES ABOVE. Both of those are
+      // conditions on DRAWING a foul — one is the free two-strike case and the
+      // other is whether there was a replay to build — and a foul that is
+      // neither still has to reach the chart as a foul.
+      // ⚠️ AND IT REACHES THE LOG, on this half as on yours. A foul is the one
+      // pitch that changes nothing a reader can see — the count sits still, no
+      // runner moves, the at-bat goes on — so a play log that skips it is a log
+      // with a hole in it exactly where somebody is asking "what just
+      // happened?". The pitch chart beside it already carried the word; the
+      // running account of the game did not.
+      if (atBat.lastSwing?.outcome === 'foul') {
+        scored = 'foul';
+        say(`${batter.name} fouls one off.`, 'out');
+      }
+    }
+  }
+
+  // The last row was written at release with everything but this.
+  chart = chart.map((r, i) => (i === chart.length - 1 ? { ...r, result: scored } : r));
+
+  theirCall = null;
+  flashUntil = pauseFor(1000);
+  phase = 'resolve';
+}
+
+// ------------------------------------------------------- ending an at-bat
+
+/**
+ * WAS THAT FOUL FREE — the two-strike one that costs nothing.
+ *
+ * ⚠️ COMPARED ON THE COUNT, NEVER ON THE OBJECT. Three call sites used to ask
+ * `atBat === before`, which worked only because swingAt() returned the SAME
+ * state object when a foul changed nothing. It returns a new one on every swing
+ * now — it has to, because it carries `lastSwing` so the ball can be drawn — so
+ * that test became permanently false and the screen started calling a
+ * two-strike foul "IN PLAY". The count is what "nothing happened" actually
+ * means, and it cannot rot the same way.
+ */
+const wasFreeFoul = (before: AtBatState, after: AtBatState): boolean =>
+  after.result === undefined &&
+  after.strikes === before.strikes &&
+  after.balls === before.balls;
+
+/**
+ * WHAT THE SWING CAME TO, in one word, for the screen.
+ *
+ * ⚠️ ONE FUNCTION FOR BOTH HALVES, and having two was the defect. Your half
+ * worked this out inline and the computer's half did not: it said `IN PLAY` for
+ * anything that was not a whiff, so a FOUL POP — a ball that ends the at-bat in
+ * the seats behind first, on a replay that barely moves — announced itself as a
+ * ball in play. Zane reported exactly that. A word the two halves derive
+ * separately is a word they eventually disagree about.
+ */
+function swingWord(freeFoul: boolean, drewFoul: boolean): string {
+  if (freeFoul || drewFoul) return 'FOUL';
+  const swung = atBat.lastSwing?.outcome;
+  if (swung === 'strikeout') {
+    return atBat.result?.kind === 'strikeout' ? 'STRIKE THREE' : 'SWING AND MISS';
+  }
+  if (swung === 'foul_out') return 'FOUL POP';
+  // Single or ground-out is not decided until finishAtBat() has asked the
+  // defence, so claiming one here would be a guess.
+  return 'IN PLAY';
+}
+
+/**
+ * DRAW THE FOUL, if the last swing was one. Returns whether it did.
+ *
+ * ⚠️ EVERY OTHER BATTED BALL REACHES THE REPLAY FROM finishAtBat(), which a
+ * foul never reaches because it does not end the at-bat. Before this the ball
+ * simply vanished off the bat. It gets the same cut to the overhead a ball in
+ * play gets, sized to a play that decides nothing — see FOUL_HOLD_MS.
+ *
+ * ⚠️ BOTH HALVES OF THE INNING CALL THIS. Your fouls and theirs are the same
+ * event and drawing only yours would be the two halves of the game disagreeing
+ * about what a foul ball is.
+ *
+ * The CAUGHT one is deliberately not built here: it ends the at-bat and goes
+ * through finishAtBat() like any other out, replay and all.
+ */
+function showFoul(runnerSpeed: number): boolean {
+  const swing = atBat.lastSwing;
+  if (!swing || swing.outcome !== 'foul') return false;
+  // ⚠️ THE PREVIOUS CAPTION HAS TO GO WITH THE PREVIOUS PLAY. A strikeout's
+  // caption lives on its own clock for TAKE_SCENE_MS, which outlasts the first
+  // pitch of the next at-bat — and this is the one other place a replay is
+  // built. Without the clear, a foul one hitter later cuts to the overhead with
+  // "STRIKE THREE" still written across the bottom of it.
+  showScene(null);
+  replay = newReplay({
+    now: performance.now(),
+    outcome: swing.outcome,
+    exitVelocity: swing.exitVelocity,
+    launchAngle: swing.launchAngle,
+    direction: swing.direction,
+    speed: runnerSpeed,
+    fielders: manned(fieldersFor(shiftNow()), fieldingAlignment(game)),
+    safe: false,
+    chaserNum: place(swing, game.home.park).fielderNum,
+    // The fence this one went toward, so the drawn ball and the sentence
+    // under it agree. See newReplay's own note.
+    wallFt: wallAt(swing.direction, game.home.park),
+  });
+  return true;
+}
+
+/**
+ * THE PLAY, STOPPED HALFWAY, waiting on your throw.
+ *
+ * ⚠️ THE BALL IS IN THE FIELDER'S HAND AND THE DICE ARE NOT THROWN YET. That is
+ * the whole reason the play has to be held in a variable rather than resolved
+ * in one go: THROW_EFFECT multiplies the error and double-play rolls, so the
+ * press has to land BEFORE rollFielding() sees them. Everything in here was
+ * settled by the swing and cannot change — where the ball went, who is under
+ * it, which way the defence was leaning — and none of it is re-derived when the
+ * play resumes, because re-deriving it is how the two halves of one play start
+ * disagreeing.
+ */
+let pendingPlay: {
+  align: ReturnType<typeof fieldingAlignment>;
+  shift: Shift;
+  placed: ReturnType<typeof withPlacement>;
+  batter: Player;
+} | null = null;
+
+/**
+ * LET IT GO. One press, graded off the same clock it is drawn against.
+ *
+ * ⚠️ IT RESOLVES THE PLAY ON THE SPOT rather than setting a flag for the frame
+ * loop, because the ball is already in a fielder's hand and every millisecond
+ * after the press is the game standing still. The FORCED throw at the end of
+ * the sweep comes through here too — see the frame loop — so a player who never
+ * presses gets a wild throw rather than a frozen game, exactly the way the arm
+ * empties at the end of a delivery.
+ */
+function makeThrow(grade: ReleaseGrade): void {
+  if (phase !== 'throw' || !pendingPlay) return;
+  throwGrade = grade;
+  thrownAt = performance.now();
+  const play = pendingPlay;
+  // A bad throw is worth saying out loud. A good one speaks for itself in the
+  // double play that follows it.
+  if (grade === 'wild') say('The throw gets away.', 'out');
+  completePlay(play, THROW_EFFECT[grade]);
+}
+
+/** The press, graded against where the marker actually is. */
+function releaseThrow(): void {
+  if (phase !== 'throw' || thrownAt !== null) return;
+  const offset = performance.now() - throwAt - THROW_AT_MS;
+  makeThrow(gradeRelease(offset, 1, assist(), 1));
+}
+
+/** The count says the at-bat is done. Fold it into the game. */
+function finishAtBat(): void {
+  // Where it landed decides whether it is a hit at all, what it is worth, AND
+  // what the scorer says. The contest needs the glove of whoever it was hit at.
+  const align = fieldingAlignment(game);
+  const shift = shiftNow();
+  const placed = withPlacement(atBat.result!, {
+    reachAt: reachOf(align),
+    park: game.home.park,
+    shift,
+  });
+  const result = placed.result;
+  const batter = currentBatter(game);
+
+  // ⚠️ THE ONE PLACE THE GAME STOPS FOR YOUR HANDS ON DEFENCE. Only the
+  // double-play ball, only while you are the one on the mound, and never in
+  // watch mode — see isClosePlay() and throwAssist(). Everything else falls
+  // straight through and resolves exactly as it always did.
+  if (
+    result.kind === 'in_play' &&
+    !auto &&
+    !youBat() &&
+    isClosePlay(result.hit.outcome, {
+      forceAtFirst: game.bases[0] !== null,
+      outs: game.outs,
+    })
+  ) {
+    pendingPlay = { align, shift, placed, batter };
+    throwAt = performance.now();
+    thrownAt = null;
+    throwGrade = null;
+    phase = 'throw';
+    render();
+    return;
+  }
+
+  completePlay({ align, shift, placed, batter }, CLEAN_THROW);
+}
+
+/**
+ * The dice, the rules, the picture and the words — everything that happens
+ * once the throw is either made or was never asked for.
+ *
+ * Split out of finishAtBat() when the throw press landed. `thrown` is
+ * CLEAN_THROW on every path that does not press, which is the computer's half,
+ * watch mode, every routine play and the whole headless sim — so all of those
+ * resolve on exactly the league's own rates. See THROW_EFFECT.
+ */
+function completePlay(
+  play: NonNullable<typeof pendingPlay>,
+  thrown: ThrowEffect,
+): void {
+  const { align, shift, placed, batter } = play;
+  const result = placed.result;
+  pendingPlay = null;
+
+  // Positional defence: WHO the ball was hit at decides whether it is booted.
+  const fielding =
+    result.kind === 'in_play'
+      ? fieldBall(
+          result.hit,
+          align,
+          {
+            batterSpeed: batter.speed,
+            forceAtFirst: game.bases[0] !== null,
+            outs: game.outs,
+            // Which bag the force goes to. See LEAD_FORCE in core/fielding.ts.
+            forcedRunners: forcedRunners(game.bases),
+            infieldIn: shift === 'in',
+            throwEffect: thrown,
+            // One answer to "who is under it" and one gap for the stretch —
+            // see the note on the option in defense.ts.
+            placement: placed.placement,
+          },
+          rng,
+        )
+      : undefined;
+
+  const half = inningLabel(game);
+  const wasBatting = battingSide(game);
+  // ⚠️ READ BEFORE recordPlay, NOT FROM log.before — that field is the BASES
+  // before the play and nothing else, and leverage needs the inning, the outs
+  // and both scores as they stood when this man walked up.
+  const spotHeWalkedInto = situationOf(game, wasBatting);
+  const { game: next, log } = recordPlay(game, result, fielding, shift);
+  game = next;
+
+  // WHAT THE BROADCAST MAKES OF IT. Built from the state BEFORE the play —
+  // leverage is a fact about the spot he walked into, not about the one he
+  // left behind him. See scene.ts.
+  showScene(
+    result.kind === 'in_play'
+      ? sceneFor({
+          outcome: result.hit.outcome,
+          placement: placed.placement,
+          verdict: placed.verdict,
+          runs: log.runs,
+          error: !!fielding?.error,
+          doublePlay: !!fielding?.doublePlay,
+          triplePlay: !!fielding?.triplePlay,
+          doubledOff: !!fielding?.doubledOff,
+          // ⚠️ ASKED OF THE STATE HE WALKED INTO, not of the one he left. The
+          // rule is "deep enough, with an out to spare, and a man on third" and
+          // all three of those are facts about BEFORE the catch — recordPlay
+          // has already taken the out and moved the runner.
+          sacFly: isSacrificeFly(
+            result.hit.outcome,
+            result.hit.exitVelocity,
+            spotHeWalkedInto.outs,
+            spotHeWalkedInto.bases,
+            result.hit.launchAngle,
+          ),
+          ...(log.thrownOut ? { thrownOutAt: log.thrownOut.at } : {}),
+          // ⚠️ THE DOUBLE PLAY'S BAG HAS TO GET HERE TOO, and `forceBag()` alone
+          // will not bring it: that helper is the predicate for "the batter
+          // REACHED", so it answers undefined on a double play by design. The
+          // caption for the 2-3 — the one play the infield-in call exists to
+          // produce — could therefore never fire, and the screen said TWO /
+          // TURNED, AND THE INNING IS OVER over a picture of a run being cut
+          // down at the plate. Caught by driving it, not by the suite; the
+          // ordering in sceneFor() is what makes this safe, because the double
+          // play returns long before the plain-force branch reads the same field.
+          forceAt: forceBag(result, fielding) ?? fielding?.forceAt,
+          exitVelocity: result.hit.exitVelocity,
+          before: spotHeWalkedInto,
+          gameOver: game.over,
+          walkOff: game.over && game.ending === 'walk_off',
+        })
+      : // ⚠️ THE STRIKEOUT, THE WALK AND THE PLUNKING USED TO LAND HERE AS
+        // `null` — no caption, no beat, nothing on the screen at all. Between
+        // them that is about a third of every plate appearance in the game, and
+        // the loudest of the three is the one a man on the mound is actually
+        // playing for. See sceneForTake().
+        sceneForTake({
+          kind: result.kind,
+          swinging: lastWasSwing,
+          runs: log.runs,
+          before: spotHeWalkedInto,
+          walkOff: game.over && game.ending === 'walk_off',
+        }),
+  );
+
+  // Cut to the overhead. Built HERE and not at contact because two of the
+  // things it needs are only known now: whether the defence booted it, and
+  // where recordPlay just put the runners.
+  //
+  // Fouls never reach this — a foul does not end the at-bat, so it never gets
+  // to finishAtBat at all, and there is nothing to watch anyway.
+  replay =
+    result.kind === 'in_play'
+      ? newReplay({
+          now: performance.now(),
+          outcome: result.hit.outcome,
+          exitVelocity: result.hit.exitVelocity,
+          launchAngle: result.hit.launchAngle,
+          direction: result.hit.direction,
+          speed: batter.speed,
+          // ⚠️ THE SAME ALIGNMENT withPlacement() JUST USED, not a fresh lookup.
+          // The shift that decided whether this was a hit is the one that has
+          // to be under it — see the note on Replay.fielders.
+          fielders: manned(fieldersFor(shift), fieldingAlignment(game)),
+          // ⚠️ THE BATTER IS SAFE ON A FORCE PLAY, and the replay has to know or
+          // it draws a throw beating him to a bag nothing was thrown to.
+          safe:
+            result.hit.isHit || !!fielding?.error || forceBag(result, fielding) !== undefined,
+          // The same fence place() just used — see newReplay's note on wallFt.
+          wallFt: wallAt(result.hit.direction, game.home.park),
+          // The beat this play earned. A routine grounder adds nothing.
+          holdMs: scene?.hold ?? 0,
+          // ⚠️ THE TRIPLE PLAY IS DRAWN AS THE DOUBLE PLAY IT CONTAINS. The
+          // relay to second and the throw on to first are both real and both
+          // already drawn; the third out is the one the fielder made standing on
+          // his own bag before he threw, which is over before the picture starts.
+          //
+          // ponytail: no third leg. The caption says THREE and the scorecard
+          // says 5-4-3, so nothing is claiming two outs — add the leg if the
+          // once-a-season play ever looks short.
+          doublePlay: !!fielding?.doublePlay || !!fielding?.triplePlay,
+          doubledOff: !!fielding?.doubledOff,
+          // ⚠️ THE BAG, ON A DOUBLE PLAY TOO. forceBag() deliberately answers
+          // `undefined` for one — it is the predicate for "the batter reached" —
+          // so the relay's bag has to come straight off the roll.
+          forceAt: forceBag(result, fielding) ?? fielding?.forceAt,
+          error: !!fielding?.error,
+          // Only a foul out sets this, and only because nobody stands in foul
+          // ground for nearestFielder() to find. See raceFor().
+          ...(result.hit.outcome === 'foul_out' && placed.placement
+            ? { chaserNum: placed.placement.fielderNum }
+            : {}),
+          // from === -1 is the batter, and he is drawn by the race instead.
+          // The scorers go in the same list: a man who came all the way home
+          // is a runner who covered more bags, not a different kind of thing.
+          moves: [
+            ...runnerMoves(log.before, log.after).filter((m) => m.from >= 0),
+            ...scorersFrom(log.before, log.after, log.runs),
+          ],
+          held: heldRunners(log.before, log.after),
+          // How far he actually ran, which a stretched single no longer says.
+          batterTo: log.batterTo,
+          ...(log.thrownOut
+            ? {
+                thrownOut: {
+                  at: log.thrownOut.at,
+                  speed: log.thrownOut.runner.speed,
+                  batter: log.thrownOut.batter,
+                },
+              }
+            : {}),
+        })
+      : null;
+
+  say(
+    `${half} ${batter.name}: ${describe(result, fielding, placed.text, placed.placement?.fielderNum)}`,
+    lineClass(result),
+  );
+
+  // ⚠️ ITS OWN LINE, not part of the batter's. The man gunned down going for
+  // the extra base is the only out on a play that did not happen to the hitter,
+  // and folding it into "single to right" produces a sentence where an out
+  // appears from nowhere.
+  if (log.thrownOut) {
+    const { runner, at, batter: wasBatter } = log.thrownOut;
+    const num = placed.placement?.fielderNum;
+    // ⚠️ TAGGED, NOT THROWN OUT. Nobody on this line is FORCED — every man
+    // here chose to run — so the fielder has to put the ball on him, and
+    // "thrown out" is the word for the other kind of play. The batter
+    // stretching his own hit gets his own sentence for the same reason the
+    // gunned-down runner does: without it an out appears from nowhere in a line
+    // about a base hit.
+    const bag = BAG_WORD[at] ?? 'the bag';
+    const how = wasBatter
+      ? `${runner.name} goes for ${bag} and is tagged out`
+      : `${runner.name} tagged out at ${bag}`;
+    say(`   ${how}` + (num === undefined ? '' : `, ${throwNotation(num, at)}`), 'out');
+  }
+  if (log.runs > 0) {
+    const who = wasBatting === YOU ? 'YOU SCORE' : 'THEY SCORE';
+    say(`   ${who} ${log.runs}`, 'big');
+  }
+  if (log.halfEnded && !game.over) {
+    say(`— end ${half} —  ${game.away.abbr} ${game.awayState.runs}, ${game.home.abbr} ${game.homeState.runs}`, 'half');
+  }
+
+  atBat = newAtBat();
+  // The next man gets his own roll for the ball getting away and for the man
+  // on first going. See runnersGoOnThePitch().
+  looseRolled = false;
+  // THE MOMENT THE NEXT MAN WALKS INTO, queued rather than shown — the replay
+  // of the play that just ended is still on the screen, and two cards at once
+  // is neither of them. The frame loop promotes it when the replay cuts away.
+  //
+  // ⚠️ ONLY WHEN THE LINE CHANGES. A tight ninth is high leverage for every
+  // hitter in it, and a card that reappeared before all four of them would stop
+  // meaning "look at this" by the second one. Comparing the text means the card
+  // marks the moment the situation TURNED — a run in, an out made, a man
+  // aboard — which is the thing actually worth looking up for.
+  const nextLine = game.over ? null : momentLine(situationOf(game, battingSide(game)));
+  if (nextLine && nextLine !== lastMoment) momentPending = nextLine;
+  lastMoment = nextLine ?? '';
+  bunting = false;
+  previous = [];
+  pitch = null;
+  // The chart is what you have thrown THIS hitter, so it empties with him.
+  chart = [];
+  // ⚠️ THE SWING READ-OUT IS DELIBERATELY *NOT* CLEARED HERE, and it was, once.
+  // Clearing it on the batter change sounds tidy and quietly deletes the most
+  // useful reading in the game: every swing that ENDS an at-bat — every hit,
+  // every strikeout, every ball put in play — reaches this function, so the
+  // number was wiped before the replay had even finished and a player only ever
+  // saw milliseconds on foul balls. The one swing he most wants measured is the
+  // one that did something.
+  //
+  // It costs carrying the previous hitter's band widths on the bar for one
+  // at-bat, which is the honest thing anyway: those ARE the bands that swing
+  // was graded in, and the line says `last swing`, not `this hitter`. It also
+  // puts it in step with `lastGrade` on the line above, which has always
+  // survived the batter change.
+  releaseGrade = null;
+
+  // The COMPUTER manages its pen between batters, exactly where you get to
+  // manage yours. Announced, because a pitching change you did not notice is
+  // a difficulty spike that reads as the game cheating.
+  if (!game.over && youBat()) {
+    const before = currentPitcher(game).name;
+    game = manageBullpen(game);
+    const after = currentPitcher(game).name;
+    if (after !== before) say(`They go to the pen: ${before} → ${after}.`, 'half');
+  }
+
+  // ...and THEY go to their bench while you are the one on the mound, by the
+  // same rule the headless sim uses. Announced for the same reason the pitching
+  // change is: a hitter you were not expecting is only fair if you are told.
+  if (!game.over && !youBat()) {
+    const before = currentBatter(game);
+    game = manageBench(game);
+    const after = currentBatter(game);
+    if (after !== before) say(`Pinch hitter: ${after.name} bats for ${before.name}.`, 'half');
+  }
+
+  // ⚠️ THE STEAL AND THE WILD PITCH USED TO BE HERE, and moving them out is the
+  // single biggest thing in this commit. Both moved a runner between plate
+  // appearances, with no ball on the screen to explain it. They happen on a
+  // pitch now — see runnersGoOnThePitch().
+
+  if (game.over) {
+    say(
+      `FINAL — ${game.away.abbr} ${game.awayState.runs}, ${game.home.abbr} ${game.homeState.runs}` +
+        (game.ending === 'walk_off' ? ' (walk-off)' : ''),
+      'big',
+    );
+    finalize();
+    return;
+  }
+  // Stay in 'resolve' while the play is on the screen. The count has already
+  // been reset above, so the frame loop's isOver() check falls straight through
+  // to the phase switch the moment the replay is done.
+  if (replay) {
+    flash = '';
+    flashUntil = performance.now() + replayLength(replay) / speed();
+    phase = 'resolve';
+    return;
+  }
+  phase = youBat() ? 'idle' : 'calling';
+}
+
+/**
+ * The game is final, from wherever it ended.
+ *
+ * In an exhibition that is the whole of it. In a franchise the result goes
+ * into the season and playDay() runs the rest of the day's card headlessly,
+ * so the standings you are shown on the next screen already include everyone
+ * else's afternoon.
+ */
+function finalize(): void {
+  phase = 'over';
+  elBanner.textContent = game.winner === YOU ? 'YOU WIN.' : 'YOU LOSE.';
+  if (!season) return;
+
+  // Read the day BEFORE playDay advances it — this is the day just played.
+  const played = season.day;
+  season = playDay(season, {
+    home: game.home.abbr,
+    away: game.away.abbr,
+    day: played,
+    hr: game.homeState.runs,
+    ar: game.awayState.runs,
+    hh: game.homeState.hits,
+    ah: game.awayState.hits,
+    // ⚠️ READ OFF THE STAFF, not off the pick we made before the game. They
+    // are the same man, and reading the one that actually threw means a
+    // result can never rest somebody who did not pitch.
+    hs: openedBy(game.homeState.staff).pitcher.name,
+    as: openedBy(game.awayState.staff).pitcher.name,
+    // ...and everybody who came out of either pen, with what he threw. Without
+    // these two the relievers in YOUR games would rest for free while the
+    // other twenty-nine clubs' did not.
+    hb: workOf(game.homeState.staff),
+    ab: workOf(game.awayState.staff),
+    // ...and the box score of the game you just played, which is the only one
+    // on today's card playDay() cannot read off a GameState of its own.
+  }, boxScore(game));
+  saveSeason(season);
+
+  // ⚠️ ASKED OF THE SEASON, NOT OF THE DAY NUMBER. A round is a series now, so
+  // "was that the last game" has no fixed answer — a best-of-seven can end on
+  // any of four nights. champion() going from null to a name is the event.
+  const champ = champion(season);
+  if (champ) {
+    crownChampion(season, champ);
+    return;
+  }
+
+  if (played >= regularDays(season)) {
+    // A playoff night that did not end the year: you are out, the series goes
+    // on, or you have won it and moved up a round.
+    const round = roundOn(season, played);
+    if (!stillIn(season, season.you)) {
+      say(`${season.you} are out.`, 'half');
+    } else if (roundOn(season, season.day) > round) {
+      say(`${season.you} take the ${roundName(season, round).toLowerCase()}.`, 'half');
+    } else {
+      say(`${season.you} play on — ${dayLabel(season).toLowerCase()} next.`, 'half');
+    }
+    return;
+  }
+
+  const me = standings(season).find((r) => r.abbr === season!.you)!;
+  const left = regularDays(season) - season.day;
+  say(
+    `${season.you} are ${me.w}-${me.l}. ` + (left > 0 ? `${left} to play.` : 'That is the year.'),
+    'half',
+  );
+  // The last day of the schedule is also the day the bracket exists.
+  if (left === 0) say(`Playoffs: ${seeds(season).join(', ')}.`, 'half');
+}
+
+/**
+ * The scorer's line. `placed` is placement.ts's sentence — "double into the
+ * left-center gap" — which is the whole reason ball placement exists: the
+ * player has to be TOLD where it went to learn to aim.
+ *
+ * The two fielding outcomes override it, because "reached on an error" is a
+ * more important fact about the play than where the ball landed.
+ */
+/**
+ * The play-by-play line: what happened, then who is on the hook for it.
+ *
+ * ⚠️ THE SENTENCE AND THE NOTATION ARE BOTH HERE ON PURPOSE. "grounded out to
+ * short" says where the ball went; "6-3" says who actually made the out and
+ * who threw it there. The first is what you watch, the second is what you can
+ * read down a column of and notice that everything you hit ends up at 6. See
+ * scorecard() in placement.ts.
+ */
+/**
+ * WAS THIS THE FORCE AT SECOND — asked in three places and derived in none of
+ * them twice. `fielding.force` is rolled on any ground ball with a man on first,
+ * and inning.ts only ACTS on it when the ball really was a ground out, so the
+ * screen has to ask the same pair of questions or the picture and the book part
+ * company on a line drive.
+ */
+const forceBag = (
+  result: AtBatState['result'],
+  fielding?: { doublePlay: boolean; forceAt?: ForceBag; error: boolean },
+): ForceBag | undefined =>
+  fielding?.forceAt !== undefined &&
+  !fielding.error &&
+  !fielding.doublePlay &&
+  result?.kind === 'in_play' &&
+  result.hit.outcome === 'ground_out'
+    ? fielding.forceAt
+    : undefined;
+
+function describe(
+  result: AtBatState['result'],
+  fielding?: {
+    error: boolean;
+    doublePlay: boolean;
+    triplePlay?: boolean;
+    doubledOff?: boolean;
+    forceAt?: ForceBag;
+  },
+  placed?: string,
+  fielderNum?: number,
+): string {
+  if (!result) return '';
+
+  // ⚠️ `forceAt` HAD TO BE RENAMED TO `force` ON THE WAY IN, and it was not.
+  // scorecard() takes a PlayShape whose bag field is called `force`, so passing
+  // the FieldingResult straight through handed it `forceAt` — a property it
+  // does not read — and every fielder's choice in the game has been scored
+  // `6-3`, the notation for a batter retired at first, since the lead force
+  // shipped. The one line of the book that says WHO was retired said the wrong
+  // man. TypeScript could not catch it: excess properties are only checked on
+  // object literals, and this was a variable.
+  const shape = fielding && {
+    error: fielding.error,
+    doublePlay: fielding.doublePlay,
+    triplePlay: fielding.triplePlay,
+    doubledOff: fielding.doubledOff,
+    force: fielding.forceAt,
+  };
+
+  const mark = (words: string, outcome: Outcome): string => {
+    if (fielderNum === undefined) return words;
+    const card = scorecard(outcome, fielderNum, shape);
+    return card ? `${words}, ${card}` : words;
+  };
+
+  switch (result.kind) {
+    case 'walk': return 'walk';
+    case 'hit_by_pitch': return 'hit by pitch';
+    case 'strikeout': return 'struck out';
+    case 'in_play': {
+      const outcome = result.hit.outcome;
+      if (fielding?.error) return mark('reached on an error', outcome);
+      if (fielding?.triplePlay) return mark('grounded into a TRIPLE PLAY', outcome);
+      if (fielding?.doubledOff) return mark('lined into a double play, doubled off first', outcome);
+      if (fielding?.doublePlay) {
+        return mark(
+          fielding.forceAt === 4
+            ? 'grounded into a double play, home to first'
+            : 'grounded into a double play',
+          outcome,
+        );
+      }
+      // ⚠️ "GROUNDED OUT TO SHORT" IS THE WRONG SENTENCE FOR A FORCE PLAY in
+      // two ways: he did not ground out — he is standing on first — and the man
+      // who is out never left the bag he started on. See FORCE_AT_SECOND.
+      if (fielding?.forceAt && outcome === 'ground_out') {
+        return mark(
+          `reached on a fielder’s choice, the force at ${BAG_WORD[fielding.forceAt] ?? 'the bag'}`,
+          outcome,
+        );
+      }
+      return mark(placed ?? outcome.replace('_', ' '), outcome);
+    }
+  }
+}
+
+const lineClass = (result: AtBatState['result']): string => {
+  if (!result) return '';
+  if (result.kind === 'in_play' && result.hit.isHit) return 'big';
+  if (result.kind === 'walk' || result.kind === 'hit_by_pitch') return '';
+  return 'out';
+};
+
+// ------------------------------------------------------------- watch mode
+
+/**
+ * Play your half for you. Called from the frame loop, once per frame.
+ *
+ * Every branch here ends in a function the human keys already call, so auto
+ * mode cannot drift away from the game a person plays — it presses the same
+ * buttons. It also manages your pen and runs your bases, because an auto mode
+ * whose starter throws 200 pitches and whose runners never go is not the game
+ * being played, it is the game being watched badly.
+ */
+function autoStep(): void {
+  if (game.over) return;
+  // ⚠️ WATCH MODE TAKES THE BREAK TOO. Without this the computer throws the
+  // first pitch of the next half straight through the card, which is the one
+  // thing the card exists to stop — and watch mode is where a player is most
+  // likely to be reading it rather than playing.
+  if (breakCard) return;
+
+  // ⚠️ TAKING OVER MID-DELIVERY. You can press T at any moment, including with
+  // the arm already going, and watch mode does not play the meter — so it
+  // finishes the pitch you started at 'good' rather than letting the sweep run
+  // out and charging a wild one to a player who has just handed over. It is the
+  // same rule the rest of this function keeps: the computer plays your half at
+  // the league's numbers, never worse and never better.
+  if (phase === 'winding') {
+    releaseAs('good');
+    return;
+  }
+
+  if (phase === 'calling') {
+    const before = currentPitcher(game).name;
+    game = manageBullpen(game);
+    const after = currentPitcher(game).name;
+    if (after !== before) say('You go to the pen: ' + before + ' → ' + after + '.', 'half');
+
+    const sit: Situation = {
+      previous,
+      firstBaseOpen: game.bases[0] === null,
+      batterPower: statsOf(currentBatter(game)).power,
+      outs: game.outs,
+    };
+    const choice = autoCaller(currentPitcher(game), book, rng, fatigue(fieldingStaff(game)))(
+      { balls: atBat.balls, strikes: atBat.strikes },
+      sit,
+    );
+    // Set the call and go through pitchToThem(), so auto mode throws under the
+    // same rules you do — including the one that says your pitch goes exactly
+    // where you put it until your arm gets tired.
+    callType = choice.type;
+    callSpot = choice.location;
+    pitchToThem();
+    return;
+  }
+
+  if (phase === 'idle' && youBat()) {
+    // YOUR club's running knob, not theirs — in watch mode the computer is
+    // managing your dugout, so it runs the way your club runs.
+    const mine = knob((YOU === 'home' ? game.home : game.away).identity, 'running');
+    if (aiShouldSend(game, fieldingAlignment(game), rng, mine)) steal();
+    // steal() can end the half, the game, or nothing at all — only deliver if
+    // it left us still waiting on a pitch.
+    if (phase === 'idle') deliver();
+    return;
+  }
+}
+
+// ------------------------------------------------------------------ input
+
+function press(key: string): void {
+  // Auto and speed are live in EVERY phase, the final screen included — the
+  // point of them is reaching for them without first getting back to a menu.
+  if (key === 't') {
+    auto = !auto;
+    autoSwingAt = null;
+    say(auto ? 'AUTO ON — the computer plays your half.' : 'AUTO OFF — you are back in.', 'half');
+    return;
+  }
+  if (key === 'f') {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    return;
+  }
+  // Live in every phase, same as the two above — this is the control a player
+  // reaches for at the exact moment he decides the window is wrong.
+  if (key === 'g') {
+    const at = LEVELS.findIndex((l) => l.key === settings.level);
+    const next = LEVELS[(at + 1) % LEVELS.length]!;
+    settings = { ...settings, level: next.key };
+    saveSettings(settings);
+    say(`${next.name} — ${next.blurb}`, 'half');
+    return;
+  }
+  // Same rule as the three above, and for a stronger reason than any of them:
+  // the moment a player decides the ball is coming too fast to read is the
+  // moment he is standing in the box, not the moment he is on a menu.
+  if (key === 'p') {
+    const at = PITCH_SPEEDS.findIndex((s) => s.value === settings.pitchSpeed);
+    // findIndex gives -1 for a hand-edited value that is not on the list, and
+    // -1 + 1 is 0, which is FULL — the right place for "off the menu" to land.
+    const next = PITCH_SPEEDS[(at + 1) % PITCH_SPEEDS.length]!;
+    settings = { ...settings, pitchSpeed: next.value };
+    saveSettings(settings);
+    say(`PITCH ${next.name} — ${next.blurb}`, 'half');
+    return;
+  }
+
+  // THE PAUSE. Between pitches only — pause() refuses anywhere else and says
+  // there why. ESC in any other phase is a key that does nothing, on purpose.
+  if (key === 'escape') {
+    pause();
+    return;
+  }
+
+  // ⚠️ THE KEYBOARD OUTLIVES THE GAME UNDERNEATH IT. #pre covers the canvas but
+  // this function stays live under every screen in the file, so SPACE on the
+  // pause screen would start a delivery nothing is stepping, and SPACE on a
+  // screen opened from the title would start one in a game that never kicked
+  // off. The four knobs above are the settings screen's own controls and stay
+  // live everywhere; everything below here wants a game that is running.
+  if (paused || !looping) return;
+
+  if (phase === 'over' && key === 'b') {
+    showBox();
+    return;
+  }
+  if (phase === 'over' && key === 'k' && season && seasonOver(season)) {
+    showCareer(() => render());
+    return;
+  }
+  if (phase === 'over') {
+    if (key === 'r') location.reload();
+    if (key === 'n' && season && !seasonOver(season)) nextGame();
+    return;
+  }
+
+  // COMING BACK FROM THE BREAK. The press that would have thrown the next pitch
+  // skips the card instead — so a player in a hurry loses nothing but the beat,
+  // and a player who was reading it does not find the pitch already gone.
+  //
+  // ⚠️ SPACE AND ENTER ONLY. Everything else falls through, because the break
+  // is exactly when a manager wants the pen and the bench keys.
+  if (breakCard && (key === ' ' || key === 'enter')) {
+    breakCard = null;
+    promoteMoment(performance.now());
+    return;
+  }
+
+  // ⚠️ THE THROW COMES FIRST, ABOVE EVERYTHING. The ball is in a fielder's hand
+  // and the game is standing still; no other control is live and none of them
+  // should be able to eat the one press that matters. Same reason the release
+  // sits above the 'calling' gate below.
+  if (phase === 'throw') {
+    if (key === ' ' || key === 'enter') releaseThrow();
+    return;
+  }
+
+  // Batting: space starts the pitch, then space is the swing.
+  if (youBat()) {
+    if (key === ' ') {
+      if (phase === 'idle') deliver();
+      else if (phase === 'windup') swing();
+    } else if (key === 's') steal();
+    else if (key === 'b') toggleBunt();
+    else if (key === 'h') pinchHitNow();
+    // The pen's two arrow keys, pointed at the bench while you are hitting —
+    // the pen panel is not on this half of the screen, so they are free.
+    else if (key === ',' || key === '.') {
+      const n = benchOf(game, YOU).length;
+      if (n > 0) {
+        benchPick = (benchPick + (key === '.' ? 1 : n - 1)) % n;
+        benchArmed = false;
+        render();
+      }
+    }
+    return;
+  }
+
+  // ⚠️ THE RELEASE COMES FIRST, ABOVE THE 'calling' GATE. Once the arm is
+  // going, the call is made and the only live control is letting go of it —
+  // a spot key that still moved the target mid-delivery would be aiming a ball
+  // that has already been decided.
+  if (phase === 'winding') {
+    if (key === ' ' || key === 'enter') release(performance.now());
+    return;
+  }
+
+  // Pitching: pick a pitch, pick a spot, throw it.
+  if (phase !== 'calling') return;
+  const arms = myArsenal();
+  const n = Number(key);
+  if (n >= 1 && n <= arms.length) {
+    callType = arms[n - 1]!;
+    render();
+    return;
+  }
+  // QWE / ASD / ZXC laid over the strike zone exactly as it is drawn, so the
+  // key you press is where the ball goes. This moved S from low to middle and
+  // X from middle to low — the grid decides that, not taste.
+  const spots: Record<string, PitchLocation> = {
+    q: 'high_inside', w: 'high',   e: 'high_outside',
+    a: 'inside',      s: 'middle', d: 'outside',
+    z: 'low_inside',  x: 'low',    c: 'low_outside',
+  };
+  if (spots[key]) {
+    callSpot = spots[key]!;
+    render();
+    return;
+  }
+  if (key === 'b') { relieve(); return; }
+  if (key === 'v') { cycleShift(); return; }
+  // Move the selection inside the pen. Two keys nothing else uses, next to
+  // each other, and only meaningful while you are the one on the mound.
+  if (key === ',') { cyclePen(-1); return; }
+  if (key === '.') { cyclePen(1); return; }
+  if (key === ' ' || key === 'enter') startDelivery();
+}
+
+addEventListener('keydown', (e) => {
+  // ⚠️ A BOX IS FOR TYPING IN. This listener preventDefaults every key it
+  // knows and it knows most of the alphabet, so with the league screen's
+  // textarea focused, typing `{"abbr":"OKC"}` put `{"":"O"}` in the box and
+  // squared the hitter to bunt on the way past. Paste still worked, which is
+  // exactly why it shipped: filling that box by hand is the one path nobody
+  // tried. Guarded here rather than in the league screen, because every future
+  // field on any screen has the same problem and deserves the same answer.
+  const into = e.target as HTMLElement | null;
+  // ⚠️ SELECT IS IN THIS LIST NOW. The club editor is the first screen in the
+  // game with a dropdown on it, and a focused <select> is driven with the arrow
+  // keys and the letter keys — the same letters this handler preventDefaults.
+  // Without it, typing "s" to jump to "slugger" squares the hitter to bunt.
+  if (
+    into &&
+    (into.tagName === 'TEXTAREA' ||
+      into.tagName === 'INPUT' ||
+      into.tagName === 'SELECT' ||
+      into.isContentEditable)
+  ) {
+    return;
+  }
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
+  // ⚠️ A HELD KEY IS ONE ACT, NOT THIRTY. The browser repeats keydown while a
+  // key is down, and SPACE is now the key that both STARTS a delivery and ends
+  // it — so a leaned-on spacebar started the arm and had the autorepeat let go
+  // of it 500ms later, which is a wild pitch nobody asked for. Only the two
+  // action keys are filtered: ',' and '.' walk a list, where repeating is the
+  // point, and every other key here is idempotent.
+  if (e.repeat && (k === ' ' || k === 'enter')) {
+    e.preventDefault();
+    return;
+  }
+  if (
+    // ⚠️ THIS LIST IS THE GATE, AND A KEY press() HANDLES BUT THIS DOES NOT
+    // LIST IS A DEAD KEY. The pen selector shipped broken for exactly that
+    // reason: press() knew ',' and '.' and the listener never forwarded them.
+    // ⚠️ 'v' WAS MISSING AND THE PANEL WAS ADVERTISING IT. renderControls()
+    // draws `DEFENCE <kbd>V</kbd>` and press() has handled 'v' since the shift
+    // shipped — this list never forwarded it, so the key printed on the screen
+    // did nothing at all. Exactly the dead key the note above describes, found
+    // the only way it ever is: by somebody pressing it. 'p' is the pitch speed.
+    // 'escape' is the pause, forwarded here for exactly the reason above it.
+    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', ',', '.', 'escape'].includes(k) ||
+    /^[1-9]$/.test(k)
+  ) {
+    e.preventDefault();
+    press(k === 'enter' ? 'enter' : k);
+  }
+});
+
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  press(' ');
+});
+
+// --------------------------------------------------------------- the d-pad
+
+/**
+ * THE D-PAD — arrows walk a cursor over a screen, ENTER presses what it is on.
+ *
+ * ⚠️ ONE IMPLEMENTATION, THREE SCREENS. The title screen, the pre-game card
+ * and the calendar all want the same thing, and the only hard part of it — the
+ * direction math — is the part that would be copied. Written three times it
+ * would be wrong in three different ways the first time a grid reflowed.
+ *
+ * ⚠️ IT CAPTURES, AND THAT IS THE POINT. The game's own keydown handler is on
+ * the window and A BALL GAME IS LIVE UNDERNEATH EVERY ONE OF THESE OVERLAYS —
+ * SPACE on the title screen was throwing a pitch nobody could see, and G was
+ * cycling the difficulty behind a dial that went on showing the old value. A
+ * capture listener runs before the one on the window: the screen in front owns
+ * the keyboard, which is what being in front means.
+ *
+ * ⚠️ `swallow` IS WHY THAT IS A SETTING AND NOT A RULE. The title screen owns
+ * the WHOLE keyboard — nothing underneath it has any business hearing a key.
+ * The card and the calendar own only the keys the d-pad actually uses, since
+ * both of them still run hotkeys of their own on the bubble (C and L off the
+ * card, ESC out of the calendar) and stopping every key would take those with
+ * it.
+ *
+ * ⚠️ NO CURSOR STATE IN HERE. `document.activeElement` already is one and the
+ * browser moves it for free. Every one of these screens redraws itself by
+ * replacing its own innerHTML, so an index held in this closure would point at
+ * a button that no longer exists.
+ */
+const CURSOR_STOPS = 'button:not(:disabled), [tabindex="0"]';
+
+function installDpad(root: HTMLElement, opts: { swallow: 'all' | 'handled' }): () => void {
+  /** Everything the cursor may sit on, in document order. */
+  const stops = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(CURSOR_STOPS)];
+
+  /**
+   * The nearest stop in a direction, measured off where things are DRAWN
+   * rather than off their order in the document. A grid wraps at whatever
+   * width the window is, so DOM order does not know that the club under this
+   * one is five along; the rectangles do.
+   */
+  const nextIn = (from: HTMLElement, dx: number, dy: number): HTMLElement | undefined => {
+    const a = from.getBoundingClientRect();
+    return stops()
+      .filter((b) => b !== from)
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        const ox = r.left + r.width / 2 - (a.left + a.width / 2);
+        const oy = r.top + r.height / 2 - (a.top + a.height / 2);
+        // How far along the way you asked, and how far off that line it sits.
+        // Off-axis is weighted double so DOWN prefers the cell underneath to
+        // one four columns over on the same row.
+        const along = dx ? ox * dx : oy * dy;
+        return { b, along, score: along + (dx ? Math.abs(oy) : Math.abs(ox)) * 2 };
+      })
+      .filter((c) => c.along > 4)
+      .sort((x, y) => x.score - y.score)[0]?.b;
+  };
+
+  /**
+   * A POINTER MOVES THE CURSOR RATHER THAN LIGHTING A SECOND ONE.
+   *
+   * The cursor is drawn on :focus, so a mouse resting on a card that was not
+   * the focused one would otherwise put two of them on screen — and a console
+   * menu has exactly one. Moving the focus also means a click and the thing
+   * ENTER would press can never be two different buttons.
+   */
+  const onOver = (e: Event): void => {
+    (e.target as HTMLElement).closest<HTMLElement>(CURSOR_STOPS)?.focus({ preventScroll: true });
+  };
+
+  const onKey = (e: KeyboardEvent): void => {
+    // Gone, or hidden behind something else. #start is removed outright when a
+    // game starts; #pre is a permanent element that gets emptied and hidden.
+    if (!root.isConnected || root.style.display === 'none') return;
+    // ⚠️ AND COVERED COUNTS AS HIDDEN. #pre opens OVER #start and leaves it
+    // connected and displayed, so the title screen's cursor went on eating
+    // SPACE and ENTER for every screen opened off it — stopPropagation() above
+    // reaches the window handler those screens leave their BACK key on. The
+    // record book has advertised `BACK SPACE` from the title card since the day
+    // it shipped and that key has never once worked. #pre is the only thing
+    // that can be in front of anything, and when it is, it owns the keyboard.
+    const front = document.getElementById('pre');
+    if (front && front !== root && front.style.display !== 'none') return;
+    const on = document.activeElement as HTMLElement | null;
+    // A box is a place to type. Leave it — including its arrows.
+    if (on?.tagName === 'TEXTAREA' || on?.tagName === 'INPUT') return;
+
+    const dirs: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+    };
+    const dir = dirs[e.key];
+    const fire = e.key === 'Enter' || e.key === ' ';
+    if (opts.swallow === 'all' || dir || fire) e.stopPropagation();
+
+    const here = on && root.contains(on) && on.matches(CURSOR_STOPS) ? on : null;
+
+    if (dir) {
+      e.preventDefault();
+      // ⚠️ A DIAL IS TURNED, NOT WALKED ACROSS. Its two arrows ARE left and
+      // right, so a cursor sitting on one and pressing the other way would move
+      // between the ends of the same control rather than change it. The redraw
+      // replaces every dial, so the focus is put back by POSITION in the list —
+      // the same reason drawRules() finds its index rather than remembering it.
+      const dial = dir[1] === 0 ? here?.closest('.dial') : null;
+      if (dial) {
+        const which = dir[0] < 0 ? 0 : 1;
+        const at = [...root.querySelectorAll('.dial')].indexOf(dial);
+        dial.querySelectorAll<HTMLButtonElement>('.arrow')[which]?.click();
+        root.querySelectorAll('.dial')[at]?.querySelectorAll<HTMLElement>('.arrow')[which]?.focus();
+        return;
+      }
+      (here ? (nextIn(here, dir[0], dir[1]) ?? here) : stops()[0])?.focus();
+      return;
+    }
+
+    if (fire) {
+      // Nothing under the cursor yet: put it on the screen rather than pressing
+      // something the player cannot see.
+      if (!here) {
+        e.preventDefault();
+        stops()[0]?.focus();
+        return;
+      }
+      // ⚠️ A BUTTON IS PRESSED BY THE BROWSER ITSELF and a row is not — a div
+      // carrying a tabindex has no default action on ENTER. Clicking it here is
+      // what makes the two kinds of stop behave like one control.
+      if (here.tagName !== 'BUTTON') {
+        e.preventDefault();
+        here.click();
+      }
+    }
+  };
+
+  root.addEventListener('pointerover', onOver);
+  addEventListener('keydown', onKey, true);
+  return (): void => {
+    root.removeEventListener('pointerover', onOver);
+    removeEventListener('keydown', onKey, true);
+  };
+}
+
+/**
+ * The d-pad currently listening on #pre, if any.
+ *
+ * ⚠️ ONE SCREEN LIVES IN #pre AT A TIME, so one d-pad may listen on it at a
+ * time. The card redraws itself by re-entering showPregame(), and every door
+ * off it opens another screen into the same element — without a single slot to
+ * put the teardown in, each redraw would leave another capture listener behind,
+ * and the stack of them would go on swallowing arrows on screens that never
+ * asked for a cursor.
+ */
+let preDpad: (() => void) | null = null;
+
+/** Put the cursor on a screen in #pre. `start` is where it lands. */
+function dpadOnPre(start?: HTMLElement | null): void {
+  const el = document.getElementById('pre');
+  dpadOffPre();
+  if (!el) return;
+  preDpad = installDpad(el, { swallow: 'handled' });
+  // preventScroll: the card puts itself back to the top on arrival, and a
+  // cursor landing on a button below the fold must not undo that.
+  (start ?? el.querySelector<HTMLElement>(CURSOR_STOPS))?.focus({ preventScroll: true });
+}
+
+/** Take it off again. Every screen that takes #pre over calls this. */
+function dpadOffPre(): void {
+  preDpad?.();
+  preDpad = null;
+}
+
+// ----------------------------------------------------------------- render
+
+/**
+ * The overhead camera, sized to whatever the canvas is. Home near the bottom,
+ * the wall arc near the top — the at-bat view is painted over completely while
+ * it is up, which is what makes the cut read as a cut.
+ */
+// ⚠️ ONE SCALE FOR EVERY PARK — see makeCam(). Fitted to the deepest fence in
+// the league so a bandbox draws small and The Void draws enormous.
+const OH_CAM = makeCam(canvas.width, canvas.height, undefined, DEEPEST_REACH_FT);
+/** The two field colours, matched to game.html's palette. */
+const OH_PALETTE = { field: '#1d2b1f', dirt: '#3a2e20' };
+
+/**
+ * The replay's clock, sped up with everything else. Scaling the CLOCK rather
+ * than the constants means the sound cues, the fielders' legs and the throw all
+ * stay in step at 8x, because they are all read off this one number.
+ */
+const replayNow = (now: number): number =>
+  replay ? replay.startedAt + (now - replay.startedAt) * speed() : now;
+
+/**
+ * `__play('triple')` in the console — see any play without waiting for the RNG
+ * to hand you one. Dev only: Vite folds import.meta.env.DEV to false and drops
+ * the branch, so there is no hook to find in the exported file.
+ *
+ * ponytail: tuning an animation you can only see once every twenty at-bats is
+ * how animations end up untuned. Two lines, not a debug menu.
+ */
+if (import.meta.env.DEV) {
+  // ⚠️ READ-ONLY, AND IT EARNED ITS LINE. A caption that fails to appear looks
+  // identical to one that was never built, and the whole reason sceneForTake()
+  // exists is that nobody noticed the second case for months. This says which.
+  (window as unknown as Record<string, unknown>)['__scene'] = () => ({
+    title: scene?.title ?? null,
+    tier: scene?.tier ?? null,
+    age: performance.now() - sceneAt,
+    sceneMs,
+    hasReplay: !!replay,
+    phase,
+  });
+  /**
+   * THE THROW BAR, on demand — the one piece of UI in this game that only
+   * appears on a double-play ball while you are on the mound, which is once or
+   * twice a game and never when you are looking for it.
+   *
+   * ⚠️ IT GOES THROUGH THE REAL PATH. It builds a genuine pendingPlay from the
+   * live game and hands it to the same phase the ball does, so pressing SPACE
+   * runs completePlay() for real — the replay, the scorer's line and the base
+   * state all follow. A hook that only drew the bar would prove the one thing
+   * that was never in doubt.
+   */
+  /** A stolen base, drawn. `to` is 1 for second and 2 for third. */
+  (window as unknown as Record<string, unknown>)['__steal'] = (to = 1, safe = false) => {
+    showSteal(to, safe, 1.1);
+    return { lengthMs: replayLength(replay!) };
+  };
+
+  (window as unknown as Record<string, unknown>)['__throw'] = () => {
+    const align = fieldingAlignment(game);
+    const shift = shiftNow();
+    const placed = withPlacement(
+      { kind: 'in_play', hit: { outcome: 'ground_out', isHit: false, isOut: true,
+        exitVelocity: 88, launchAngle: 4, direction: -20 } as never },
+      { reachAt: reachOf(align), park: game.home.park, shift },
+    );
+    pendingPlay = { align, shift, placed, batter: currentBatter(game) };
+    throwAt = performance.now();
+    thrownAt = null;
+    throwGrade = null;
+    phase = 'throw';
+    return { sweepMs: THROW_SWEEP_MS, targetAt: THROW_AT_MS };
+  };
+
+  (window as unknown as Record<string, unknown>)['__play'] = (
+    outcome: Outcome = 'double',
+    exitVelocity = 95,
+    launchAngle = 22,
+    direction = -18,
+    extra: Partial<Parameters<typeof newReplay>[0]> = {},
+  ) => {
+    replay = newReplay({
+      now: performance.now(),
+      outcome,
+      exitVelocity,
+      launchAngle,
+      direction,
+      speed: 1,
+      safe: !outcome.includes('out'),
+      // The debug hook draws the park the game is actually in, or the field
+      // under the ball would not be the one it was plotted against.
+      wallFt: wallAt(direction, game.home.park),
+      ...extra,
+    });
+    // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.
+    // Frame-level tuning of a scene is the whole reason to be able to freeze
+    // one, and a replay with no words over it is what the feature looked like
+    // before scene.ts. `runs` and the situation are taken from the live game,
+    // so a hook fired in the ninth of a tied game gets the ninth's treatment.
+    scene = sceneFor({
+      outcome,
+      placement: place(
+        { outcome, exitVelocity, launchAngle, direction } as never,
+        game.home.park,
+      ),
+      verdict: null,
+      runs: (extra as { runs?: number }).runs ?? (outcome === 'home_run' ? 1 : 0),
+      // The hook has to be able to show a force play, or the one caption that
+      // needs frame-level tuning is the one it cannot put on the screen.
+      forceAt: extra.forceAt,
+      //
+      // ⚠️ AND THE SAME NOW GOES FOR THE FOUR MULTI-OUT PLAYS. `doublePlay` was
+      // hardcoded false here, so the hook could draw the relay and then put
+      // GROUND OUT over it — the exact failure the note above describes, in the
+      // tool built to catch it. A triple play happens once every 190 games and
+      // a throw home on a sacrifice fly is rarer than that; neither is a thing
+      // anybody can wait for while tuning the frame it lands on.
+      error: !!extra.error,
+      doublePlay: !!extra.doublePlay,
+      triplePlay: !!(extra as { triplePlay?: boolean }).triplePlay,
+      doubledOff: !!extra.doubledOff,
+      sacFly: !!(extra as { sacFly?: boolean }).sacFly,
+      thrownOutAt: extra.thrownOut?.at,
+      exitVelocity,
+      before: situationOf(game, battingSide(game)),
+      gameOver: false,
+      walkOff: false,
+    });
+    return outcome;
+  };
+  // The high-leverage card, on demand. It normally fires off a situation the
+  // game has to reach, which is not a thing you can wait for while tuning the
+  // twelve pixels the band is off by.
+  (window as unknown as Record<string, unknown>)['__moment'] = (
+    line = momentLine({ ...situationOf(game, battingSide(game)), inning: 9, us: 3, them: 4 }) ??
+      '9TH · TWO DOWN · TYING RUN IN SCORING POSITION',
+  ) => {
+    momentText = line;
+    momentFrom = performance.now();
+    return line;
+  };
+  /**
+   * `__swingGhosts()` in the console — every bat pose at once, frozen over the
+   * live batter.
+   *
+   * ⚠️ THE SWING IS 340ms AND ONLY HAPPENS WHEN YOU SWING, which is not
+   * enough to judge a shape by, and judging the shape is the entire job. The
+   * roguelike has had this hook for months and it is the reason its arc got
+   * tuned at all; this view drew a fixed stick for months and nobody could see
+   * that either. Same two lines, same argument.
+   */
+  (window as unknown as Record<string, unknown>)['__swingGhosts'] = (on = true) => {
+    swingGhosts = !!on;
+    return swingGhosts;
+  };
+  // Step the play to an exact millisecond and hand back the frame. Frame-level
+  // tuning without having to catch a two-second animation live.
+  (window as unknown as Record<string, unknown>)['__frame'] = (ms: number) => {
+    const now = performance.now();
+    if (replay) replay.startedAt = now - ms;
+    drawField(now);
+    return canvas.toDataURL('image/png');
+  };
+}
+
+/** Dev only: freeze every bat pose over the batter. See `__swingGhosts`. */
+let swingGhosts = false;
+
+const PLATE_Y = 250;
+// The plate's centre line. swing.ts measures the whole swing from it, so it is
+// a name now rather than a 210 repeated down the file.
+const PLATE_X = 210;
+const ZONE = { x: 160, y: 118, w: 100, h: 108 };
+
+/**
+ * WHERE THE PEOPLE STAND — 2026-09-15, and until this there were none.
+ *
+ * ⚠️ THIS IS THE DEFECT A PLAYED SEASON FOUND, and it was not a bug anywhere in
+ * the engine. drawField() drew a zone, a plate, a base widget, a ball and a
+ * bar, and nothing else: a correct game of baseball with nobody in it. Every
+ * line of the 09-12 playtest file — "does not play like baseball", "scripted,
+ * not fluid", "takes away immersion" — is that, and the engine was right all
+ * along. The picture had gone to the roguelike, which has had a batter, a
+ * sprite layer and a real swing arc for a month.
+ *
+ * ⚠️ EVERY FIGURE IS ASSEMBLED FROM `look.ts` RATHER THAN DRAWN. Building them
+ * as one drawing and retrofitting customization later costs the same today and
+ * loses the seam, so the batter you can see and the batter you can edit arrived
+ * in one commit on purpose.
+ *
+ * Geometry on the 420x340 canvas, which is tight and mostly decided for us:
+ * the zone owns x 160-260, the bar owns y 296+ out to x 276, and the base
+ * widget owns the bottom right from x 315. What is left is a column either side
+ * of the plate and the mound above it.
+ */
+const BATTER_H = 96;
+/** Clear of the zone's left edge at 160, so he never stands in the strike zone. */
+const BATTER_X = 134;
+const BATTER_Y = PLATE_Y + 14;
+/**
+ * ⚠️ 42 PUT HIM UNDER EVERY DETAIL THRESHOLD HE OWNS. At that height his head
+ * radius was 4.8px — below the face gate, so the one man you look at for the
+ * whole pitch had no face — and his crest was a sub-pixel smear, so a machine
+ * arm's antenna and a human's cap were the same grey nub. He read as a blob.
+ *
+ * 58 clears the face gate and leaves the crest something to be, while his chest
+ * stays under drawFigure's number gate — two digits across a seventeen-pixel
+ * chest is noise that looks like a glyph bug, and that judgement has not
+ * changed. It is also still a little over half the batter's 96, which is the
+ * perspective a man sixty feet away has to keep.
+ */
+const ARM_XY = { x: 210, y: 78, h: 58 };
+/**
+ * ⚠️ THE CATCHER IS TUCKED INTO A 26-PIXEL GAP, and that is the whole of what
+ * this canvas has left. The plate's point reaches y 270 and the delivery bar
+ * starts at y 296, so a foreground catcher — which is how this camera angle is
+ * framed everywhere else in baseball — has nowhere to be. The first cut put him
+ * at h 52 and he stood on top of home plate.
+ *
+ * So he is a head and a pair of shoulders, cropped by the frame the way the
+ * nearest thing to a camera is. ponytail: the honest ceiling is that this view
+ * is 420x340 and carries two instruments across its bottom edge. A real
+ * foreground catcher needs the bar moved or the canvas grown, and both are
+ * bigger decisions than a catcher.
+ */
+const CATCHER_XY = { x: 210, y: 296, h: 30 };
+
+function drawField(now: number): void {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Backstop dirt and the mound sightline.
+  ctx.fillStyle = '#101a12';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#16211a';
+  ctx.beginPath();
+  ctx.ellipse(210, 60, 92, 34, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Strike zone.
+  ctx.strokeStyle = '#3d4a38';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ZONE.x, ZONE.y, ZONE.w, ZONE.h);
+  ctx.strokeStyle = '#222c20';
+  for (let i = 1; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(ZONE.x + (ZONE.w / 3) * i, ZONE.y);
+    ctx.lineTo(ZONE.x + (ZONE.w / 3) * i, ZONE.y + ZONE.h);
+    ctx.moveTo(ZONE.x, ZONE.y + (ZONE.h / 3) * i);
+    ctx.lineTo(ZONE.x + ZONE.w, ZONE.y + (ZONE.h / 3) * i);
+    ctx.stroke();
+  }
+
+  // THE MAN ON THE MOUND. Before the plate and before the ball, because he is
+  // the furthest thing away and the pitch has to come out over him.
+  drawArm(now);
+
+  // Home plate.
+  ctx.fillStyle = '#cfd6c4';
+  ctx.beginPath();
+  ctx.moveTo(180, PLATE_Y);
+  ctx.lineTo(240, PLATE_Y);
+  ctx.lineTo(240, PLATE_Y + 10);
+  ctx.lineTo(210, PLATE_Y + 20);
+  ctx.lineTo(180, PLATE_Y + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // The hitter and the man behind him, over the plate and under the ball.
+  drawHitter(now);
+
+  drawBases();
+
+  if (phase === 'windup' && pitch) drawBall(now);
+  // The call stays on the zone through the delivery. It is locked once the arm
+  // starts, and taking the reticle away at the exact moment you are watching
+  // the bar would hide what you are throwing at from the pitch you are throwing.
+  if (phase === 'calling' || phase === 'winding') drawCall();
+  // Your half only: there is no delivery to draw while you are the hitter.
+  // ⚠️ THE THROW TAKES THE BAR OVER, in the same rectangle and for the same
+  // reason the swing does on the other half: both halves of this game are one
+  // press timed against one window, and putting every instrument in one place
+  // is the cheapest way to say so. The two are never up together — the
+  // delivery bar belongs to a pitch and this belongs to a ball already hit.
+  if (phase === 'throw') drawThrowBar(now);
+  else if (!youBat() && !game.over) drawDelivery(now);
+  // The hitter's half of the same instrument, and it stands where the mound's
+  // bar stands on the other half — the bottom of the frame, under the plate.
+  if (youBat() && !game.over) drawSwingBar();
+  drawFlash(now);
+
+  // Last, and opaque: the cut to the field covers the at-bat view rather than
+  // replacing it, so neither view has to know the other exists.
+  if (replay) {
+    const rn = replayNow(now);
+    const oh = overheadAlpha(replay, rn);
+    if (oh > 0) {
+      ctx.globalAlpha = oh;
+      drawOverhead(ctx, OH_CAM, replay, rn, {
+        ...OH_PALETTE,
+        wall: (d) => wallAt(d, game.home.park),
+        figure: overheadFigure,
+      });
+      // The caption rides the same alpha as the picture under it, so the two
+      // cut in and out as one thing rather than the words outliving the field.
+      if (scene) drawScene(scene, rn - replay.startedAt, replayLength(replay));
+      ctx.globalAlpha = 1;
+    }
+  } else if (scene) {
+    // A caption with no ball under it — the strikeout and the walk. It runs on
+    // its own clock rather than the replay's; see showScene().
+    //
+    // ⚠️ THE `total` IS THE CAPTION'S OWN LENGTH, NOT sceneMs, and the two are
+    // deliberately different numbers. drawScene anchors to the END of what it
+    // is given so a caption lands after the ball has finished; with nothing to
+    // wait for, handing it its own length puts the anchor at zero and the words
+    // come up immediately. sceneMs is how long they then STAY.
+    drawScene(scene, now - sceneAt, CAPTION_MS + scene.hold);
+  }
+  drawBreak(now);
+  drawMoment(now);
+}
+
+/**
+ * THE BREAK CARD — the one card in the game that HOLDS.
+ *
+ * ⚠️ EVERY OTHER CARD HERE IS DELIBERATELY NON-BLOCKING and this one is not,
+ * because stopping is the entire feature: a break you could pitch through is
+ * the innings running together again with a picture over them. It is still not
+ * a prompt — it runs out on its own in BREAK_MS, speed-scaled like every other
+ * beat, and one press skips it. Nobody ever has to press anything.
+ */
+function drawBreak(now: number): void {
+  const b = breakCard;
+  if (!b) return;
+  const t = now - breakFrom;
+  // ⚠️ THE FADES SCALE WITH THE CARD, and fixed 200/400ms was the first cut and
+  // invisible: at 8x the card is only 300ms long, so a 200ms ramp in and a
+  // 400ms ramp out never let the alpha off the floor and the whole thing played
+  // as a faint flicker. Caught by driving it, not by the suite.
+  const len = breakLen();
+  const a = Math.min(1, t / (len / 12)) * Math.min(1, (len - t) / (len / 6));
+
+  const h = 104;
+  const y = Math.round(canvas.height / 2 - h / 2);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, a);
+  // Darker than the moment card: the field behind it is between innings and
+  // there is nothing on it worth seeing through the words.
+  ctx.fillStyle = 'rgba(9,13,11,0.92)';
+  ctx.fillRect(0, y, canvas.width, h);
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillRect(0, y, canvas.width, 2);
+  ctx.fillRect(0, y + h - 2, canvas.width, 2);
+
+  ctx.textAlign = 'center';
+  const cx = canvas.width / 2;
+  ctx.fillStyle = '#d8b44a';
+  ctx.font = '13px ui-monospace, monospace';
+  ctx.fillText(b.label, cx, y + 28);
+  // The score is the big thing on the card. It is what the break is for.
+  ctx.fillStyle = '#e8e8d8';
+  ctx.font = '26px ui-monospace, monospace';
+  ctx.fillText(b.score, cx, y + 62);
+  ctx.fillStyle = '#9aa896';
+  ctx.font = '11px ui-monospace, monospace';
+  ctx.fillText(b.note, cx, y + 86);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+/**
+ * THE CAPTION OVER THE REPLAY — the whole reward half of a scene.
+ *
+ * ⚠️ IT IS TIMED OFF THE END OF THE REPLAY, NOT OFF THE START, and a fixed
+ * delay was the first cut and wrong. The caption is a lower third: it covers
+ * the bottom of the frame, which is where home plate, the catcher and the race
+ * to first all are. Coming up half a second after the cut put it over a
+ * groundout while the runner was still running — the play hidden behind the
+ * words describing it. Anchored to the end instead, it appears once the ball
+ * has finished doing whatever it was going to do, on every kind of play,
+ * without anything having to know which kind this was.
+ *
+ * ⚠️ AND THE WINDOW GROWS WITH THE BEAT THE PLAY EARNED, which is what the
+ * extra hold in scene.ts is FOR. A routine out gets its word for nine hundred
+ * milliseconds; a grand slam gets its two lines for two full seconds, because
+ * that is the time the tier bought.
+ */
+function drawScene(s: Scene, t: number, total: number): void {
+  const from = total - (CAPTION_MS + s.hold);
+  const inK = Math.max(0, Math.min(1, (t - from) / 180));
+  if (inK <= 0) return;
+  const big = s.tier === 'big' || s.tier === 'huge';
+  const y = canvas.height - (s.detail ? 54 : 40);
+
+  ctx.save();
+  ctx.globalAlpha *= inK;
+  ctx.fillStyle = 'rgba(9,13,11,0.82)';
+  ctx.fillRect(0, y - 24, canvas.width, s.detail ? 62 : 44);
+  // A rule in the tier's colour, so the size of the moment reads before the
+  // words do — the same trick the pre-game card plays with the rank label.
+  ctx.fillStyle = TIER_COLOUR[s.tier];
+  ctx.fillRect(0, y - 24, canvas.width, 2);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = TIER_COLOUR[s.tier];
+  ctx.font = `${big ? 22 : 16}px ui-monospace, monospace`;
+  ctx.fillText(s.title, canvas.width / 2, y);
+  if (s.detail) {
+    ctx.fillStyle = '#9aa896';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText(s.detail, canvas.width / 2, y + 20);
+  }
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+/**
+ * How long the caption is up on an ordinary play. A big one adds the beat its
+ * tier bought on top of this — see drawScene().
+ */
+const CAPTION_MS = 900;
+
+/**
+ * THE HIGH-LEVERAGE CARD — the moment getting its own scene rather than
+ * borrowing the replay's.
+ *
+ * ⚠️ IT DOES NOT BLOCK. The player can throw the next pitch straight through
+ * it, and at 8x it is gone before they could have read it anyway. A card that
+ * had to be dismissed would turn the tensest half-inning in the game into the
+ * one with the most button presses in it.
+ */
+/**
+ * Put the queued moment card up, if there is one. Called from the one place in
+ * the frame loop that knows the screen is free — see the note there.
+ */
+function promoteMoment(now: number): void {
+  if (!momentPending) return;
+  momentText = momentPending;
+  momentFrom = now;
+  momentPending = null;
+}
+
+function drawMoment(now: number): void {
+  if (!momentText) return;
+  const t = now - momentFrom;
+  if (t > MOMENT_MS) {
+    momentText = null;
+    return;
+  }
+  // Up fast, held, then out — the fade is only on the tail.
+  const a = Math.min(1, t / 140) * Math.min(1, (MOMENT_MS - t) / 420);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(9,13,11,0.86)';
+  ctx.fillRect(0, 96, canvas.width, 46);
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillRect(0, 96, canvas.width, 2);
+  ctx.fillRect(0, 140, canvas.width, 2);
+  ctx.textAlign = 'center';
+  ctx.font = '13px ui-monospace, monospace';
+  ctx.fillText(momentText, canvas.width / 2, 124);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+/** Where the pitch crosses, given its nominal location. */
+function spotXY(location: PitchLocation, inZone: boolean): [number, number] {
+  const cx = ZONE.x + ZONE.w / 2;
+  const cy = ZONE.y + ZONE.h / 2;
+  const off = inZone ? 0.22 : 0.78;
+  const { dx, dy } = locationOffset(location);
+  return [cx + dx * ZONE.w * off, cy + dy * ZONE.h * off];
+}
+
+/**
+ * THE PITCHER, and the catcher's opposite number in the fiction: both of them
+ * wear the FIELDING club's kit, so your half and their half look different from
+ * each other without anybody being told which is which.
+ *
+ * ⚠️ HIS BUILD COMES FROM HIS CLUB, not from himself. `Pitcher` carries no
+ * `build` — see lookForArm() — so an Albany arm is a holdout and a Detroit arm
+ * is a machine because of who he plays for. It is a hole in the data and the
+ * editor closes it.
+ */
+function drawArm(now: number): void {
+  if (game.over) return;
+  const club = clubInGame(game, fieldingSide(game));
+  const arm = currentPitcher(game);
+  const kit = uniformFor(club);
+
+  // ⚠️ OFF THE CLOCK, NOT OFF THE PHASE, and that is what kills the snap.
+  // This read `if (phase === 'winding')` and turned him back to square the
+  // instant the ball left, so the recovery never existed: he popped upright in
+  // one frame, every pitch. `deliveryAt` keeps running after release, and
+  // armPoseAt() parks him at rest once the recovery is done — which is the
+  // same pose the set is, so the pitch before last cannot leave him crooked.
+  const pose = armPoseAt(now - deliveryAt, deliveryOf(deliveryPitch));
+
+  drawFigure(ctx, {
+    look: lookForArm(arm, club),
+    uniform: kit,
+    // ⚠️ armBuild(), NOT clubBuild(). He has his own build now, and the look
+    // above is indexed against it — see armBuild().
+    build: armBuild(arm, club),
+    x: ARM_XY.x,
+    y: ARM_XY.y,
+    h: ARM_XY.h,
+    stance: 'pitch',
+    turn: pose.turn,
+    armBack: pose.armBack,
+    armFront: pose.armFront,
+    legFront: pose.legFront,
+    legBack: pose.legBack,
+  });
+}
+
+/**
+ * THE MAN AT THE PLATE, and the man crouched behind him.
+ *
+ * ⚠️ THE BODY TURNS OFF THE SAME POSE TABLE THE BAT DOES. `poseAt()` is
+ * swing.ts's, it is what the roguelike's batter has always used, and reusing it
+ * means the body cannot drift out of step with the barrel — there is one swing
+ * in this codebase and now two things read it.
+ *
+ * ⚠️ A LEFT-HANDER IS THE SAME MAN, MIRRORED, standing on the other side. Two
+ * fields, no second figure, and nothing to keep in step.
+ */
+function drawHitter(now: number): void {
+  if (game.over) return;
+  const batting = clubInGame(game, battingSide(game));
+  const fielding = clubInGame(game, fieldingSide(game));
+  const man = currentBatter(game);
+
+  // The catcher is scenery and has no record anywhere in the engine, so he is
+  // rolled off his club's abbr and wears its kit. ponytail: a nameless man in
+  // the right colours beats inventing a catcher entity nothing else would read.
+  //
+  // ⚠️ lookForExtra(), NOT A SPREAD OF THE PITCHER. That spread used to be
+  // harmless and stopped being the moment an arm could carry a stored look —
+  // it put the pitcher's chosen face on his own catcher. See lookForExtra().
+  const since = swingStartedAt === null ? -1 : now - swingStartedAt;
+  const swinging = isSwinging(since, swingTravel);
+  const pose = swinging ? poseAt(since, swingTravel) : REST_POSE;
+  const lefty = man.bats === 'L';
+
+  /**
+   * ⚠️ ONE SINE, TWO MEN, NO SYSTEM. Between pitches this screen drew two
+   * statues: `REST_POSE` and a crouch, held perfectly still for however long
+   * you took to pick a pitch, which reads as a paused game rather than as two
+   * men waiting. A slow breath is the cheapest thing that says the game is
+   * still running.
+   *
+   * ⚠️ IT STOPS DEAD DURING THE SWING. The pose table owns the batter's body
+   * for those 340ms and a bob added under it would be decoration moving graded
+   * geometry — the one thing that is not allowed to happen.
+   *
+   * ponytail: the batter breathes through his LEGS, not his chest. His hands
+   * hold a bat that is drawn in plate coordinates, so rocking his torso would
+   * slide the body out from under the barrel; legs hinge at the hip and move
+   * his feet instead, which is what a hitter waiting actually does.
+   */
+  const breath = swinging ? 0 : Math.sin(now / 900);
+
+  drawFigure(ctx, {
+    look: lookForExtra(`${fielding.abbr}-catcher`, fielding),
+    uniform: uniformFor(fielding),
+    build: clubBuild(fielding),
+    x: CATCHER_XY.x,
+    // Under a pixel either way. A catcher who bobs any harder is a catcher
+    // rocking on his heels, and he has 26 pixels of band to live in.
+    y: CATCHER_XY.y + breath * 0.9,
+    h: CATCHER_XY.h,
+    stance: 'crouch',
+  });
+
+  drawFigure(ctx, {
+    look: lookFor(man),
+    uniform: uniformFor(batting),
+    build: man.build,
+    // Mirrored about the plate, so he stands on the other side of it and faces
+    // back in. 2 * PLATE_X is the plate's own centre line.
+    x: lefty ? 2 * PLATE_X - BATTER_X : BATTER_X,
+    y: BATTER_Y,
+    h: BATTER_H,
+    stance: 'bat',
+    turn: lefty ? -pose.turn : pose.turn,
+    flip: lefty,
+    legFront: breath * 0.05,
+    legBack: breath * -0.05,
+  });
+
+  // ⚠️ THE BAT IS DRAWN HERE, OVER HIM, AND OFF THE POSE THE ENGINE GRADES.
+  // Until 09-19 this view read ONE of BatPose's six fields — `turn`, for the
+  // body above — and drew the bat as a fixed stick inside drawFigure(), so the
+  // authored arc (LOAD → COIL → CONTACT → THROUGH → FINISH, 167px of level
+  // travel through the zone) existed, was tested, and had never once rendered
+  // in Basedball. `scale` is not passed: 1:1 is the only mapping that cannot
+  // move the barrel off the graded pose.
+  //
+  // ponytail: the barrel lands where the pose puts it, not on this pitch's
+  // crossing point — same stance the roguelike takes. Aiming the bat is a
+  // different game; this one only has to make the timing legible.
+  const anchor = { x: PLATE_X, y: PLATE_Y, flip: lefty };
+  if (import.meta.env.DEV && swingGhosts) {
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    for (const ghost of BAT_POSES) drawBat(ctx, ghost, anchor);
+    ctx.restore();
+  }
+  drawBat(ctx, pose, anchor);
+}
+
+/**
+ * THE NINE, AND THE MEN RUNNING ON THEM, in the overhead replay.
+ *
+ * ⚠️ THIS IS THE HALF OF THE PICTURE overhead.ts CANNOT HAVE. That file is
+ * choreography — where the nine move and when — and this file owns the league,
+ * so it imports overhead.ts and not the other way round. The kit, the part sets
+ * and the look roll therefore have to be handed DOWN to it; see
+ * OverheadOpts.figure. The result is that the replay stops being nine identical
+ * grey dots and becomes the fielding club in its own colours with the batting
+ * club running the bases, which is the thing a dot could never say.
+ *
+ * ⚠️ THE MAN ON THE MOUND IS NOT ONE OF THE MEN WITHOUT A RECORD — not since
+ * 09-17. `FILL_ORDER` in defense.ts never fills `'P'`, so the pitcher reaches
+ * here with no `man` and used to be rolled off a made-up name like every other
+ * anonymous figure. He has his own face now, chosen in the editor, and drawing
+ * him as scenery would mean the man you just watched deliver the pitch turns
+ * into somebody else the instant the camera cuts to the field. Seed `F1` on the
+ * fielding side IS the pitcher; see overhead.ts, which numbers the nine.
+ *
+ * ⚠️ EVERY OTHER MAN WITHOUT A RECORD IS STILL ROLLED OFF A SEED — the
+ * baserunners, who reach this file as bag numbers. They go through
+ * lookForExtra(), which spreads no record and so cannot leak one man's chosen
+ * face onto another's.
+ */
+const overheadFigure: FigureFn = (c, o) => {
+  const club = clubInGame(game, o.side === 'fielding' ? fieldingSide(game) : battingSide(game));
+  const onMound = o.side === 'fielding' && !o.man && o.seed === 'F1';
+  const arm = onMound ? currentPitcher(game) : null;
+  drawFigure(c, {
+    look: o.man
+      ? lookFor(o.man)
+      : arm
+        ? lookForArm(arm, club)
+        : lookForExtra(`${club.abbr}-${o.seed}`, club),
+    uniform: uniformFor(club),
+    build: o.man ? o.man.build : arm ? armBuild(arm, club) : clubBuild(club),
+    x: o.x,
+    y: o.y,
+    h: o.h,
+    // ⚠️ 'pitch', WHICH IS THE ONLY STANCE WITH BOTH ARMS DOWN. From above, a
+    // man standing on the grass is not holding a bat and is not crouching.
+    stance: 'pitch',
+    // ⚠️ AND NOW HE RUNS. overhead.ts owns how far he has gone, look.ts owns
+    // what a running man looks like, and this line is the whole of the join.
+    // Every one of the nine and every runner comes through here.
+    ...runCycle(o.phase ?? 0),
+  });
+};
+
+function drawBall(now: number): void {
+  if (!pitch) return;
+  const flight = arriveAt - launchAt;
+  const t = Math.max(0, Math.min(1.15, (now - launchAt) / flight));
+
+  const [tx, ty] = spotXY(pitch.location, pitch.inZone);
+
+  // THE BREAK. Off the straight line on the way in, and back onto the spot by
+  // the time it gets there — movementOf() owns the shape, the sign and the
+  // reason for both. Scaled by the ZONE so a curveball is the same size pitch
+  // on both screens, and seeded off the launch so no two knuckleballs wander
+  // the same way.
+  const arm = currentPitcher(game);
+  const m = movementOf(pitch.type, t, {
+    break: arm.break,
+    throws: arm.throws,
+    seed: Math.floor(launchAt),
+  });
+
+  // Release point above the mound, arriving at the spot.
+  const x = 210 + (tx - 210) * t + m.dx * ZONE.w;
+  const y = 52 + (ty - 52) * t + m.dy * ZONE.h;
+  const r = 2.5 + t * t * 7;
+
+  ctx.fillStyle = swingStartedAt !== null && checkedAt === null ? '#fff2b0' : '#f0f0e2';
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // The tell: a coloured ring on a pitcher who leaks it.
+  if (pitch.tell && (pitch.tell.timing === 'pre_pitch' || t > 0.12)) {
+    ctx.strokeStyle = TELL_COLOR[pitch.tell.pitch];
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // The bat, travelling. It used to be a 130ms flash AFTER the press, which is
+  // a picture of a decision already made; now the sweep IS the travel, so the
+  // barrel is visibly on its way and you can watch it get pulled back.
+  if (swingStartedAt !== null) {
+    const sweep =
+      checkedAt === null
+        ? Math.min(1.3, (now - swingStartedAt) / swingTravel)
+        : // Checked: the barrel retreats from wherever it had got to.
+          ((checkedAt - swingStartedAt) / swingTravel) *
+          Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS);
+
+    if (sweep > 0.02) {
+      ctx.strokeStyle = checkedAt === null ? '#d8b44a' : '#7a8a6a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(210, PLATE_Y - 30, 62, Math.PI * (0.15 + sweep * 0.8), Math.PI * (0.25 + sweep * 0.8));
+      ctx.stroke();
+    }
+  }
+}
+
+const TELL_COLOR: Record<PitchType, string> = {
+  fastball: '#c4574a',
+  slider: '#7a9ed8',
+  changeup: '#6fbf62',
+  curveball: '#b57ad8',
+  knuckleball: '#d8b44a',
+  // Orange, next door to the fastball's red — a sinker IS a fastball that
+  // dies, and the two reading as cousins on the screen is the honest signal.
+  sinker: '#d8813a',
+};
+
+/** In 'calling', show where you are aiming. */
+function drawCall(): void {
+  const [x, y] = spotXY(callSpot, true);
+  ctx.strokeStyle = TELL_COLOR[callType];
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 12, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.arc(x, y, 20, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/**
+ * THE DELIVERY BAR — the sweep, the release point, and where you let go.
+ *
+ * ⚠️ THE BANDS ARE DRAWN OFF THE FUNCTION THAT GRADES THEM. releaseWindow()
+ * closes over the arm's signature and the difficulty level, so a painter's band
+ * is visibly wider than a knuckleballer's and ROOKIE's is visibly wider than
+ * ALL-STAR's, without this function knowing either fact. Hard-coding the widths
+ * here is how the picture and the verdict come apart.
+ *
+ * It sits bottom-left because that is the only quiet corner of this canvas:
+ * the zone runs x160-260 down to y226, the plate to y270, and the bases live
+ * around x315-385. Nothing here overlaps any of them.
+ */
+const BAR = { x: 24, y: 296, w: 252, h: 14 } as const;
+
+/**
+ * Milliseconds into the sweep, as an x on the bar. Clamped to the bar.
+ *
+ * ⚠️ THE BAR IS THE SAME WIDTH FOR EVERY PITCH AND THE SWEEP IS NOT, which is
+ * the whole point: a curveball's 1250ms is drawn across the same 252 pixels as
+ * a fastball's 880, so the marker CRAWLS on the slow pitches and SNAPS on the
+ * quick ones. Scaling the bar's width to the sweep instead would have made
+ * every pitch look and feel identical again, which is the thing being fixed.
+ *
+ * ⚠️ AND THE TRAVEL IS NOT LINEAR ANY MORE — see Delivery.ease. The marker
+ * whips through the release on a slider and dies into it on a changeup, which
+ * is what makes the six presses six different motions rather than one motion
+ * at six speeds.
+ *
+ * ⚠️ EVERYTHING ON THE BAR GOES THROUGH THIS ONE FUNCTION — the marker, the
+ * release line, both bands and the dead arm region. That is load-bearing, not
+ * tidiness: a marker eased one way against a line placed another is a picture
+ * that disagrees with the verdict, which is the one thing the swing model's
+ * fault-5 note refuses to allow.
+ */
+/**
+ * THE THROW BAR — the bang-bang play, as one press.
+ *
+ * ⚠️ IT IS THE DELIVERY BAR'S GEOMETRY WITH A DIFFERENT CLOCK, and drawn from
+ * the same window function that grades it, which is the rule every instrument
+ * in this game follows: a meter drawn from its own constants is a meter that
+ * lies the first time somebody retunes the thing behind it.
+ *
+ * ⚠️ NO EASING. Delivery.ease gives each PITCH its own arm action because six
+ * of them have to be told apart; there is one throw, and a marker that did
+ * anything other than run straight would be character for its own sake on a
+ * bar that is only up for seven hundred milliseconds.
+ */
+function drawThrowBar(now: number): void {
+  const t = Math.max(0, Math.min(THROW_SWEEP_MS, now - throwAt));
+  const x = (ms: number): number =>
+    BAR.x + (Math.max(0, Math.min(THROW_SWEEP_MS, ms)) / THROW_SWEEP_MS) * BAR.w;
+
+  const band = (halfWidthMs: number, fill: string): void => {
+    const a = x(THROW_AT_MS - halfWidthMs);
+    const b = x(THROW_AT_MS + halfWidthMs);
+    ctx.fillStyle = fill;
+    ctx.fillRect(a, BAR.y, b - a, BAR.h);
+  };
+
+  ctx.fillStyle = '#0a0f0c';
+  ctx.fillRect(BAR.x, BAR.y, BAR.w, BAR.h);
+  band(throwWindow('good'), '#243320');
+  band(throwWindow('perfect'), '#3d5733');
+
+  ctx.strokeStyle = '#2f3a2a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(BAR.x + 0.5, BAR.y + 0.5, BAR.w - 1, BAR.h - 1);
+
+  const target = x(THROW_AT_MS);
+  ctx.strokeStyle = '#cfd6c4';
+  ctx.beginPath();
+  ctx.moveTo(target, BAR.y - 3);
+  ctx.lineTo(target, BAR.y + BAR.h + 3);
+  ctx.stroke();
+
+  // The marker, frozen where it was when you let go so the verdict is readable
+  // against the mark that earned it. Same as the delivery.
+  const at = thrownAt === null ? t : thrownAt - throwAt;
+  ctx.fillStyle = throwGrade ? RELEASE_COLOR[throwGrade] : '#e8e8d8';
+  ctx.fillRect(x(at) - 1, BAR.y - 4, 2, BAR.h + 8);
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillText('THROW IT — SPACE', BAR.x, BAR.y + BAR.h + 15);
+  ctx.fillStyle = '#7a8a6a';
+  ctx.fillText('two on the line', BAR.x, BAR.y + BAR.h + 27);
+}
+
+const barX = (ms: number, tempo: Delivery): number =>
+  BAR.x + Math.pow(Math.max(0, Math.min(tempo.sweepMs, ms)) / tempo.sweepMs, tempo.ease) * BAR.w;
+
+/** What each verdict is painted in. Gold rewards, red costs, dim is the shrug. */
+const RELEASE_COLOR: Record<ReleaseGrade, string> = {
+  perfect: '#d8b44a',
+  good: '#6fbf62',
+  early: '#7a8a6a',
+  late: '#7a8a6a',
+  wild: '#c4574a',
+};
+
+function drawDelivery(now: number): void {
+  // ⚠️ THE TEMPO BEING DRAWN IS THE ONE BEING GRADED. Same snapshot the release
+  // reads, so the line you aim at is the line you are measured from — the
+  // fault-5 rule, that the picture and the verdict are one event.
+  const tempo = deliveryOf(phase === 'winding' ? deliveryPitch : callType);
+  const band = (halfWidthMs: number, fill: string): void => {
+    const a = barX(tempo.releaseAtMs - halfWidthMs, tempo);
+    const b = barX(tempo.releaseAtMs + halfWidthMs, tempo);
+    ctx.fillStyle = fill;
+    ctx.fillRect(a, BAR.y, b - a, BAR.h);
+  };
+
+  ctx.fillStyle = '#0a0f0c';
+  ctx.fillRect(BAR.x, BAR.y, BAR.w, BAR.h);
+  // The arm coming forward, drawn hatched-dark so the one stretch of the sweep
+  // where a press does nothing at all is a place on the bar rather than a
+  // surprise. See ARM_MS.
+  ctx.fillStyle = '#131a14';
+  ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS, tempo) - BAR.x, BAR.h);
+  band(releaseWindow('good'), '#243320');
+  band(releaseWindow('perfect'), '#3d5733');
+
+  ctx.strokeStyle = '#2f3a2a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(BAR.x + 0.5, BAR.y + 0.5, BAR.w - 1, BAR.h - 1);
+
+  // The release point. One line, and it is the thing you are aiming the press
+  // at — the bands either side of it are what that press is worth.
+  const rx = barX(tempo.releaseAtMs, tempo);
+  ctx.strokeStyle = '#cfd6c4';
+  ctx.beginPath();
+  ctx.moveTo(rx, BAR.y - 3);
+  ctx.lineTo(rx, BAR.y + BAR.h + 3);
+  ctx.stroke();
+
+  // The arm while it is going, then frozen at the moment it let go — so the
+  // verdict is readable against the mark that earned it rather than on its own.
+  const at =
+    phase === 'winding'
+      ? now - deliveryAt
+      : releasedAt === null
+        ? null
+        : releasedAt - deliveryAt;
+  if (at !== null) {
+    ctx.fillStyle =
+      phase === 'winding' ? '#e8e8d8' : RELEASE_COLOR[releaseGrade ?? 'good'];
+    ctx.fillRect(barX(at, tempo) - 1, BAR.y - 4, 2, BAR.h + 8);
+  }
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'left';
+  if (phase === 'winding') {
+    // Nothing. The marker is saying it, and a line of text under a bar you are
+    // trying to time is one more thing pulling the eye off it.
+  } else if (releaseGrade) {
+    ctx.fillStyle = RELEASE_COLOR[releaseGrade];
+    ctx.fillText(RELEASE_LABEL[releaseGrade], BAR.x, BAR.y + BAR.h + 15);
+  } else {
+    ctx.fillStyle = '#7a8a6a';
+    // ⚠️ TWO SHORT LINES, NOT ONE LONG ONE. drawBases() puts the diamond at
+    // canvas x 328-372 on this same row, and appending the tempo to the hint
+    // ran the sentence straight through it — 43 characters cleared the bags,
+    // 62 did not. Playtested; it is in every screenshot of the mound.
+    ctx.fillText('SPACE starts the arm — SPACE again to let go', BAR.x, BAR.y + BAR.h + 15);
+    ctx.fillStyle = '#5f6d54';
+    ctx.fillText(`${callType} · ${tempoWord(callType)}`, BAR.x, BAR.y + BAR.h + 27);
+  }
+}
+
+/**
+ * WHERE THE BAT ACTUALLY ARRIVED, against the window it was measured in.
+ *
+ * ⚠️ IT STANDS IN THE MOUND'S SLOT ON PURPOSE — the same BAR rectangle
+ * drawDelivery() uses, and the two are never on the screen together. Both
+ * halves of this game are one press timed against one window, and putting the
+ * instrument for each in the same place is the cheapest way to say so. It also
+ * clears the base diamond at x 328-372, which BAR was already sized around.
+ *
+ * ⚠️ EVERY NUMBER HERE COMES OFF THE SWING THAT WAS GRADED. bandsFor() is
+ * grade()'s own boundary function and the multipliers are the ones snapshotted
+ * at the plate — see SwingRead. Nothing is recomputed, so there is no version
+ * of this that can draw one at-bat's windows under another at-bat's verdict.
+ * Same rule releaseWindow() states for the bar above.
+ */
+function drawSwingBar(): void {
+  const read = swingRead;
+  // Nothing swung at, or nothing the clock can honestly say — a bar with no
+  // mark on it is a bar with nothing to say. See SwingRead.offsetMs.
+  if (!read || read.offsetMs === null) return;
+  const offsetMs = read.offsetMs;
+
+  const mid = BAR.x + BAR.w / 2;
+  const half = BAR.w / 2;
+  const bands = bandsFor(read.scale, read.eyes);
+  // A quarter past the whiff edge, so a swing that missed still lands ON the
+  // bar with room to see how far outside it was rather than pinned to the end.
+  const scale = half / (bands.contact * 1.25);
+
+  ctx.fillStyle = 'rgba(9,14,11,0.55)';
+  ctx.fillRect(BAR.x - 8, BAR.y - 16, BAR.w + 16, BAR.h + 36);
+
+  const band = (ms: number, color: string): void => {
+    ctx.fillStyle = color;
+    ctx.fillRect(mid - ms * scale, BAR.y, ms * 2 * scale, BAR.h);
+  };
+  band(bands.contact, '#3a4a30');
+  band(bands.good, '#5e7a3e');
+  band(bands.perfect, '#a8c25a');
+
+  // Dead on, so PERFECT has something to be perfect against.
+  ctx.fillStyle = 'rgba(232,232,216,0.35)';
+  ctx.fillRect(mid - 0.5, BAR.y - 3, 1, BAR.h + 6);
+
+  ctx.fillStyle = '#d8b44a';
+  const mark = mid + Math.max(-half, Math.min(offsetMs * scale, half));
+  ctx.fillRect(mark - 1.5, BAR.y - 5, 3, BAR.h + 10);
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillStyle = '#5f6d54';
+  ctx.textAlign = 'left';
+  ctx.fillText('EARLY', BAR.x, BAR.y - 6);
+  ctx.textAlign = 'right';
+  ctx.fillText('LATE', BAR.x + BAR.w, BAR.y - 6);
+
+  // The number itself, which is the thing this whole panel exists to say out
+  // loud. Signed, in the same convention core/timing.ts states: under zero is
+  // in front of it, over zero is behind it.
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#d8b44a';
+  ctx.fillText(
+    // A real minus sign rather than a hyphen: this is a canvas, so what is
+    // written here is what is drawn. An HTML entity would render as its own
+    // source text.
+    `${offsetMs < 0 ? '−' : '+'}${Math.abs(offsetMs).toFixed(0)}ms`,
+    mid,
+    BAR.y - 6,
+  );
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#7a8a6a';
+  ctx.fillText(
+    // The verdict and what it came to, in the order the player experiences
+    // them. They are the same two facts the controls panel carries, from the
+    // same record, so the canvas and the panel cannot drift apart.
+    read.grade === read.outcome ? read.grade : `${read.grade} · ${read.outcome}`,
+    BAR.x,
+    BAR.y + BAR.h + 13,
+  );
+  // Left on the way out, the way drawFlash() and drawDelivery() leave it. The
+  // canvas alignment is shared state between every draw call on the frame.
+  ctx.textAlign = 'left';
+}
+
+function drawBases(): void {
+  const cx = 350;
+  const cy = 300;
+  const s = 13;
+  const bags: [number, number][] = [
+    [cx + 22, cy],       // first
+    [cx, cy - 22],       // second
+    [cx - 22, cy],       // third
+  ];
+  ctx.strokeStyle = '#3d4a38';
+  ctx.lineWidth = 1;
+  bags.forEach(([bx, by], i) => {
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(Math.PI / 4);
+    if (game.bases[i]) {
+      ctx.fillStyle = '#d8b44a';
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+    } else {
+      ctx.strokeRect(-s / 2, -s / 2, s, s);
+    }
+    ctx.restore();
+  });
+  // Home.
+  ctx.save();
+  ctx.translate(cx, cy + 22);
+  ctx.rotate(Math.PI / 4);
+  ctx.strokeStyle = '#5c6b52';
+  ctx.strokeRect(-s / 2, -s / 2, s, s);
+  ctx.restore();
+
+  // Outs.
+  ctx.fillStyle = '#c4574a';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.arc(cx - 20 + i * 20, cy + 46, 5, 0, Math.PI * 2);
+    if (i < game.outs) ctx.fill();
+    else { ctx.strokeStyle = '#3d4a38'; ctx.stroke(); }
+  }
+}
+
+function drawFlash(now: number): void {
+  if (!flash || phase !== 'resolve' || now > flashUntil) return;
+  ctx.fillStyle = 'rgba(13,18,16,0.72)';
+  ctx.fillRect(0, 140, canvas.width, 60);
+  ctx.fillStyle = '#d8b44a';
+  ctx.font = '18px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(flash, canvas.width / 2, 176);
+  ctx.textAlign = 'left';
+}
+
+// ------------------------------------------------------------ dom render
+
+/**
+ * Rewrite the panels — but only when they would actually say something new.
+ *
+ * ⚠️ THE BUG THIS FIXES, AND WHY IT LOOKED LIKE NOTHING. render() is called
+ * from the frame loop, so before this guard every panel's innerHTML was
+ * rebuilt SIXTY TIMES A SECOND. Text survives that. A button does not: a click
+ * is a mousedown and a mouseup on the SAME element, and the element you
+ * pressed on was replaced by a fresh one a few milliseconds later, so the
+ * mouseup landed on a different node and no click ever fired. Every on-screen
+ * control — pitch, spot, throw, pen, steal — was dead to the mouse and to
+ * touch, and only the keyboard worked. Nothing errored, which is why it went
+ * unnoticed: the buttons drew perfectly and simply did not respond.
+ *
+ * The check is identity, not deep equality, and that is safe because
+ * `game` and `atBat` are REPLACED rather than mutated on every change. `book`
+ * is the one thing here that mutates in place, and it is covered by `phase` —
+ * observePitch() only ever runs on the way into 'resolve'.
+ *
+ * ⚠️ Do NOT add a time value to this key. The animation lives on the canvas in
+ * drawField(), which is still called every frame; the moment the DOM depends
+ * on the clock, the buttons die again.
+ */
+let lastKey: unknown[] = [];
+
+function render(): void {
+  // penArmed is in here for the same reason bunting is: it is a STANCE the
+  // panel has to show. Leave it out and the first press of the pen arms it
+  // silently, the button keeps saying GO TO THE PEN, and the second press is
+  // the accident this was all meant to prevent.
+  // ⚠️ ANYTHING THE PANELS DRAW MUST BE IN THIS ARRAY. It is a memo key — a
+  // value that is rendered but not listed here simply never redraws, silently.
+  // penPick shipped missing from it: the pen list highlighted the wrong arm
+  // all game while the GO TO THE PEN button named the right one, because the
+  // button rides on penArmed, which IS listed, and the rows rode on nothing.
+  const key = [phase, game, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead];
+  if (key.length === lastKey.length && key.every((v, i) => v === lastKey[i])) return;
+  lastKey = key;
+
+  renderScore();
+  renderSituation();
+  renderMeta();
+  renderControls();
+  renderBook();
+}
+
+/**
+ * The auto / speed strip.
+ *
+ * The buttons here work because render() no longer runs every frame — see the
+ * dirty check on render(), which is what keeps every control on the screen
+ * clickable rather than just this one.
+ */
+function renderMeta(): void {
+  // ⚠️ THE DIFFICULTY IS ON THE SCREEN, NEXT TO THE THING IT CHANGES, and it
+  // is changeable here rather than only on the title screen. A player who finds
+  // out in the fourth inning of game nine that the window is too narrow should
+  // not have to abandon a franchise to say so.
+  //
+  // The calibration reads out beside it for the same reason: it moves the
+  // grading of every swing, so it says so out loud. A silent correction and a
+  // timing bug look identical from the batter's box.
+  const level = levelOf(settings.level);
+  // ⚠️ TWO SPEEDS ON ONE STRIP, AND THEY ARE OPPOSITE CONTROLS. `speed 4×` cuts
+  // the parts nobody is playing; `pitch SLOW` stretches the one part somebody
+  // is. They are labelled as different words on purpose — see readScale().
+  const cage = pitchSpeedOf(settings.pitchSpeed);
+  elMeta.innerHTML =
+    '<button data-auto="1">' +
+    (auto ? 'AUTO — computer plays your half' : 'MANUAL — you play') +
+    ' <kbd>T</kbd></button>' +
+    '<button data-speed="1" style="margin-left:8px">speed ' +
+    speed() +
+    '&times; <kbd>F</kbd></button>' +
+    '<button data-diff="1" style="margin-left:8px">' +
+    level.name +
+    ' <kbd>G</kbd></button>' +
+    '<button data-pitch="1" style="margin-left:8px" class="' +
+    (settings.pitchSpeed < 1 ? 'on' : '') +
+    '">pitch ' +
+    cage.name +
+    ' <kbd>P</kbd></button>' +
+    // Clicking the read-out is what stops it moving. It is the one control on
+    // this strip nobody reaches for until they have watched the number walk,
+    // which is exactly when their hand is already on the mouse pointing at it.
+    '<button data-hold="1" class="flat" style="margin-left:10px" ' +
+    'title="hold the calibration where it is">' +
+    calibrationLabel(settings.calibration, settings.holdCalibration) +
+    '</button>' +
+    (auto
+      ? '<span class="dim" style="margin-left:10px">watching · press T to take over</span>'
+      : '');
+
+  const autoBtn = elMeta.querySelector<HTMLButtonElement>('[data-auto]');
+  if (autoBtn) autoBtn.onclick = () => press('t');
+  const speedBtn = elMeta.querySelector<HTMLButtonElement>('[data-speed]');
+  if (speedBtn) speedBtn.onclick = () => press('f');
+  const diffBtn = elMeta.querySelector<HTMLButtonElement>('[data-diff]');
+  if (diffBtn) diffBtn.onclick = () => press('g');
+  const pitchBtn = elMeta.querySelector<HTMLButtonElement>('[data-pitch]');
+  if (pitchBtn) pitchBtn.onclick = () => press('p');
+  const holdBtn = elMeta.querySelector<HTMLButtonElement>('[data-hold]');
+  if (holdBtn) holdBtn.onclick = () => holdCalibration();
+}
+
+/**
+ * Nail the correction down where it is, or let it go on learning.
+ *
+ * ponytail: click only, no key. Every other control on this strip is one a
+ * hand reaches for mid-game; this one is answered once, by somebody who has
+ * just read the number next to it, and a sixth letter to remember costs more
+ * than it buys.
+ */
+function holdCalibration(): void {
+  settings = { ...settings, holdCalibration: !settings.holdCalibration };
+  saveSettings(settings);
+  // "Held at 0ms" is true and useless before the twelfth swing: there is no
+  // correction yet, so what was actually just switched off is the MEASURING.
+  const measured = settings.calibration.samples.length >= MIN_SAMPLES;
+  say(
+    settings.holdCalibration
+      ? measured
+        ? `Calibration held at ${Math.round(settings.calibration.shift)}ms — it will not move again.`
+        : 'Calibration paused — no correction will be measured or applied.'
+      : 'Calibration learning again.',
+    'half',
+  );
+  render();
+}
+
+function renderScore(): void {
+  // The season outran this game — see lastGameIsStale. An empty strip is the
+  // honest version; the FINAL line and the bracket under it are the news.
+  if (lastGameIsStale) {
+    elScore.innerHTML = '';
+    return;
+  }
+  const innings = Math.max(9, game.inning);
+  const head = ['', ...Array.from({ length: innings }, (_, i) => String(i + 1)), 'R', 'H'];
+  const row = (side: 'home' | 'away') => {
+    const t = side === 'home' ? game.home : game.away;
+    const s = stateOf(game, side);
+    const cells = Array.from({ length: innings }, (_, i) =>
+      i < s.byInning.length ? String(s.byInning[i]) : '·',
+    );
+    const batting = !game.over && battingSide(game) === side ? ' class="batting"' : '';
+    return `<tr${batting}><td class="team">${t.abbr}${side === YOU ? ' (you)' : ''}</td>${cells
+      .map((c) => `<td>${c}</td>`)
+      .join('')}<td class="tot">${s.runs}</td><td>${s.hits}</td></tr>`;
+  };
+  elScore.innerHTML = `<table class="line"><thead><tr>${head
+    .map((h) => `<th>${h}</th>`)
+    .join('')}</tr></thead><tbody>${row('away')}${row('home')}</tbody></table>`;
+}
+
+function renderSituation(): void {
+  if (showingFinal()) {
+    if (!season) {
+      elSit.innerHTML = `<span><b>FINAL</b></span><span class="dim">press R for a new game</span>`;
+      return;
+    }
+    const me = standings(season).find((r) => r.abbr === season!.you)!;
+    const champ = champion(season);
+    elSit.innerHTML = [
+      // FINAL is a word about a ball game. When the league outran the one on
+      // the screen there is no ball game to be final, only a year that ended.
+      `<span><b>${lastGameIsStale ? 'SEASON OVER' : 'FINAL'}</b></span>`,
+      `<span>${season.you} <b>${me.w}-${me.l}</b></span>`,
+      champ
+        ? `<span class="dim">${champ} win the championship</span>`
+        : yourGame(season)
+          ? `<span class="dim">up next: ${dayLabel(season)}</span>`
+          : `<span class="dim">you are out — ${dayLabel(season)} still to play</span>`,
+    ].join('');
+    return;
+  }
+  const b = currentBatter(game);
+  const role = youBat() ? 'YOU BAT' : 'YOU PITCH';
+  const staff = fieldingStaff(game);
+  const cond = armCondition(staff);
+  const condColor =
+    cond === 'gassed' ? 'var(--bad)' : cond === 'tiring' ? 'var(--hot)' : 'var(--dim)';
+
+  elSit.innerHTML = [
+    `<span><b>${inningLabel(game)}</b></span>`,
+    `<span>${atBat.balls}–${atBat.strikes}</span>`,
+    `<span>${game.outs} out</span>`,
+    `<span class="dim">|</span>`,
+    `<span><b>${role}</b></span>`,
+    // The bat speed is shown because the check swing is what makes it matter:
+    // a heavy bat arrives late AND gives you longer to change your mind, and a
+    // trade you cannot see is not a trade.
+    `<span>${b.name} <span class="dim">(${b.bats}, ${batSpeedLabel(statsOf(b).power)})</span></span>`,
+    `<span class="dim">on deck ${onDeck(game).name}</span>`,
+    `<span class="dim">|</span>`,
+    `<span>${currentPitcher(game).name}` +
+      ` <span class="dim">${staff.current.pitches}p</span>` +
+      ` <span style="color:${condColor}">${cond}</span></span>`,
+  ].join('');
+}
+
+/**
+ * YOUR BENCH, on the controls panel while you are the one hitting.
+ *
+ * ⚠️ IT IS THE PEN PANEL AGAIN, DELIBERATELY. Same rows, same picked
+ * highlight, same ARMED-THEN-CONFIRMED button — because it is the same shape of
+ * decision: pick one of a short list of men, and once he is in, the man he
+ * replaced is gone for the night. The bullpen grew its second press because
+ * pitchers were being changed by accident; a pinch hitter costs exactly as much
+ * and would be lost exactly as easily, so it does not get to happen on one
+ * click either.
+ *
+ * ⚠️ ONLY FOR THE MAN AT THE PLATE, and only between pitches. `phase === 'idle'`
+ * is the same gate the bunt and the steal use — a substitution mid-flight would
+ * change who is swinging at a ball already in the air.
+ */
+/**
+ * WHAT A BENCH MAN IS FOR, in one word, read off his card and his club's.
+ *
+ * ⚠️ THE FOURTH MAN BROKE THIS AND THE BENCH SECTION IN teams.ts PREDICTED IT.
+ * It says a bench is a MENU, and that if a club's men ever stop being one of
+ * each "two rows of that panel say the same word and the choice stops
+ * reading". Three archetypes and three men held that. A fourth man — average
+ * everything, which is what a twenty-sixth man IS — fell into the same
+ * catch-all as the platoon bat, and Chicago's panel listed PLATOON twice.
+ *
+ * ⚠️ THE PLATOON MAN IS DECIDED BY HIS HAND, NOT BY WHAT HE IS NOT. That is
+ * what the archetype was always about — see the bench section: "on most clubs
+ * he hits the other way round from the men around him", because
+ * platoonContact() in hit.ts is worth about eight points against a breaking
+ * ball. So ask the question directly: does he bat the other way from the nine
+ * he would come in for? Everybody else left over is the utility man, which is
+ * an honest name for a man who is on the roster because somebody has to be.
+ *
+ * It relabels exactly one written man in the league, and for a true reason:
+ * Chicago is the only lefty-majority lineup in it, so their left-handed bench
+ * bat has no platoon edge to sell and never did.
+ */
+export function benchRole(p: Player, lineup: readonly Player[]): string {
+  const s = statsOf(p);
+  if (s.power >= 1.3) return 'bat';
+  if (s.speed >= 1.25) return 'legs';
+  const lefties = lineup.filter((x) => x.bats === 'L').length;
+  const majority = lefties * 2 > lineup.length ? 'L' : 'R';
+  return p.bats === majority ? 'utility' : 'platoon';
+}
+
+function benchPanel(): string {
+  const bench = benchOf(game, YOU);
+  if (bench.length === 0) return '';
+
+  const due = currentBatter(game);
+  const ready = phase === 'idle' ? '' : ' disabled';
+  const picked = bench[Math.min(benchPick, bench.length - 1)]!;
+
+  // ⚠️ TWO LINES PER MAN, NOT THE PEN'S FOUR COLUMNS. The pen panel's grid
+  // carries two ratings and fits; this one has to carry three plus a hand plus
+  // what he is FOR, and in a 240px side column that grid wrapped every name
+  // onto three lines. Same rows, same picked highlight — stacked instead of
+  // columned, because the column count is what did not fit.
+  const man = (p: Player, tag: string, on: boolean, attr = ''): string => {
+    const s = statsOf(p);
+    return (
+      `<div class="benchrow${on ? ' picked' : ''}"${attr}>` +
+      `<div class="benchname"><b>${on ? '▸ ' : ''}${p.name}</b>` +
+      `<span class="dim">${tag}</span></div>` +
+      `<div class="dim">${p.bats}H · POW ${showScale(s.power)} · CON ${showScale(s.contact)}` +
+      ` · SPD ${showScale(s.speed)}</div></div>`
+    );
+  };
+
+  const rows = bench
+    .map((p, i) =>
+      // What he is FOR, read off the shape of his card rather than stored. The
+      // three archetypes in teams.ts are built to be legible at a glance and
+      // this is the glance — see the bench section there.
+      man(
+        p,
+        benchRole(p, clubInGame(game, YOU).lineup),
+        i === benchPick,
+        ` data-bench="${i}" style="cursor:pointer"`,
+      ),
+    )
+    .join('');
+
+  return (
+    `<div class="pen"><div class="dim penhead">YOUR BENCH — ${bench.length} LEFT</div>` +
+    man(due, 'at the plate', false) +
+    rows +
+    `<button class="pengo${benchArmed ? ' on' : ''}" data-hit="1"${ready}>` +
+    (benchArmed
+      ? `PRESS AGAIN — ${picked.name.toUpperCase()} BATS FOR ${due.name.toUpperCase()} <kbd>H</kbd>`
+      : `PINCH HIT <kbd>H</kbd>`) +
+    `</button>` +
+    `<div class="dim" style="font-size:10px;margin-top:4px">` +
+    // ⚠️ FUTURE TENSE, AND IT WAS NOT. This line read "<due> is out of the
+    // game" — about the man the row directly above it labels AT THE PLATE. It
+    // was describing what a pinch hit WOULD cost and stating it as something
+    // that had already happened, so the panel contradicted itself: the hitter
+    // standing in the box was announced as gone every time you looked at the
+    // bench, whether or not you ever pressed the button.
+    (benchArmed
+      ? `${due.name} is done for the night if you press it.`
+      : `A pinch hitter costs you ${due.name} for the night.`) +
+    ` Pick the man — click, or <kbd>,</kbd> <kbd>.</kbd></div>` +
+    `</div>`
+  );
+}
+
+function bindBench(): void {
+  elControls.querySelectorAll<HTMLElement>('[data-bench]').forEach((row) => {
+    row.onclick = () => {
+      benchPick = Number(row.dataset['bench']);
+      // Picking a different man DISARMS. Otherwise clicking a row while the
+      // button was armed would send up somebody the button had not named.
+      benchArmed = false;
+      render();
+    };
+  });
+  const go = elControls.querySelector<HTMLButtonElement>('[data-hit]');
+  if (go) go.onclick = () => press('h');
+}
+
+/**
+ * Send him up. Two presses; see benchPanel().
+ *
+ * ⚠️ THE BUNT STANCE IS DROPPED WITH HIM. `bunting` is a decision made about
+ * the man who was at the plate, and carrying it onto a pinch hitter would have
+ * him squaring round without being asked — most likely the power bat you just
+ * spent, which is the one man in the park who should never be bunting.
+ */
+function pinchHitNow(): void {
+  if (phase !== 'idle' || game.over) return;
+  const bench = benchOf(game, YOU);
+  if (bench.length === 0) return;
+
+  if (!benchArmed) {
+    benchArmed = true;
+    render();
+    return;
+  }
+  benchArmed = false;
+
+  const sub = bench[Math.min(benchPick, bench.length - 1)]!;
+  const out = currentBatter(game);
+  game = pinchHit(game, YOU, sub);
+  if (currentBatter(game) === out) return;
+
+  bunting = false;
+  benchPick = 0;
+  say(`${sub.name} bats for ${out.name}.`, 'big');
+  flash = 'PINCH HITTER';
+  flashUntil = pauseFor(900);
+  render();
+}
+
+/**
+ * The nine spots in the player's words. Module scope because two panels name
+ * them now — the picker you call the pitch on, and the chart that says where it
+ * actually went. Two copies of this table is two vocabularies for one grid.
+ */
+const SPOT_LABEL: Record<PitchLocation, string> = {
+  high_inside: 'high in', high: 'high', high_outside: 'high away',
+  inside: 'in',           middle: 'middle', outside: 'away',
+  low_inside: 'low in',   low: 'low',   low_outside: 'low away',
+};
+
+/**
+ * The six pitches on a scorer's card. Only the chart uses these — the picker
+ * has room for the whole word and a button that said "KN" would be a quiz.
+ */
+const TYPE_SHORT: Record<PitchType, string> = {
+  fastball: 'FB',
+  curveball: 'CB',
+  changeup: 'CH',
+  slider: 'SL',
+  knuckleball: 'KN',
+  sinker: 'SI',
+};
+
+function renderControls(): void {
+  if (showingFinal()) {
+    // Eliminated but the bracket is not decided: the button plays it out
+    // rather than disappearing and stranding you on a season with no ending.
+    const label =
+      season && !seasonOver(season) ? (yourGame(season) ? 'Next game' : 'Watch it out') : null;
+    const next = label ? `<button data-next="1">${label} <kbd>N</kbd></button>` : '';
+    // ⚠️ AN EXHIBITION HAS ONE TOO. It has no season to compare the night
+    // against, which is why this used to be a franchise-only button — but the
+    // night itself was fully scored the whole time. See showStats().
+    //
+    // ...but not when the league outran the game: the box score would be a
+    // night nine days ago, or the empty one this module starts holding.
+    const box = lastGameIsStale ? '' : '<button data-box="1">Box score <kbd>B</kbd></button>';
+    // The book is offered on the screen where the season ENDED, which is the
+    // one moment it is about — see showCareer().
+    const bookBtn =
+      season && seasonOver(season) ? '<button data-book="1">Record book <kbd>K</kbd></button>' : '';
+    elControls.innerHTML =
+      `<div class="keys">${next}${box}${bookBtn}<button onclick="location.reload()">` +
+      `${season ? 'Quit to menu' : 'Play again'} <kbd>R</kbd></button></div>`;
+    const btn = elControls.querySelector<HTMLButtonElement>('[data-next]');
+    if (btn) btn.onclick = () => nextGame();
+    const boxBtn = elControls.querySelector<HTMLButtonElement>('[data-box]');
+    if (boxBtn) boxBtn.onclick = () => showBox();
+    const kBtn = elControls.querySelector<HTMLButtonElement>('[data-book]');
+    if (kBtn) kBtn.onclick = () => showCareer(() => render());
+    return;
+  }
+
+  if (youBat()) {
+    const hint =
+      phase === 'idle'
+        ? 'Click the field or press SPACE for the pitch.'
+        : phase === 'windup'
+          ? // Both presses named at once, deliberately. The controls panel only
+            // rebuilds when render()'s dirty key changes, and a hint that
+            // rewrote itself mid-flight would need the swing in that key — see
+            // the warning on render() for why putting a live value in there is
+            // how every button on this screen died last time.
+            'SWING — press SPACE. Press it again early to check.'
+          : // ⚠️ THIS WAS A SINGLE ELLIPSIS, AND AN ELLIPSIS IS NOT AN ANSWER.
+            // Nothing on the batting half is a button that can be greyed out —
+            // the control is the spacebar — so a press during the resolve is
+            // swallowed with no queue and nothing on the screen saying why. It
+            // reads as a dead key on a frozen game. Say what is happening
+            // instead; the press is still dropped, and now that is visibly a
+            // state rather than a fault.
+            'Watching the play — the ball is still live.';
+
+    // The steal offer carries its ODDS. A gamble whose price you cannot see is
+    // not a decision, it is a coin flip with extra steps.
+    const op = stealOpportunity(game);
+    let stealBtn = '';
+    if (op) {
+      const odds = Math.round(chanceFor(game, op, fieldingAlignment(game)) * 100);
+      const bag = op.to === 1 ? 'second' : 'third';
+      const enabled = phase === 'idle';
+      stealBtn =
+        `<button style="margin-top:8px;width:100%;text-align:center" data-steal="1"${enabled ? '' : ' disabled'}>` +
+        `SEND ${op.runner.name.toUpperCase()} — ${odds}% <kbd>S</kbd><br>` +
+        `<kbd>stealing ${bag} · caught costs an out</kbd></button>`;
+    }
+
+    // The bunt carries HIS rating on the button, for the same reason the steal
+    // carries its odds: a stance whose price you cannot see is not a decision.
+    // Squaring up is legal between pitches only, so the button is live in
+    // 'idle' and reads as a stance the rest of the time.
+    const bstat = statsOf(currentBatter(game)).bunt;
+    // ⚠️ AND IT ONLY SAYS "MOVES THE RUNNER" WHEN ONE ACTUALLY MOVES. The
+    // sacrifice in inning.ts is gated on fewer than two outs, and there has to
+    // be somebody to move — so with two down, or with the bases empty, the line
+    // was promising a sacrifice the engine will not give. What a bunt is in
+    // that state is a bunt for a hit: BUNT_HIT is 11%, which is the real offer.
+    const sacrifice = game.outs < 2 && game.bases.some((b) => b !== null);
+    const buntBtn =
+      `<button style="margin-top:8px;width:100%;text-align:center" data-bunt="1"` +
+      `${phase === 'idle' ? '' : ' disabled'} class="${bunting ? 'on' : ''}">` +
+      `${bunting ? 'SQUARED TO BUNT' : 'BUNT'} — ${showScale(bstat)} <kbd>B</kbd><br>` +
+      `<kbd>${
+        bunting
+          ? 'offers at strikes only · foul with 2K is out'
+          : sacrifice
+            ? 'moves the runner, costs the out'
+            : 'for a hit — no sacrifice on from here'
+      }</kbd></button>`;
+
+    // The number and the record, together. A record you cannot see is not a
+    // record — it is the steal button with no odds on it all over again.
+    const heat = streak.current >= 3 ? 'var(--hot)' : 'var(--ink)';
+    // ⚠️ TWO LINES, BECAUSE THEY ANSWER TWO QUESTIONS. This was one line saying
+    // `last swing: <grade>`, and it was fed by every pitch — so a take wrote
+    // BALL into a field labelled "swing", and three fouls in a row wrote LATE
+    // three times over a count that never moved. The last PITCH and the last
+    // SWING are different facts about different moments and the screen now says
+    // which is which. See SwingRead.
+    const pitchLine =
+      `<div class="dim">last pitch: ${lastGrade || '—'}` +
+      ` &nbsp;·&nbsp; squared up <b style="color:${heat}">${streak.current}</b> in a row` +
+      ` <span class="dim">(best ${streak.best})</span></div>`;
+    // The milliseconds the game has always measured and never shown. Signed in
+    // core/timing.ts's convention: under zero is out in front of it.
+    const ms = swingRead?.offsetMs;
+    const swingLine = swingRead
+      ? `<div class="dim">last swing: <b>${swingRead.grade}</b>` +
+        ` &nbsp;·&nbsp; ${swingRead.outcome}` +
+        // No clock on this one. The grade and the outcome are still true; the
+        // milliseconds are a sleeping frame loop. See SwingRead.offsetMs.
+        (ms === null || ms === undefined
+          ? ''
+          : ` &nbsp;·&nbsp; <b style="color:var(--hot)">` +
+            `${ms < 0 ? '&minus;' : '+'}${Math.abs(ms).toFixed(0)}ms</b>`) +
+        `</div>`
+      : '';
+    const streakLine = pitchLine + swingLine;
+
+    elControls.innerHTML =
+      `<div style="margin-bottom:6px">${hint}</div>` +
+      streakLine +
+      stealBtn +
+      buntBtn +
+      benchPanel();
+
+    const stealEl = elControls.querySelector<HTMLButtonElement>('[data-steal]');
+    if (stealEl) stealEl.onclick = () => steal();
+    const buntEl = elControls.querySelector<HTMLButtonElement>('[data-bunt]');
+    if (buntEl) buntEl.onclick = () => toggleBunt();
+    bindBench();
+    return;
+  }
+
+  // Clamped here because here is where the pitcher changing — the pen, the
+  // half, the next game — first has to be shown. A selection he cannot throw
+  // is a button that lies.
+  const arms = myArsenal();
+  if (!arms.includes(callType)) callType = arms[0]!;
+
+  // ⚠️ THE CALL IS LOCKED ONCE THE ARM STARTS, ON BOTH INPUT PATHS. press()
+  // returns early on a spot key during 'winding'; without this the MOUSE could
+  // still re-aim a pitch that is already being delivered, because these
+  // handlers set callSpot directly and pitchToThem() does not read it until the
+  // release. Two inputs to one control that disagreed about when it was live is
+  // the kind of thing only ever found by the person who plays with a mouse.
+  //
+  // Deliberately still live during 'windup': picking the NEXT pitch while the
+  // current one is in the air changes nothing about the one already thrown.
+  const locked = phase === 'winding' ? ' disabled' : '';
+
+  const pitches = arms.map(
+    (t, i) =>
+      // ⚠️ THE TEMPO IS ON THE BUTTON. Six pitches that each ask for a
+      // different press is only a mechanic if you can see which is which
+      // BEFORE you call one — otherwise it is the bar behaving oddly.
+      `<button data-pitch="${t}"${locked} class="${t === callType ? 'on' : ''}">${t}` +
+      `<br><kbd>${i + 1} · ${tempoWord(t)}</kbd></button>`,
+  ).join('');
+  // Drawn in reading order, which IS the grid order, which is the key order.
+  // ALL_LOCATIONS is the single source for all three.
+  const spotKeys = ['Q', 'W', 'E', 'A', 'S', 'D', 'Z', 'X', 'C'];
+  const spots = ALL_LOCATIONS.map(
+    (s, i) =>
+      `<button data-spot="${s}"${locked} class="${s === callSpot ? 'on' : ''}">${SPOT_LABEL[s]}` +
+      `<br><kbd>${spotKeys[i]}</kbd></button>`,
+  ).join('');
+
+  // Live only between pitches. While the ball is in the air there is nothing
+  // left to decide, and a THROW button you can press twice is a button that
+  // lies about what the phase is.
+  //
+  // ⚠️ 'winding' IS NOT A DEAD PHASE THOUGH — it is the one phase where this
+  // button is the whole game. The pen and the pitch grid stay disabled through
+  // it (the call is made, and the pen mid-delivery is nonsense), but the throw
+  // button below reads `phase` for itself and stays live to take the release.
+  const ready = phase === 'calling' ? '' : ' disabled';
+  const throwable = phase === 'calling' || phase === 'winding' ? '' : ' disabled';
+
+  // ---- THE BULLPEN, which is its own panel and not another pitch button.
+  //
+  // It reads top to bottom as the question a manager actually asks: how is the
+  // man I have, who is warm, and is he better. The arm on the mound carries its
+  // pitch count and its condition; the next one out carries the two ratings
+  // that decide whether the change is worth making.
+  const staff = fieldingStaff(game);
+  const penLeft = staff.bullpen.length;
+  const cond = armCondition(staff);
+  const condColor =
+    cond === 'gassed' ? 'var(--bad)' : cond === 'tiring' ? 'var(--hot)' : 'var(--dim)';
+  const mine = currentPitcher(game);
+  const mineR = ratingsOf(mine);
+
+  // ⚠️ THE WHOLE PEN, NOT JUST THE NEXT MAN. It listed one arm because
+  // bringInRelief() only ever took one; now every available arm is a row you
+  // can pick, which is the difference between a bullpen and a queue. The
+  // starter's own STA is the number rest has already been folded into — see
+  // ArmState.stamina — so a short-rest man reads short here all game.
+  const onMound =
+    `<div class="penrow"><span>on the mound</span><b>${mine.name}</b>` +
+    `<span class="dim">${staff.current.pitches}p · BRE ${showScale(mineR['break']!)} · STA ${showScale(staff.current.stamina)}</span>` +
+    `<span style="color:${condColor}">${cond}</span></div>`;
+
+  const penRows = penLeft
+    ? onMound +
+      staff.bullpen
+        .map((arm, i) => {
+          const on = i === penPick;
+          // ⚠️ HIS LEGS TONIGHT, NOT THE RATING ON HIS CARD. Staff.legs has
+          // yesterday's work already folded in, and a pen panel that showed the
+          // card number would be quietly recommending a man who is not there.
+          const legs = staff.legs?.[arm.name] ?? arm.stamina ?? 1;
+          const share = legs / Math.max(0.01, arm.stamina ?? 1);
+          const word = share >= 0.99 ? '' : share >= 0.7 ? 'used' : share >= 0.45 ? 'tired' : 'gassed';
+          const colour = share >= 0.7 ? 'var(--dim)' : share >= 0.45 ? 'var(--hot)' : 'var(--bad)';
+          return (
+            `<div class="penrow${on ? ' picked' : ''}" data-arm="${i}" style="cursor:pointer">` +
+            `<span>${on ? '▸ warming' : ''}</span><b>${arm.name}</b>` +
+            `<span class="dim">BRE ${showScale(ratingsOf(arm)['break']!)} · STA ${showScale(legs)}</span>` +
+            `<span style="color:${colour}">${on ? (word || 'next') : word}</span></div>`
+          );
+        })
+        .join('')
+    : onMound +
+      `<div class="penrow dim"><span>warm</span><b>nobody</b><span>the pen is empty</span><span></span></div>`;
+
+  // ⚠️ ARMED, THEN CONFIRMED, and the button says which state it is in. The
+  // change cannot be taken back, so it does not happen on one press — see
+  // penArmed. It is also no longer full-width or adjacent to THROW IT.
+  const penBtn = penLeft
+    ? `<button class="pengo${penArmed ? ' on' : ''}" data-pen="1"${ready}>` +
+      (penArmed
+        ? `PRESS AGAIN — ${staff.bullpen[penPick]!.name.toUpperCase()} COMES IN <kbd>B</kbd>`
+        : `GO TO THE PEN <kbd>B</kbd>`) +
+      `</button>` +
+      (penLeft > 1
+        ? `<div class="dim" style="font-size:10px;margin-top:4px">pick the arm — click, or <kbd>,</kbd> <kbd>.</kbd></div>`
+        : '')
+    : '';
+
+  const penPanel =
+    `<div class="pen"><div class="dim penhead">BULLPEN</div>${penRows}${penBtn}</div>`;
+
+  // ---- THE DEFENCE. The other decision you make from the mound, and the one
+  // you make every hitter rather than once a night.
+  //
+  // ⚠️ IT NAMES THE MAN AND WHY. A shift with no hitter on it is a setting; a
+  // shift that says "Brennan pulls" is a read. pullScore() is the same number
+  // the computer shifts on, so the panel is showing you its actual reasoning.
+  const up = currentBatter(game);
+  const pull = Math.round(pullScore(up) * 100);
+  const called = game.shift ?? 'straight';
+  const shiftBtns = SHIFTS.map(
+    (sh) =>
+      `<button data-shift="${sh}"${ready} class="${sh === called ? 'on' : ''}">` +
+      `${SHIFT_WORDS[sh]}</button>`,
+  ).join('');
+  const advice =
+    pull >= SHIFT_ON * 100
+      ? `<b>${up.name}</b> pulls — ${up.bats === 'L' ? 'shift right' : 'shift left'}`
+      : `<b>${up.name}</b> sprays it — play him honest`;
+  const defPanel =
+    `<div class="pen"><div class="dim penhead">DEFENCE <kbd>V</kbd></div>` +
+    `<div class="keys">${shiftBtns}</div>` +
+    `<div class="dim" style="font-size:10px;margin-top:6px">${SHIFT_BLURB[called]}</div>` +
+    `<div class="dim" style="font-size:10px;margin-top:2px">${advice} <span class="dim">(pull ${pull})</span></div>` +
+    `</div>`;
+
+  elControls.innerHTML =
+    `<div style="margin-bottom:6px" class="dim">pitch</div><div class="keys">${pitches}</div>` +
+    `<div style="margin:8px 0 6px" class="dim">spot</div><div class="zone">${spots}</div>` +
+    `<button style="margin-top:8px;width:100%;text-align:center" data-throw="1"${throwable}` +
+    `${phase === 'winding' ? ' class="on"' : ''}>` +
+    (phase === 'calling'
+      ? 'THROW IT <kbd>SPACE</kbd>'
+      : phase === 'winding'
+        ? 'LET GO <kbd>SPACE</kbd>'
+        : phase === 'windup'
+          ? 'ON ITS WAY…'
+          : '…') +
+    '</button>' +
+    chartPanel() +
+    defPanel +
+    penPanel;
+
+  elControls.querySelectorAll<HTMLButtonElement>('[data-pitch]').forEach((btn) => {
+    btn.onclick = () => { callType = btn.dataset.pitch as PitchType; render(); };
+  });
+  elControls.querySelectorAll<HTMLButtonElement>('[data-spot]').forEach((btn) => {
+    btn.onclick = () => { callSpot = btn.dataset.spot as PitchLocation; render(); };
+  });
+  elControls.querySelectorAll<HTMLElement>('[data-arm]').forEach((row) => {
+    row.onclick = () => {
+      penPick = Number(row.dataset['arm']);
+      render();
+    };
+  });
+  elControls.querySelectorAll<HTMLButtonElement>('[data-shift]').forEach((btn) => {
+    btn.onclick = () => {
+      game = { ...game, shift: btn.dataset['shift'] as Shift };
+      render();
+    };
+  });
+  const penBtnEl = elControls.querySelector<HTMLButtonElement>('[data-pen]');
+  if (penBtnEl) penBtnEl.onclick = () => relieve();
+  // ⚠️ ONE BUTTON, TWO PRESSES, ROUTED BY THE PHASE — the same button the
+  // keyboard's SPACE is, and it has to be: a mouse player who could start the
+  // arm but not let go of it would be handed a wild pitch every time.
+  const throwBtn = elControls.querySelector<HTMLButtonElement>('[data-throw]');
+  if (throwBtn) {
+    throwBtn.onclick = () => {
+      if (phase === 'calling') startDelivery();
+      else if (phase === 'winding') release(performance.now());
+    };
+  }
+}
+
+/**
+ * WHAT YOU HAVE THROWN THIS HITTER — the chart, under the throw button.
+ *
+ * Four columns, and the middle two are the pair that makes it worth drawing:
+ * the call, and then whether the ball got there. `low away → away` is a pitch
+ * that missed off the plate; `low away → middle` is the mistake pitch, and it
+ * is the one you want to see written down after somebody has just hit it.
+ *
+ * ⚠️ THE RELEASE IS IN HERE FOR A REASON. It is the only place the two halves
+ * of a pitch sit on one line: what you DID, and what it CAME TO. Painting one
+ * and having it leak back over the plate anyway is the arm's command roll doing
+ * its job, and a player who cannot see both numbers has no way to learn that.
+ */
+function chartPanel(): string {
+  if (chart.length === 0) return '';
+  const rows = chart
+    .map((r, i) => {
+      // ⚠️ TWO KINDS OF MISS, AND THE SECOND ONE IS INVISIBLE IN `actual`.
+      // pitchToSpot() misses three ways: a middle call leaks to a corner, a
+      // corner call leaks to the MIDDLE — the mistake pitch — and, most often
+      // of all, a corner call stays on its corner and simply runs OFF THE
+      // PLATE, which changes `inZone` and leaves `location` exactly where it
+      // was. Comparing locations alone caught the first two and drew the third
+      // as a pitch that hit its spot, so a painted corner that the umpire
+      // called ball four read as the game cheating rather than as a miss.
+      const miss =
+        r.actual !== r.called
+          ? ` <span style="color:var(--bad)">&rarr; ${SPOT_LABEL[r.actual]}</span>`
+          : r.inZone
+            ? ''
+            : ` <span style="color:var(--bad)">&rarr; off the plate</span>`;
+      const word = r.result || '…';
+      const colour =
+        r.result === 'ball' || r.result === 'hit batter'
+          ? 'var(--bad)'
+          : r.result === 'in play'
+            ? 'var(--hot)'
+            : r.result === ''
+              ? 'var(--dim)'
+              : 'var(--good)';
+      // ⚠️ FOUR CHILDREN, FOUR COLUMNS. .penrow is a grid, so every element is
+      // a cell — the call has to arrive as ONE span or the type and the spot
+      // take a column each and the result is pushed onto a row of its own.
+      return (
+        `<div class="penrow"><span>${i + 1}</span>` +
+        `<span><b>${TYPE_SHORT[r.type]}</b> <span class="dim">${SPOT_LABEL[r.called]}</span>${miss}</span>` +
+        `<span class="dim">${RELEASE_SHORT[r.release]}</span>` +
+        `<span style="color:${colour}">${word}</span></div>`
+      );
+    })
+    .join('');
+  return `<div class="pen chart"><div class="dim penhead">THIS AT-BAT</div>${rows}</div>`;
+}
+
+/**
+ * The table, in the panel the scouting report usually has. Shown only when a
+ * franchise game is final, because that is the only moment it is the thing
+ * you want to look at — mid-game the scouting report is.
+ */
+function renderStandings(s: Season): void {
+  const rows = standings(s).map((r, i) => {
+    const line =
+      // The seed number is the whole reason to look at the table late in the
+      // year — fourth and fifth are one line apart and one is elimination.
+      `${i < 4 ? i + 1 : ' '} ${r.abbr}  ${String(r.w).padStart(2)}-${String(r.l).padStart(2)}` +
+      `  ${r.gb === 0 ? '  —' : r.gb.toFixed(1).padStart(3)}` +
+      `  ${String(r.rf - r.ra > 0 ? '+' + (r.rf - r.ra) : r.rf - r.ra).padStart(4)}`;
+    return r.abbr === s.you ? `<b>${line}</b>` : line;
+  });
+  // ⚠️ THE BRACKET GOES ON TOP ONCE THERE IS ONE. This panel scrolls and a
+  // thirty-club league is thirty rows in it, so a bracket printed underneath
+  // them is a bracket nobody sees: a season that ended while you were watching
+  // finished on "MEM TAKE THE TITLE" with no way to find out who MEM beat
+  // without scrolling a box most players do not know scrolls. In October the
+  // bracket is the news and the table is the history that seeded it.
+  const bracket = bracketLines(s);
+  const table = ['<b>STANDINGS</b>', '       W -L   GB   DIFF', ...rows];
+  const lines = bracket.length ? [...bracket, '', ...table] : table;
+  elBook.innerHTML =
+    '<div style="white-space:pre">' + lines.join('\n') + '</div>';
+}
+
+/** The bracket, once there is one. Empty for the whole regular season. */
+function bracketLines(s: Season): string[] {
+  if (s.day < regularDays(s)) return [];
+
+  // ⚠️ ONE LINE PER SERIES, NOT PER GAME. A best-of-seven bracket of eight
+  // clubs is up to twenty-eight ball games, and printing them all would bury
+  // the panel it shares with the standings. What a bracket is FOR is who is
+  // beating whom, so each pairing gets its series score and its winner.
+  const out: string[] = [];
+  for (let r = 0; r < roundsOf(s); r++) {
+    const pairs = matchupsInRound(s, r);
+    if (!pairs.length) break;
+    out.push(`<b>${roundName(s, r)}</b>`);
+    for (const p of pairs) {
+      const score = seriesOf(s) === 1 ? '' : ` ${p.homeWins}-${p.awayWins}`;
+      const tail = p.winner ? ` — ${p.winner}` : '';
+      out.push(`  ${p.home} v ${p.away}${score}${tail}`);
+    }
+  }
+  return out.length ? ['<b>PLAYOFFS</b>', ...out] : [];
+}
+
+/**
+ * The scouting report, shown to YOU — deliberately.
+ *
+ * The computer's read is not a secret mechanic. A hidden system that makes the
+ * game harder is indistinguishable from the game cheating; a visible one is a
+ * thing you can play against, which is the entire point of building it.
+ */
+/** One rating card: label, then the numbers, dimmed under average. */
+/**
+ * ⚠️ `speed` DOES NOT ABBREVIATE TO ITS FIRST THREE LETTERS. The slice below
+ * made this card say SPE while the bench list, the scouting card and the club
+ * summary all hand-write SPD — the same stat under two names, a few inches
+ * apart on one screen. Every other rating survives the slice; this is the only
+ * exception and it stays a lookup of one rather than a table of six.
+ */
+const RATING_LABELS: Record<string, string> = { speed: 'SPD' };
+
+function card(title: string, ratings: Record<string, number>): string {
+  const cells = Object.entries(ratings)
+    .map(([k, v]) => {
+      const n = showScale(v);
+      const colour = n >= 75 ? 'var(--hot)' : n < 45 ? 'var(--bad)' : 'var(--ink)';
+      const label = RATING_LABELS[k] ?? k.slice(0, 3).toUpperCase();
+      return `${label} <b style="color:${colour}">${n}</b>`;
+    })
+    .join(' &nbsp; ');
+  return `<b>${title}</b><br>${cells}`;
+}
+
+function renderBook(): void {
+  if (showingFinal() && season) {
+    renderStandings(season);
+    return;
+  }
+  // THE RATINGS GO FIRST, above the scouting book. They are the thing that
+  // decides the at-bat you are about to play; the book is what happens over
+  // nine of them.
+  const bat = currentBatter(game);
+  const arm = currentPitcher(game);
+  // Nobody is at the plate once it is final — currentBatter() still answers,
+  // but it answers with the man who was due up, and a card for an at-bat that
+  // never happened reads as a bug.
+  const lines: string[] = game.over ? ['<b>WHAT THEY HAVE ON YOU</b>'] : [
+    card(`AT THE PLATE — ${bat.name}`, {
+      power: bat.power,
+      contact: bat.contact,
+      vision: bat.vision,
+      clutch: bat.clutch,
+      bunt: bat.bunt,
+      speed: bat.speed,
+    }),
+    '',
+    card(`ON THE MOUND — ${arm.name}`, ratingsOf(arm)),
+    '',
+    '<b>WHAT THEY HAVE ON YOU</b>',
+  ];
+  if (book.seen < 12) {
+    lines.push('Still watching. Nothing yet.');
+  } else {
+    lines.push(`chase rate <b>${(chaseRate(book) * 100).toFixed(0)}%</b> &nbsp; swing rate <b>${(swingRate(book) * 100).toFixed(0)}%</b>`);
+    if (hasTimingRead(book)) {
+      const bias = timingBias(book);
+      const word = bias < -12 ? 'OUT IN FRONT' : bias > 35 ? 'BEHIND IT' : 'on time';
+      lines.push(`timing <b>${word}</b> (${bias > 0 ? '+' : ''}${bias.toFixed(0)}ms)`);
+    }
+    const weak = weakestPitch(book);
+    if (weak) lines.push(`can't touch the <b>${weak}</b>`);
+  }
+  // Who is standing where, for the side in the field. The player needs this to
+  // read an error as "you hid a bat at third" rather than as bad luck.
+  const a = fieldingAlignment(game);
+  lines.push('<br><b>IN THE FIELD</b>');
+  lines.push(
+    (['SS', 'CF', '2B', '3B', 'C', '1B'] as const)
+      .map((p) => `${p} <b>${a[p]?.name ?? '—'}</b>`)
+      .join('<br>'),
+  );
+
+  if (book.callsTotal >= 12) {
+    const p = predictedCall(book, false);
+    const p2 = predictedCall(book, true);
+    lines.push('<br><b>WHAT THEY EXPECT YOU TO THROW</b>');
+    lines.push(p ? `sitting <b>${p}</b>` : 'you are mixing it well');
+    if (p2) lines.push(`two strikes: sitting <b>${p2}</b>`);
+  }
+  elBook.innerHTML = lines.join('<br>');
+}
+
+// -------------------------------------------------------------- the loop
+
+/**
+ * ⚠️ THE RE-QUEUE IS IN A `finally`, AND THAT IS THE WHOLE POINT.
+ *
+ * It used to be the last statement of step(), which meant any throw anywhere
+ * under it skipped the re-queue and the loop simply stopped — a black, silent,
+ * permanently frozen game with no message and nothing to press. That is how
+ * one bad pitch call in ai.ts turned into "the game freezes in auto mode":
+ * auto reaches a few hundred pitches a minute at 8x, so it found the throw
+ * long before a person playing by hand would.
+ *
+ * There is no `catch`. The error still goes to the console exactly as before —
+ * this does not hide a bug, it stops a bug from being fatal.
+ */
+function frame(): void {
+  try {
+    step();
+  } finally {
+    requestAnimationFrame(frame);
+  }
+}
+
+function step(): void {
+  // ⚠️ THE FIRST LINE, ABOVE EVERYTHING. This is the pause. The screen over the
+  // canvas stops nothing at all — see the note on the flag.
+  if (paused) return;
+  const now = performance.now();
+
+  // The replay-less caption expires on its own clock. Checked first, and only
+  // when there is no replay, so the branch below stays the single owner of a
+  // scene that belongs to one.
+  if (!replay && scene && now - sceneAt > sceneMs) scene = null;
+
+  // THE HALF ROLLED OVER. Queued here, not at any of the three places that can
+  // make the third out — see markedHalf.
+  const halfIdx = game.inning * 2 + (game.half === 'bottom' ? 1 : 0);
+  if (halfIdx !== markedHalf) {
+    if (halfIdx === markedHalf + 1 && !game.over) breakPending = halfBreak(game);
+    markedHalf = halfIdx;
+  }
+
+  if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
+    replay = null;
+    scene = null;
+  }
+
+  // WHOSE SCREEN IS IT. The play that just happened owns it until it is done —
+  // the replay, and the caption over it — then the break, then the next man's
+  // card. One at a time, in that order, because two of them at once is neither.
+  //
+  // ⚠️ `!scene` MATTERS FOR THE STRIKEOUT THAT ENDS THE HALF. That one has no
+  // replay to wait on, only a caption on its own clock, and a break card
+  // arriving on top of STRIKE THREE would step on the out it is there to
+  // celebrate — which is the exact defect this whole thing is about.
+  if (!replay && !scene) {
+    if (breakPending) {
+      breakCard = breakPending;
+      breakFrom = now;
+      breakPending = null;
+      // The previous hitter's card does not ride over the break.
+      momentText = null;
+    } else if (breakCard && now - breakFrom > breakLen()) {
+      breakCard = null;
+      promoteMoment(now);
+    } else if (!breakCard) {
+      promoteMoment(now);
+    }
+  }
+
+  if (auto) autoStep();
+
+  // ⚠️ THE ARM EMPTIES WHETHER YOU ASK IT TO OR NOT. A delivery with no exit is
+  // a frozen game, and the tab this is played in gets switched away from — see
+  // SANE_SAMPLE_MS in difficulty.ts for what a sleeping frame loop does to a
+  // press. Letting go at the end of the sweep is a pitch that got away, which
+  // is the honest outcome and not a free take. DELIVERY_MS is set to outlast
+  // the widest late press that still grades; delivery.test.ts holds it there.
+  if (phase === 'winding' && now >= deliveryAt + deliveryOf(deliveryPitch).sweepMs) {
+    releaseAs('wild');
+  }
+
+  // ⚠️ AND THE SAME FOR THE THROW. A play that waits forever on a press is a
+  // frozen game, and this one stops the game mid-ball — see makeThrow(). The
+  // sweep outlasts the widest late press that still grades, so nothing a player
+  // actually meant is being swallowed here.
+  if (phase === 'throw' && now >= throwAt + THROW_SWEEP_MS) makeThrow('wild');
+
+  if (phase === 'windup') {
+    // THE COMPUTER’S BAT, whichever of the two of you it is hitting for: watch
+    // mode taking your at-bat, or its own hitter facing a pitch you threw.
+    //
+    // ⚠️ DISARMED THE MOMENT IT FIRES, and that is a fix, not a tidy-up. This
+    // lived in autoStep() and left autoSwingAt set, so the next frame called
+    // swing() a second time — and a second press inside the check window is a
+    // CHECK. Every computer swing was being pulled back into a take.
+    if (autoSwingAt !== null && now >= autoSwingAt) {
+      autoSwingAt = null;
+      swing();
+    }
+
+    // The swing window closes a little after the ball arrives, so a very late
+    // swing is still a swing rather than a take.
+    // A committed swing resolves when the BARREL arrives, not when the ball
+    // does — that is the frame the bat is drawn crossing the plate, and the
+    // picture and the verdict have to be one event.
+    const contact = contactAt();
+    if (contact !== null ? now >= contact : now > arriveAt + 90 / flightScale()) {
+      if (youBat()) resolvePitch();
+      else resolveTheirSwing();
+      // ⚠️ AFTER the pitch, never between at-bats. See runnersGoOnThePitch().
+      runnersGoOnThePitch();
+    }
+  }
+
+  if (phase === 'resolve' && now > flashUntil) {
+    if (isOver(atBat)) finishAtBat();
+    else phase = youBat() ? 'idle' : 'calling';
+  }
+
+  drawField(now);
+  render();
+}
+
+// ------------------------------------------------------------- the pregame
+
+/**
+ * The frame loop re-queues itself forever, so it is started exactly once. A
+ * second kickOff() — the next game of a season — must not start a second one,
+ * or every clock in the file runs at double speed.
+ */
+let looping = false;
+
+// --------------------------------------------------------- the pre-game card
+
+/**
+ * ⚠️ EVERY CLUB NAME, BIO, BLURB AND PARK NAME IS SOMEBODY ELSE'S TEXT. All of
+ * it is written by whoever is holding the keyboard — the editor, or a pasted
+ * league — and all of it goes into innerHTML. A `<` in a bio would otherwise
+ * eat the rest of the panel.
+ *
+ * ⚠️ IT WAS SCOPED TO THE START SCREEN AND IS MODULE-WIDE NOW. The league
+ * screen was the only place user text reached innerHTML when this was written;
+ * the park name put a second one on the pre-game card, and a second copy of an
+ * escape function is how one of them ends up not being called.
+ */
+const escapeText = (s: string): string =>
+  s.replace(/[&<>"]/g, (c) => `&${{ '&': 'amp', '<': 'lt', '>': 'gt', '"': 'quot' }[c]};`);
+
+/**
+ * THE BUILDING, on the card, in one line.
+ *
+ * ⚠️ IT SAYS WHAT THE PARK DOES, NOT JUST WHAT IT IS CALLED. "The Common,
+ * 310/390/302" is trivia; "plays big" or "plays small" is the thing that
+ * changes how you should manage the next nine innings, and it is the reading
+ * parkPower() already has. A name with no verdict beside it is decoration.
+ *
+ * ⚠️ AND IT SAYS IT ABOUT BOTH CLUBS. The wording is deliberately about the
+ * scoreboard rather than about the home side — a park is not an edge, it is the
+ * weather. See atPark().
+ *
+ * Empty for a club with no park, which is every club in a league imported from
+ * a build before parks existed.
+ */
+function parkLine(home: Team): string {
+  const p = home.park;
+  if (!p) return '';
+  const f = parkPower(p);
+  // Bands off the measured league spread — 0.95 to 1.065 across the thirty.
+  const verdict =
+    f >= 1.03
+      ? 'plays small — the ball carries out of here'
+      : f >= 1.008
+        ? 'plays a little small'
+        : f > 0.992
+          ? 'plays fair'
+          : f > 0.975
+            ? 'plays a little big'
+            : 'plays big — fly balls go to die';
+  const room =
+    p.foul >= 1.15 ? ' · acres of foul ground' : p.foul <= 0.85 ? ' · no foul ground at all' : '';
+  return (
+    `<div class="panel dim" style="text-align:center">` +
+    `<b style="color:var(--ink)">${escapeText(p.name)}</b> &nbsp; ` +
+    `${p.left} / ${p.center} / ${p.right} ft &nbsp;·&nbsp; ${verdict}${room}` +
+    `</div>`
+  );
+}
+
+/**
+ * A FRANCHISE MOMENT, on the days moments.ts says there is one.
+ *
+ * ⚠️ IT REUSES #pre, THE PRE-GAME OVERLAY, rather than adding an element.
+ * They are the same object at two moments — a full-screen thing you read and
+ * then dismiss into a ball game — and game.html already styles that once for
+ * both. A third overlay is a third copy of the same CSS block to drift.
+ *
+ * ⚠️ THE VALUE SHIFT IS SHOWN AFTER, NEVER BEFORE. Printing "-0.02" next to
+ * each button turns a baseball decision into an arithmetic one, and the whole
+ * design of moments.ts is that the trades are matched flat so there is no
+ * arithmetic to do. Showing it afterwards is the receipt: it is how the player
+ * learns the screen was telling the truth.
+ */
+function showMoment(s: Season, m: Moment, then: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) {
+    // No overlay in the document. Skip the moment and play the game — a
+    // missing panel must never be a season that cannot advance.
+    then();
+    return;
+  }
+
+  const buttons = m.choices
+    .map(
+      (c, i) =>
+        `<button class="choice" data-pick="${i}"><b>${c.label}</b> <kbd>${i + 1}</kbd><br>` +
+        `<span class="dim">${c.detail}</span></button>`,
+    )
+    .join('');
+
+  // ⚠️ YOUR OWN CLUB, ON THIS SCREEN. Found by playing it: THE BENCH tells you
+  // to "look at what your nine can actually do — the card lists it", and the
+  // card is the NEXT screen. You cannot reach it without answering first, so
+  // the one instruction the moment gives you was impossible to follow.
+  //
+  // It is the same four averages showPregame() prints, off the same scale, for
+  // the same reason: hiring the running-game man is a good idea at 61 SPD and
+  // a disaster at 44, and that number IS the decision. The deadline wants it
+  // too — a trade that moves your shape is only legible against the shape you
+  // already have.
+  const you = teamOf(s, s.you);
+  const avg = (pick: (p: Player) => number): number =>
+    showScale(you.lineup.reduce((a, p) => a + pick(p), 0) / you.lineup.length);
+  const record = standings(s).find((r) => r.abbr === s.you);
+  const mine =
+    `<div class="panel">` +
+    `<div class="club">${you.abbr}</div>` +
+    `<div class="dim">${you.name}${record ? ` · ${record.w}-${record.l}` : ''}</div>` +
+    `<div style="margin-top:6px"><b style="color:var(--good)">${you.identity?.name ?? 'STEADY'}</b>` +
+    `<span class="dim"> — ${you.identity?.blurb ?? ''}</span></div>` +
+    `<div style="margin-top:6px" class="dim">lineup &nbsp; ` +
+    `POW <b>${avg((p) => p.power)}</b> &nbsp; CON <b>${avg((p) => p.contact)}</b> &nbsp;` +
+    ` VIS <b>${avg((p) => p.vision)}</b> &nbsp; SPD <b>${avg((p) => p.speed)}</b></div>` +
+    `</div>`;
+
+  el.innerHTML =
+    `<div class="wrap">` +
+    `<h1>${dayLabel(s)}</h1>` +
+    `<h2>${m.headline}</h2>` +
+    `<div class="panel">${m.body}</div>` +
+    mine +
+    `<div class="choices">${buttons}</div>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const take = (i: number): void => {
+    const after = decide(s, m, i);
+    season = after;
+    saveSeason(after);
+    const shift = valueShift(s, after);
+    // The receipt. Two decimals, signed, in the same units the card ranks by.
+    say(
+      `${m.headline}: ${m.choices[i]!.label}. Roster ${shift >= 0 ? '+' : ''}${shift.toFixed(2)}.`,
+      'half',
+    );
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    then();
+  };
+
+  el.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((btn) => {
+    btn.onclick = () => take(Number(btn.dataset['pick']));
+  });
+
+  /**
+   * ⚠️ NUMBER KEYS, because everything else in this game has them and this
+   * screen did not — the pitch is 1-5, the spot is WASD, the card is SPACE,
+   * and the one screen that asks you a QUESTION was mouse-only.
+   *
+   * ⚠️ NO SPACE AND NO ENTER, deliberately, which is the one place this screen
+   * departs from the card. SPACE means "go" everywhere else, and a player who
+   * has hammered it through nine pre-game cards would answer a trade offer
+   * without reading it. There is no default here; you have to name a choice.
+   *
+   * Its own listener, removed on the way out — the main handler runs press(),
+   * which drives a game that has not started yet.
+   */
+  function onKey(e: KeyboardEvent): void {
+    const i = Number(e.key) - 1;
+    if (Number.isInteger(i) && i >= 0 && i < m.choices.length) {
+      e.preventDefault();
+      take(i);
+    }
+  }
+  addEventListener('keydown', onKey);
+}
+
+/**
+ * YOUR BATTING ORDER, on the pre-game card — and it is yours to set.
+ *
+ * ⚠️ THE ORDER IS PURELY OFFENSIVE, WHICH IS WHY THIS IS SAFE. `Team.lineup` is
+ * the batting order and nothing else: assignPositions() in defense.ts sorts the
+ * same nine by glove to decide who plays where, independently, so moving your
+ * best bat to the top cannot accidentally put him at shortstop. Nothing else in
+ * the engine reads the order except whose turn it is to hit.
+ *
+ * ⚠️ IT WRITES TO THE SEASON'S OWN ROSTERS, not to LEAGUE. franchise.ts says
+ * the season owns all thirty clubs and everything reads them through teamOf();
+ * this is the first feature to actually take it up on that. Your order is part
+ * of the save, it survives a reload, and it does not follow you into the next
+ * franchise — which is right, because the next franchise is a new club.
+ *
+ * ponytail: yours only, and no bench. The other twenty-nine clubs bat in the
+ * order teams.ts wrote them in, and they are not worse for it — the computer
+ * cannot tell you why it moved somebody, so a lineup it shuffled would read as
+ * noise. Give the CPU an order rule when a club identity wants one.
+ */
+/**
+ * HOT or COLD beside a man's name, or nothing.
+ *
+ * ⚠️ IT READS THE SAME FUNCTION THE AT-BAT DOES. form.ts is what inForm()
+ * applies to the club that walks out there, so a man tagged HOT here is
+ * measurably better tonight — the tag is a readout, not flavour. A label drawn
+ * off a second rule would be the game lying to the player about its own dice.
+ */
+function formTag(s: Season, name: string): string {
+  const f = formOf(s.seed, s.day, name);
+  const tag = formLabel(f);
+  if (!tag) return '';
+  return ` <b style="color:var(--${tag.hot ? 'good' : 'bad'})">${tag.text}</b>`;
+}
+
+function lineupPanel(s: Season): string {
+  const you = teamOf(s, s.you);
+  const book = s.stats;
+
+  const rows = you.lineup
+    .map((p, i) => {
+      const on = i === lineupPick;
+      const line = book?.bat[p.name];
+      // His season, if there is one yet. Day one shows the ratings alone rather
+      // than a column of .000s, which would read as nine men in a slump.
+      const so_far = line && line.pa > 0
+        ? `${rate(avg(line))} &middot; ${line.hr}HR ${line.rbi}RBI`
+        : '';
+      return (
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + i + '" tabindex="0" style="cursor:pointer">' +
+        '<span>' + (on ? '&#9656; moving' : String(i + 1)) + '</span>' +
+        '<b>' + p.name + formTag(s, p.name) + '</b>' +
+        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(p.power) +
+        ' &middot; CON ' + showScale(p.contact) + ' &middot; VIS ' + showScale(p.vision) +
+        ' &middot; SPD ' + showScale(p.speed) + '</span>' +
+        '<span class="dim">' + so_far + '</span></div>'
+      );
+    })
+    .join('');
+
+  // ⚠️ THE BENCH IS IN THE SAME LIST AND THE SAME SWAP HANDLES IT. Clicking a
+  // starter and then a bench man exchanges them, which is how a man gets INTO
+  // the nine for a night — there is no second widget and no "promote" verb.
+  // Both arrays live on the same Team in Season.rosters, so the exchange is one
+  // edit to each and it is in the save.
+  //
+  // ⚠️ THIS IS THE ONLY PLACE THE BENCH CAN BE RESHUFFLED. Once the game starts,
+  // pinchHit() writes into the GAME's copy only — a substitution is for tonight,
+  // and a season whose roster quietly rearranged itself every ninth inning
+  // would be an offseason nobody asked for.
+  const benched = (you.bench ?? [])
+    .map((p, i) => {
+      const at = you.lineup.length + i;
+      const on = at === lineupPick;
+      const line = book?.bat[p.name];
+      // ⚠️ NOT `s`. This used to shadow the Season with the man's batting line,
+      // which was harmless while nothing in the row needed the season — and
+      // stopped being harmless the moment formTag() did.
+      const bat = statsOf(p);
+      const so_far = line && line.pa > 0
+        ? `${rate(avg(line))} &middot; ${line.hr}HR ${line.rbi}RBI`
+        : '';
+      return (
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" tabindex="0" style="cursor:pointer">' +
+        '<span class="dim">' + (on ? '&#9656; moving' : benchRole(p, you.lineup)) + '</span>' +
+        '<b>' + p.name + formTag(s, p.name) + '</b>' +
+        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(bat.power) +
+        ' &middot; CON ' + showScale(bat.contact) + ' &middot; VIS ' + showScale(bat.vision) +
+        ' &middot; SPD ' + showScale(bat.speed) + '</span>' +
+        '<span class="dim">' + so_far + '</span></div>'
+      );
+    })
+    .join('');
+
+  return (
+    '<div class="panel lineup"><div class="dim penhead">YOUR LINEUP &mdash; CLICK TWO MEN TO SWAP THEM</div>' +
+    rows +
+    (benched
+      ? '<div class="dim penhead" style="margin-top:12px">YOUR BENCH</div>' + benched
+      : '') +
+    '<div class="dim" style="font-size:10px;margin-top:6px">' +
+    (lineupPick === null
+      ? 'Slot one bats the most times. Swap a bench man with a starter to put him in the nine tonight. ' +
+        'Nobody bats where he does because of his glove &mdash; that is worked out separately.'
+      : 'Now click the man he changes places with.') +
+    '</div></div>'
+  );
+}
+
+/**
+ * YOUR ROTATION, on the pre-game card.
+ *
+ * ⚠️ THIS PANEL IS THE FEATURE. Before it there was no choice to make: every
+ * club started rotation[0] in every game it ever played, so a fourteen-game
+ * season was one starter fourteen times and you met exactly seven opposing
+ * arms all year. Five starters and a rest rule are only a rotation if
+ * somebody picks, and this is where you pick.
+ *
+ * ⚠️ REST IS SHOWN AS STA, THE SAME NUMBER THE PEN PANEL SHOWS IN-GAME. Not a
+ * separate "days rest" column — rest is spent as stamina and as nothing else
+ * (see rotation.ts), so giving it its own quantity on screen would imply a
+ * second mechanic that does not exist. The word beside it is the plain-English
+ * reading: RESTED, WORKING, SHORT REST, SPENT.
+ */
+function rotationPanel(s: Season): string {
+  const you = teamOf(s, s.you);
+  const rows = you.rotation
+    .map((arm, i) => {
+      const fresh = restOf(s, s.you, arm.name);
+      const sta = restedStamina(arm, fresh);
+      const word =
+        fresh >= 1 ? 'RESTED' : fresh >= 0.66 ? 'WORKING' : fresh > 0 ? 'SHORT REST' : 'SPENT';
+      const colour = fresh >= 1 ? 'var(--good)' : fresh >= 0.66 ? 'var(--ink)' : 'var(--bad)';
+      const on = i === myStarter;
+      return (
+        '<div class="penrow' + (on ? ' picked' : '') + '" data-sp="' + i + '" tabindex="0" style="cursor:pointer">' +
+        '<span>' + (on ? '&#9656; starting' : '') + '</span><b>' + arm.name + formTag(s, arm.name) + '</b>' +
+        '<span class="dim">' + arm.throws + 'HP &middot; BRE ' + showScale(arm.break ?? 1) +
+        ' &middot; STA ' + showScale(sta) + '</span>' +
+        '<span style="color:' + colour + '">' + word + '</span></div>'
+      );
+    })
+    .join('');
+  // ⚠️ THE PEN IS ON THIS SCREEN TOO, and it is NOT pickable here. Who starts
+  // is a decision you make before the first pitch; who relieves is one you make
+  // in the seventh, with the score in front of you. What you need now is only
+  // to know who is available — a closer who threw the last three nights is a
+  // fact you want BEFORE you decide how long to leave your starter in.
+  const pen = you.bullpen
+    .map((arm) => {
+      const fresh = penRestOf(s, s.you, arm.name);
+      const legs = restedStamina(arm, fresh);
+      const word =
+        fresh >= 0.99 ? 'READY' : fresh >= 0.7 ? 'USED' : fresh >= 0.45 ? 'TIRED' : 'GASSED';
+      const colour =
+        fresh >= 0.99 ? 'var(--good)' : fresh >= 0.7 ? 'var(--ink)' : fresh >= 0.45 ? 'var(--hot)' : 'var(--bad)';
+      return (
+        '<div class="penrow"><span></span><b>' + arm.name + '</b>' +
+        '<span class="dim">' + arm.throws + 'HP &middot; BRE ' + showScale(arm.break ?? 1) +
+        ' &middot; STA ' + showScale(legs) + '</span>' +
+        '<span style="color:' + colour + '">' + word + '</span></div>'
+      );
+    })
+    .join('');
+
+  return (
+    '<div class="panel rotation"><div class="dim penhead">YOUR ROTATION &mdash; PICK A STARTER</div>' +
+    rows +
+    '<div class="dim" style="font-size:10px;margin-top:6px">' +
+    // ⚠️ THE COUNT IS READ OFF THE CLUB, NOT WRITTEN OUT. This said "the
+    // three" and then "the five", and both were wrong somewhere: a SEASON
+    // STORES ITS ROSTERS WHOLE, so a franchise begun before the staff went to
+    // twenty-six men is still playing three starters and three relievers and
+    // will be until it ends. It loads and plays correctly — that is the point
+    // of storing them whole — and the line under the panel was the one thing
+    // on the screen telling it that it had five.
+    'A start costs him a game and a half. Turn the ' + you.rotation.length +
+    ' over and everybody is always whole; ' +
+    'reach for a man early and he is short the next time you need him.</div>' +
+    '<div class="dim penhead" style="margin-top:12px">YOUR PEN &mdash; WHO IS AVAILABLE</div>' +
+    pen +
+    '<div class="dim" style="font-size:10px;margin-top:6px">' +
+    'An outing costs a reliever most of a night and he refills slower than a starter. ' +
+    'Use him every other day for ever; use him four nights running and there is nothing left.</div>' +
+    '</div>'
+  );
+}
+
+/**
+ * THE CARD, shown before every franchise game.
+ *
+ * ⚠️ FRANCHISE ONLY, and that is not an omission. An exhibition has no
+ * standings, no wire and no record — every panel below would be empty or a
+ * lie, and a screen that shows you eight rows of 0-0 before a one-off game is
+ * a loading screen with extra steps. You picked both clubs in an exhibition;
+ * there is nothing here you do not already know.
+ *
+ * WHAT IT IS FOR. The season already simulated the other seven clubs' afternoon
+ * — playDay() has done that since franchise mode existed — and the player never
+ * saw any of it. They walked out of one game and straight into the next with a
+ * standings table buried behind a finished-game screen. Everything on this
+ * screen is state that was ALREADY BEING COMPUTED and never shown.
+ *
+ * ⚠️ ROSTER STRENGTH IS ON IT DELIBERATELY, top and centre on both clubs. The
+ * league is no longer balanced — see value.ts — so who is better is now a real
+ * fact about the night, and a player who cannot see it before the first pitch
+ * has to infer it from fourteen games of results. It is also the number every
+ * future roster move will be judged by, which is the other reason it wants a
+ * home now rather than the day trades land.
+ */
+function showPregame(s: Season, m: Matchup, cursor?: string): void {
+  const el = document.getElementById('pre');
+  if (!el) {
+    // No overlay in the document: play the game rather than stranding them on
+    // a blank screen. A missing panel must never be a locked season.
+    kickOff(teamOf(s, m.home), teamOf(s, m.away), m.home === s.you ? 'home' : 'away');
+    return;
+  }
+
+  // ⚠️ THE DEFAULT IS WHAT A MANAGER WOULD DO, NOT THE ACE.
+  //
+  // myStarter persists between games so the panel remembers what you clicked,
+  // and if it were simply left alone a player who never opens the picker would
+  // start rotation[0] every single game — which is EXACTLY the bug this whole
+  // change exists to remove, reintroduced through the front door. So every
+  // card re-seeds it from pickStarter(), the same call the computer makes for
+  // its own clubs. Ignore the panel entirely and your rotation still turns
+  // over properly; open it and you can overrule the man.
+  const cardKey = `${s.you}:${s.day}`;
+  if (starterSeededFor !== cardKey) {
+    myStarter = starterFor(s, s.you).index;
+    starterSeededFor = cardKey;
+  }
+
+  const table = standings(s);
+  const recordOf = (abbr: string): Standing =>
+    table.find((r) => r.abbr === abbr) ?? { abbr, w: 0, l: 0, rf: 0, ra: 0, hf: 0, gb: 0, value: 0 };
+  // ⚠️ THE SEASON'S OWN CLUBS, NOT `LEAGUE`. This is the pool the rank on the
+  // card is measured against — "THIN, 28 of 30" — and reading the module-level
+  // league made that sentence describe a different competition than the one
+  // being played. Resume a thirty-club franchise after importing a league of
+  // six and every card read "0 of 6", the nought because your club was not in
+  // the six at all and strengthRank() had nothing to find.
+  const clubs = clubsIn(s).map((abbr: string) => teamOf(s, abbr));
+
+  /** One club's half of the marquee. */
+  const side = (abbr: string, where: string): string => {
+    const t = teamOf(s, abbr);
+    const r = recordOf(abbr);
+    const rank = strengthRank(t, clubs);
+    // ⚠️ NOT rotation[0]. The card has to name the man the game will actually
+    // send out, or the screen and the first pitch disagree — and with a
+    // rotation they no longer agree by default. Yours is your pick; theirs is
+    // the same pickStarter() call the game itself will make.
+    const at = abbr === s.you ? myStarter : starterFor(s, abbr).index;
+    const arm = t.rotation[at] ?? t.rotation[0]!;
+    // The lineup as one line of ratings — the club's averages, on the same
+    // 20-99 scale the in-game namecards use, so the two never disagree.
+    const avg = (pick: (p: Player) => number): number =>
+      showScale(t.lineup.reduce((a, p) => a + pick(p), 0) / t.lineup.length);
+    return (
+      `<div class="panel">` +
+      `<div class="club">${t.abbr}${abbr === s.you ? ' (you)' : ''}</div>` +
+      `<div class="dim">${t.name} · ${where}</div>` +
+      `<div style="margin-top:6px">${r.w}-${r.l} <span class="dim">` +
+      `${r.rf} for, ${r.ra} against</span></div>` +
+      `<div style="margin-top:6px"><b>${strengthLabel(rank, clubs.length)}</b> ` +
+      `<span class="dim">${rank} of ${clubs.length} by roster · ${clubValue(t).toFixed(2)}</span></div>` +
+      // HOW THEY PLAY, directly under how good they are. The two answer
+      // different questions and the card has always only answered the first.
+      `<div style="margin-top:6px"><b style="color:var(--good)">${t.identity?.name ?? 'STEADY'}</b>` +
+      `<span class="dim"> — ${t.identity?.blurb ?? ''}</span></div>` +
+      `<div style="margin-top:6px" class="dim">lineup &nbsp; ` +
+      `POW <b>${avg((p) => p.power)}</b> &nbsp; CON <b>${avg((p) => p.contact)}</b> &nbsp;` +
+      ` VIS <b>${avg((p) => p.vision)}</b> &nbsp; SPD <b>${avg((p) => p.speed)}</b></div>` +
+      // ⚠️ THEIR STARTER'S FORM IS ON THE CARD TOO, not just yours. Who is hot
+      // is the one thing on this screen that changes week to week, and hiding
+      // the away half of it would make the tag read as a house advantage.
+      `<div style="margin-top:6px">${arm.name}${formTag(s, arm.name)} <span class="dim">` +
+      `(${arm.throws}HP, ${scoutingReport(arm).split(' · ').slice(1).join(' · ')})</span></div>` +
+      `<div class="dim">${arm.blurb}</div>` +
+      `</div>`
+    );
+  };
+
+  // The rest of today's card. Nothing else on this screen tells you that the
+  // club chasing you is playing the club at the bottom tonight.
+  const elsewhere = gamesOn(s)
+    .filter((g) => g.home !== m.home || g.away !== m.away)
+    .map((g) => `${g.away} at ${g.home}`)
+    .join(' &nbsp;·&nbsp; ');
+
+  const rows = table
+    .map((r) => {
+      const you = r.abbr === s.you ? ' class="you"' : '';
+      const playing = r.abbr === m.home || r.abbr === m.away ? '▸ ' : '';
+      return (
+        `<tr${you}><td class="team">${playing}${r.abbr}</td><td>${r.w}</td><td>${r.l}</td>` +
+        `<td>${r.gb === 0 ? '—' : r.gb.toFixed(1)}</td><td>${r.rf}</td><td>${r.ra}</td>` +
+        `<td>${r.hf}</td><td>${clubValue(teamOf(s, r.abbr)).toFixed(2)}</td></tr>`
+      );
+    })
+    .join('');
+
+  // The wire, newest first, most recent handful only. See franchise.ts — this
+  // is where a trade or an injury will appear the day one exists.
+  const wire = [...(s.news ?? [])]
+    .reverse()
+    .slice(0, 6)
+    .map((n) => `<div class="${n.kind}">${n.text}</div>`)
+    .join('');
+
+  el.innerHTML =
+    `<div class="wrap">` +
+    `<h1>${dayLabel(s)}</h1>` +
+    `<h2>${m.away} AT ${m.home}</h2>` +
+    // ⚠️ WHOSE BUILDING IT IS, AND WHAT IT DOES, BEFORE A PITCH IS THROWN. A
+    // park is the one thing on this card that applies to BOTH clubs, so it
+    // belongs across the top rather than inside either panel — putting it in
+    // the home club's half would read as a home-field advantage, which is
+    // exactly what atPark() is written not to be.
+    parkLine(teamOf(s, m.home)) +
+    `<div class="vs">${side(m.away, 'away')}${side(m.home, 'home')}</div>` +
+    (elsewhere ? `<div class="panel dim">also today &nbsp; ${elsewhere}</div>` : '') +
+    `<div class="panel"><table class="line"><thead><tr>` +
+    `<th></th><th>W</th><th>L</th><th>GB</th><th>RF</th><th>RA</th><th>H</th><th>ROSTER</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table></div>` +
+    (wire ? `<div class="panel wire"><b>AROUND THE LEAGUE</b>${wire}</div>` : '') +
+    lineupPanel(s) +
+    rotationPanel(s) +
+    `<button class="go" data-play="1">PLAY BALL <kbd>SPACE</kbd></button>` +
+    `<button class="go" data-cal="1">THE SCHEDULE <kbd>C</kbd></button>` +
+    `<button class="go" data-stats="1">LEAGUE LEADERS <kbd>L</kbd></button>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  /**
+   * Redraw the whole card, and stay where the player was reading.
+   *
+   * ⚠️ THE SCROLL POSITION IS THE WHOLE REASON THIS EXISTS. showPregame() puts
+   * the card back to the top, which is right when you arrive at it and wrong
+   * every time you press something ON it: both pickers sit below the standings
+   * table, so picking a starter — or the first of the two men you are swapping
+   * — threw you back to the top of the page and you had to scroll down again to
+   * make the second click. Restoring it here fixes both pickers at once,
+   * because both of them redraw through this.
+   */
+  const redraw = (next: Season): void => {
+    const at = el.scrollTop;
+    // ⚠️ THE CURSOR SURVIVES THE REDRAW, for the same reason the scroll position
+    // does. Picking a starter redraws the whole card, and a cursor that jumped
+    // back to PLAY BALL every time would make both pickers unusable from the
+    // keyboard after exactly one press. Remembered as the ROW rather than as
+    // the man: after a swap the slot is where you just put somebody, which is
+    // where you are looking.
+    const on = document.activeElement as HTMLElement | null;
+    const sp = on?.dataset['sp'];
+    const lu = on?.dataset['lu'];
+    showPregame(
+      next,
+      m,
+      sp !== undefined ? `[data-sp="${sp}"]` : lu !== undefined ? `[data-lu="${lu}"]` : undefined,
+    );
+    el.scrollTop = at;
+  };
+
+  /**
+   * Hand the keyboard back. See onKey at the bottom — every door off this card
+   * that is not go() has to take the card's listener down first, or the screen
+   * it opens is sharing SPACE with a PLAY BALL button nobody can see.
+   */
+  const leaveCard = (): void => {
+    removeEventListener('keydown', onKey);
+    dpadOffPre();
+  };
+
+  /** Click one of this card's buttons. See onKey. */
+  const press = (sel: string): void => el.querySelector<HTMLButtonElement>(sel)?.click();
+
+  const bindRotation = (): void => {
+    el.querySelectorAll<HTMLElement>('[data-sp]').forEach((row) => {
+      row.onclick = () => {
+        myStarter = Number(row.dataset['sp']);
+        // The marquee names the starter too, so the whole card is redrawn
+        // rather than just the picker — two places showing one fact.
+        redraw(s);
+      };
+    });
+    el.querySelectorAll<HTMLElement>('[data-lu]').forEach((row) => {
+      row.onclick = () => swapInto(Number(row.dataset['lu']));
+    });
+    el.querySelector<HTMLButtonElement>('[data-stats]')!.onclick = () => {
+      leaveCard();
+      showStats(season ?? s, null, () => showPregame(season ?? s, m));
+    };
+    // ⚠️ THE CALENDAR LEAVES THIS CARD FOR GOOD IF YOU SKIP. Its `back` puts
+    // you here again, but a day cell calls skipTo(), which advances the season
+    // and re-enters through nextGame() — so the card you come back to is the
+    // card for the day you jumped to, drawn fresh, not this closure.
+    el.querySelector<HTMLButtonElement>('[data-cal]')!.onclick = () => {
+      leaveCard();
+      showCalendar(season ?? s, () => showPregame(season ?? s, m));
+    };
+  };
+
+  /**
+   * Pick a man up, or put the one you are holding down here.
+   *
+   * ⚠️ THE WHOLE CARD IS REDRAWN, and it is redrawn against the SAVED season
+   * rather than the `s` this render closed over. go() captures the season it
+   * was built with and hands those rosters to kickOff(), so re-rendering with
+   * the old one would start the game with the order you had before the swap —
+   * the screen would show the change and the first inning would not.
+   */
+  const swapInto = (i: number): void => {
+    if (lineupPick === null) {
+      lineupPick = i;
+      redraw(s);
+      return;
+    }
+    const at = lineupPick;
+    lineupPick = null;
+    if (at === i) {
+      // Clicking the same man again puts him back down. A pick you cannot undo
+      // is a trap on a touchscreen.
+      redraw(s);
+      return;
+    }
+    // ⚠️ ONE FLAT LIST, NINE STARTERS THEN THE BENCH. The panel numbers the
+    // bench rows straight on from the lineup, so a swap is a swap whether it
+    // is two starters, two bench men, or one of each — and "put him in the
+    // nine" needs no rule of its own. Split back into the two arrays at the
+    // end, because that is the shape a Team is.
+    const you = teamOf(s, s.you);
+    const all = [...you.lineup, ...(you.bench ?? [])];
+    [all[at], all[i]] = [all[i]!, all[at]!];
+    const after: Season = {
+      ...s,
+      rosters: {
+        ...s.rosters,
+        [s.you]: {
+          ...you,
+          lineup: all.slice(0, you.lineup.length),
+          ...(you.bench ? { bench: all.slice(you.lineup.length) } : {}),
+        },
+      },
+    };
+    season = after;
+    saveSeason(after);
+    redraw(after);
+  };
+  bindRotation();
+
+  const go = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    dpadOffPre();
+    const youAre: Side = m.home === s.you ? 'home' : 'away';
+    const them = youAre === 'home' ? m.away : m.home;
+    // Your choice, and the computer's — resolved HERE so the man on the card
+    // is the man who takes the ball.
+    const mineP = armFor(s, s.you, myStarter);
+    const theirsP = starterFor(s, them);
+    // ⚠️ penLegs TRAVELS WITH THE STARTER. Dropping it here is invisible and
+    // wrong in exactly one direction: the pre-game card reads the season and
+    // showed two gassed relievers, the in-game pen panel reads the Staff and
+    // showed them at their card rating, and the arm that came in was whole.
+    // Both screens have to be looking at the same ledger.
+    // ⚠️ IN TODAY'S FORM, both sides, exactly as playDay() sends out the other
+    // fourteen games on the card. See form.ts: if the game you play read the
+    // flat roster while the league's games read form, your club would be the
+    // only one in it whose slumps never happened.
+    kickOff(
+      inForm(teamOf(s, m.home), s.seed, s.day, rulesOf(s).streak),
+      inForm(teamOf(s, m.away), s.seed, s.day, rulesOf(s).streak),
+      youAre,
+      {
+        [youAre]: { index: mineP.index, stamina: mineP.stamina, penLegs: mineP.penLegs },
+        [them === m.home ? 'home' : 'away']: {
+          index: theirsP.index,
+          stamina: theirsP.stamina,
+          penLegs: theirsP.penLegs,
+        },
+      } as { home?: StarterPick; away?: StarterPick },
+    );
+  };
+  // ⚠️ Its own listener, removed on the way out. The main keydown handler runs
+  // press(), which drives a game that has not started yet — routing SPACE
+  // through it here would deliver a pitch behind the screen.
+  //
+  // ⚠️ AND IT HAS TO COME DOWN BEFORE ANOTHER SCREEN GOES UP, or the card is
+  // still listening underneath it: SPACE on the calendar would close the
+  // calendar AND throw the first pitch of a game the player did not ask to
+  // start. leaveCard() is that, on its own, for the doors that are not go().
+  //
+  // ⚠️ SPACE AND ENTER ARE NOT IN HERE ANY MORE. They used to play the game
+  // from anywhere on the card, which stopped being right the moment the card
+  // grew a cursor: ENTER on THE SCHEDULE would have opened the calendar AND
+  // kicked off the ball game behind it. The d-pad presses what the cursor is
+  // on, and the cursor arrives on PLAY BALL — so the button's own SPACE hint is
+  // still true on the screen you land on. See installDpad().
+  function onKey(e: KeyboardEvent): void {
+    const k = e.key.toLowerCase();
+    // The two other doors off this card, both of which the buttons advertise.
+    // Routed through the buttons rather than calling the two screens directly,
+    // so the key and the click can never take different paths off this card —
+    // the click is the one that remembers to hand the keyboard back.
+    if (k === 'c' || k === 'l') {
+      e.preventDefault();
+      press(k === 'c' ? '[data-cal]' : '[data-stats]');
+    }
+  }
+  addEventListener('keydown', onKey);
+  el.querySelector<HTMLButtonElement>('[data-play]')!.onclick = () => go();
+
+  // The cursor lands on PLAY BALL, or back on the row a redraw took it off.
+  dpadOnPre(
+    (cursor ? el.querySelector<HTMLElement>(cursor) : null) ??
+      el.querySelector<HTMLElement>('[data-play]'),
+  );
+}
+
+/**
+ * THE CALENDAR — every day of your year, and the one control that makes a long
+ * season possible: pick a day and everything before it is played without you.
+ *
+ * ⚠️ WHY THIS EXISTS. A fourteen-game year is a schedule you can simply play.
+ * A hundred and sixty-two is not, and shipping the longer years without a way
+ * past them would be a menu option that hands the player a chore. So the
+ * calendar is not a view — it is the second half of the season-length feature,
+ * and every cell in it is a button.
+ *
+ * ⚠️ IT JUMPS FORWARD ONLY. There is no rewinding a season — see simTo() — so
+ * a played day is text and an unplayed one is a door. Clicking today plays
+ * today, which is the same thing PLAY BALL does, and is there so the grid has
+ * no dead cell in the middle of it.
+ *
+ * ponytail: a flat wrap of day cells, not a month grid with weekday columns
+ * and empty leading squares. The season has no dates in it — day 1 is not a
+ * Tuesday and nothing in the engine thinks otherwise — so a real calendar
+ * would be six weeks of decoration around the only number that means anything.
+ * Give it dates when there is something that CARES about dates, like a
+ * day-of-week rest rule; what it grows then is a label per cell.
+ */
+function showCalendar(s: Season, back: () => void): void {
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const n = regularDays(s);
+  const mine = (m: Matchup): boolean => m.home === s.you || m.away === s.you;
+
+  // Your results, by day. Playoff days are in here too — the grid runs to the
+  // end of the bracket, not to the end of the schedule, because "sim to the
+  // final" is the jump a knocked-out player wants.
+  //
+  // ⚠️ INDEXED ONCE, not filtered per cell. resultsOn() walks every result in
+  // the season, and a hundred and sixty-four cells each walking two and a half
+  // thousand results is the same answer computed four hundred thousand times.
+  const yours = new Map<number, Result>();
+  for (const r of s.results) if (mine(r)) yours.set(r.day, r);
+
+  const cell = (day: number): string => {
+    // ⚠️ THE PLAYOFF CELLS ARE NAMED FOR THEIR ROUND, NOT NUMBERED ON FROM THE
+    // SCHEDULE. "163" means nothing beside "SF 2"; and with a bracket of eight
+    // and a best-of-seven there are twenty-one playoff days to tell apart.
+    const label =
+      day < n
+        ? String(day + 1)
+        : shortRound(s, roundOn(s, day)) + (seriesOf(s) > 1 ? ` ${gameInRound(s, day) + 1}` : '');
+    const m = gamesOn(s, day).find(mine);
+    const r = yours.get(day);
+
+    // ---- Behind you. Either a result to read, or a day you sat out.
+    if (day < s.day) {
+      if (!r) {
+        return (
+          `<div class="cal off"><span class="calday">${label}</span>` +
+          `<span class="dim">—</span></div>`
+        );
+      }
+      const home = r.home === s.you;
+      const [us, them] = home ? [r.hr, r.ar] : [r.ar, r.hr];
+      const won = us > them;
+      return (
+        `<div class="cal done"><span class="calday">${label}</span>` +
+        `<span class="dim">${home ? 'vs' : 'at'} ${home ? r.away : r.home}</span>` +
+        `<span class="${won ? 'w' : 'l'}">${won ? 'W' : 'L'} ${us}-${them}</span></div>`
+      );
+    }
+
+    // ---- Ahead of you, so it is a door whatever is in it. A playoff day with
+    // no opponent yet is STILL a door, and it is the most useful one on the
+    // screen: "sim the rest of the year" is a click on the semifinal. Naming
+    // an opponent there would be a lie — see the note in gamesOn().
+    const today = day === s.day;
+    const who = m
+      ? `${m.home === s.you ? 'vs' : 'at'} ${m.home === s.you ? m.away : m.home}`
+      : day >= n
+        ? 'bracket'
+        : 'not you';
+    return (
+      `<button class="cal${today ? ' now' : ''}" data-day="${day}">` +
+      `<span class="calday">${label}</span>` +
+      `<span class="${m ? '' : 'dim'}">${who}</span>` +
+      `<span class="dim">${today && m ? 'play' : 'sim to here'}</span></button>`
+    );
+  };
+
+  const days: string[] = [];
+  for (let d = 0; d < seasonEnd(s); d++) days.push(cell(d));
+
+  const table = standings(s);
+  const me = table.find((r) => r.abbr === s.you);
+  const played = s.results.filter((r) => mine(r) && r.day < n).length;
+
+  el.innerHTML =
+    `<div class="wrap">` +
+    `<h1>${dayLabel(s)}</h1>` +
+    `<h2>${s.you} — THE SCHEDULE</h2>` +
+    `<div class="panel dim">` +
+    `${me ? `<b>${me.w}-${me.l}</b>, ` : ''}${played} of ${n} played. ` +
+    `Pick a day and the ones before it are played for you — your club included.` +
+    `</div>` +
+    `<div class="calgrid">${days.join('')}</div>` +
+    // ⚠️ ESC, NOT SPACE, AND THE HINT HAD TO CHANGE WITH IT. SPACE presses
+    // what the cursor is on now, and on this screen the cursor starts on today
+    // — so a button still advertising SPACE would be pointing at a key that
+    // plays a ball game.
+    `<button class="go" data-back="1">BACK TO THE CARD <kbd>ESC</kbd></button>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    dpadOffPre();
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+      back();
+    }
+  }
+  addEventListener('keydown', onKey);
+  el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => {
+    leave();
+    back();
+  };
+
+  el.querySelectorAll<HTMLElement>('[data-day]').forEach((b) => {
+    b.onclick = () => {
+      leave();
+      skipTo(Number(b.dataset['day']));
+    };
+  });
+
+  // ⚠️ THE CURSOR STARTS ON TODAY, not on day one. Day one is usually months
+  // behind you and is not a door at all; today is the only cell that plays
+  // rather than skips, and it is the cell somebody opening this screen is
+  // looking for. A finished season has no today, so the last door will do.
+  dpadOnPre(
+    el.querySelector<HTMLElement>('button.cal.now') ??
+      el.querySelector<HTMLElement>('button.cal') ??
+      el.querySelector<HTMLElement>('[data-back]'),
+  );
+}
+
+/** A round's name in two or three characters, for a calendar cell. */
+const shortRound = (s: Season, round: number): string => {
+  const left = roundsOf(s) - round;
+  return left <= 1 ? 'F' : left === 2 ? 'SF' : `R${2 ** left}`;
+};
+
+/**
+ * Play everything up to a day, then arrive at it.
+ *
+ * ⚠️ THE MOMENT GATE IS WHY THIS IS NOT ONE LINE. simTo() halts on a day a
+ * franchise moment would fire on, WITHOUT playing it — see franchise.ts — so a
+ * jump from day two to day ninety stops at the trade deadline and hands the
+ * player the question. nextGame() then does what it always does: shows the
+ * moment, then the card. Which means a skip lands you either on the day you
+ * asked for or on a decision, and never past one.
+ *
+ * ⚠️ AND IT PAINTS BEFORE IT WORKS. A day of a thirty-club league is fifteen
+ * whole ball games and costs about a tenth of a second; a jump across a
+ * hundred and sixty of them is the better part of twenty seconds of blocked
+ * main thread. Measured, not guessed: thirty-nine days took 4.3s in Chrome.
+ * Without a frame in between, the tab simply stops responding on the click and
+ * every player's first thought is that it crashed.
+ *
+ * ⚠️ A TIMER, NOT requestAnimationFrame, AND THAT IS A BUG FIX RATHER THAN A
+ * PREFERENCE. This first used the two-frame rAF idiom — the standard way to run
+ * something strictly after a paint. Chrome DOES NOT FIRE rAF IN A BACKGROUND
+ * TAB, and a hundred-and-thirty-day skip is precisely when a person tabs away:
+ * they click it BECAUSE it is going to take half a minute. Caught in the
+ * browser with document.hidden true and the callback never arriving — the
+ * screen sat on "PLAYING 132 DAYS" for ever, the season frozen mid-jump, and
+ * coming back to the tab was the only thing that would restart it. A timer
+ * fires either way. Yielding to a macrotask is enough of a gap for the browser
+ * to paint the note first when it IS visible, which is all the rAF was buying.
+ *
+ * ponytail: a note and a timer, not a web worker and a progress bar. The work
+ * is one synchronous call into a pure function, and moving it off the main
+ * thread means shipping the engine, the league and the whole season across a
+ * structured clone to save a wait nobody does twice a game.
+ */
+function skipTo(day: number): void {
+  if (!season) return;
+  const el = document.getElementById('pre');
+  const days = day - season.day;
+
+  const work = (): void => {
+    season = simTo(season!, day, (at) => momentOn(at) !== null);
+    saveSeason(season);
+    if (el) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+    }
+    nextGame();
+  };
+
+  // A jump of a day or three is over before a frame lands. Telling the player
+  // to wait for something that already happened is its own kind of broken.
+  if (!el || days <= 3) return work();
+
+  el.innerHTML =
+    `<div class="wrap"><h1>${dayLabel(season)}</h1>` +
+    `<h2>PLAYING ${days} DAYS</h2>` +
+    `<div class="panel dim">The rest of the league is on the field. ` +
+    `${days * (gamesOn(season).length || 15)} ball games — this takes a moment.</div></div>`;
+  el.style.display = 'flex';
+  setTimeout(work, 32);
+}
+
+/**
+ * THE NUMBERS — last night's box score, the league's leaders, and your club's
+ * year. Same overlay as the card, because it is the same moment: something to
+ * read between two ball games.
+ *
+ * ⚠️ ONE SCREEN, TWO DOORS. It is reached from the finished-game controls with
+ * a box score in hand, and from the pre-game card with none — and in both cases
+ * `back` is what the button at the bottom does. A separate screen per door
+ * would be the same three tables written twice, and the second copy is where
+ * the columns stop agreeing.
+ *
+ * ⚠️ THE BOX SCORE IS NOT SAVED ANYWHERE. It is read straight off the GameState
+ * of the game that just ended and it is gone when you leave. Keeping fourteen
+ * of them would be weight in the save to re-show a game the player watched;
+ * everything that has to survive the night is already in `Season.stats`.
+ *
+ * ⚠️ `s` IS NULLABLE BECAUSE AN EXHIBITION IS A REAL BALL GAME. Every at-bat
+ * in the engine goes through recordAtBat() whether or not there is a season
+ * around it — see stats.ts — so a one-off game finishes holding a complete box
+ * score, and the only thing standing between the player and it was this
+ * function wanting a Season for three things: the day to date it, the club
+ * names, and the year to print rates against. The first two have answers
+ * without a season (the game itself knows who is playing) and the third
+ * honestly does not, so an exhibition gets the night's numbers and no league
+ * panels. What it does not get is nothing at all, which is what it got before.
+ */
+/**
+ * THE LEAGUE LEADERS — six short lists rather than one long table: nobody reads
+ * a four-hundred-row sort, and the question is always "who is leading".
+ *
+ * ⚠️ EVERY ROW CARRIES ITS PLAYING TIME, and that is not decoration. ".577"
+ * and "0.00" are different claims over 26 at-bats and over 300, and in a
+ * fourteen-game season they are ALWAYS over the small number — a board that
+ * prints the rate alone is asking the player to trust a sample he cannot see.
+ *
+ * ⚠️ IT LIVES OUT HERE BECAUSE THE YEAR ENDS. This was written inside
+ * showStats(), which is the DURING-the-season screen; the champion screen wants
+ * the identical six lists with the season finished, and two copies of a
+ * leaderboard is two places for a qualifying rule to drift.
+ */
+function leaderBoardsFor(book: StatBook | undefined): string {
+  if (!book) return '';
+  const board = (
+    title: string,
+    rows: { name: string; line: { tm: string } }[],
+    over: (l: never) => string,
+    val: (l: never) => string,
+  ): string =>
+    `<div class="panel" style="flex:1 1 200px"><div class="dim penhead">${title}</div>` +
+    (rows.length === 0
+      ? '<div class="dim">nothing yet</div>'
+      : rows
+          .map(
+            (r) =>
+              `<div class="penrow" style="grid-template-columns:1fr auto auto"><b>${r.name}` +
+              ` <span class="dim">${r.line.tm}</span></b>` +
+              `<span class="dim" style="font-size:10px">${over(r.line as never)}</span>` +
+              `<span class="tot">${val(r.line as never)}</span></div>`,
+          )
+          .join('')) +
+    '</div>';
+
+  const AB = (l: BatLine): string => `${l.ab}ab`;
+  const IP = (l: ArmLine): string => `${ip(l.outs)}ip`;
+  return (
+    '<div class="vs">' +
+    board('BATTING AVERAGE', leaders(book.bat, avg, (l) => l.pa, 5), AB, (l: BatLine) => rate(avg(l))) +
+    board('HOME RUNS', leaders(book.bat, (l) => l.hr, (l) => l.pa, 5), AB, (l: BatLine) => String(l.hr)) +
+    board('RUNS BATTED IN', leaders(book.bat, (l) => l.rbi, (l) => l.pa, 5), AB, (l: BatLine) => String(l.rbi)) +
+    '</div><div class="vs">' +
+    board('EARNED RUN AVERAGE', leaders(book.arm, era, (l) => l.outs, 5, true), IP, (l: ArmLine) => era(l).toFixed(2)) +
+    board('STRIKEOUTS', leaders(book.arm, (l) => l.k, (l) => l.outs, 5), IP, (l: ArmLine) => String(l.k)) +
+    board('WINS', leaders(book.arm, (l) => l.w, (l) => l.outs, 5), IP, (l: ArmLine) => `${l.w}-${l.l}`) +
+    '</div>'
+  );
+}
+
+function showStats(s: Season | null, box: StatBook | null, back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const head = (cols: string[]): string =>
+    `<thead><tr><th></th>${cols.map((c) => `<th>${c}</th>`).join('')}</tr></thead>`;
+
+  // ⚠️ THE COUNTING COLUMNS AND THE RATE COLUMNS COME FROM DIFFERENT BOOKS in a
+  // box score, and that is how a box score has always read: "2 for 4, and he is
+  // hitting .312" — the game on the left, the season on the right. Passing the
+  // season book in is what makes the last two columns mean something; without
+  // it AVG in a box score is just the same four numbers divided, which tells
+  // you nothing you cannot see two columns to the left.
+  const batRows = (rows: { name: string; line: BatLine }[], rates?: StatBook): string =>
+    rows
+      .map((r) => {
+        const year = rates?.bat[r.name] ?? r.line;
+        return (
+          `<tr><td class="team">${r.name}</td>` +
+          `<td>${r.line.ab}</td><td>${r.line.h}</td><td>${r.line.d}</td><td>${r.line.t}</td>` +
+          `<td>${r.line.hr}</td><td>${r.line.rbi}</td><td>${r.line.bb}</td><td>${r.line.k}</td>` +
+          `<td class="tot">${rate(avg(year))}</td><td>${rate(ops(year))}</td></tr>`
+        );
+      })
+      .join('');
+
+  const armRows = (
+    rows: { name: string; line: ArmLine }[],
+    decisions: boolean,
+    rates?: StatBook,
+  ): string =>
+    rows
+      .map((r) => {
+        // ⚠️ THE SAME SPLIT THE HITTERS GET, and it was missing here. batRows()
+        // has always taken the season book so a box score reads "2 for 4, and
+        // he is hitting .312" — the game on the left, the year on the right.
+        // The arms were printing an ERA folded from the three innings in this
+        // one column set, so one table was making two different claims: 13.50
+        // beside a man carrying a 2.81. Counting columns are the night's; rate
+        // columns are the season's; that is what a box score has always been.
+        const year = rates?.arm[r.name] ?? r.line;
+        // In a box score the decision is a letter beside the name; over a season
+        // it is a record, and W-L is the column everyone reads first.
+        const mark = r.line.w ? ' <b style="color:var(--good)">W</b>' : r.line.l ? ' <b style="color:var(--bad)">L</b>' : '';
+        return (
+          `<tr><td class="team">${r.name}${decisions ? '' : mark}</td>` +
+          (decisions ? `<td>${r.line.w}-${r.line.l}</td>` : '') +
+          `<td>${ip(r.line.outs)}</td><td>${r.line.h}</td><td>${r.line.r}</td><td>${r.line.er}</td>` +
+          `<td>${r.line.bb}</td><td>${r.line.k}</td>` +
+          `<td class="tot">${era(year).toFixed(2)}</td><td>${whip(year).toFixed(2)}</td></tr>`
+        );
+      })
+      .join('');
+
+  /**
+   * THE GLOVES — the third table, and the one nobody in this league had.
+   *
+   * ⚠️ THE NUMBERS EXISTED AND NOTHING ADDED THEM UP. placement.ts has printed
+   * "6-4-3" beside every out since the scorecard shipped, and its own header
+   * said what was missing: "the moment somebody wants a per-fielder total, the
+   * numbers are already here to add up." Meanwhile gloveOf() decides who plays
+   * shortstop and how often a ball gets booted, so a player could build a
+   * defence, watch it cost him a game, and find no record that anybody had
+   * fielded anything. See FieldLine in stats.ts.
+   *
+   * Same split as the other two: counting columns are the night's, the rate
+   * column is the year's.
+   */
+  const fieldRows = (rows: { name: string; line: FieldLine }[], rates?: StatBook): string =>
+    rows
+      .map((r) => {
+        const year = rates?.field?.[r.name] ?? r.line;
+        return (
+          `<tr><td class="team">${r.name}</td>` +
+          `<td>${chances(r.line)}</td><td>${r.line.po}</td><td>${r.line.a}</td>` +
+          `<td>${r.line.e}</td>` +
+          `<td class="tot">${rate(fpct(year))}</td></tr>`
+        );
+      })
+      .join('');
+
+  const panel = (title: string, table: string): string =>
+    `<div class="panel"><div class="dim penhead">${title}</div>` +
+    `<div style="overflow-x:auto"><table class="line">${table}</table></div></div>`;
+
+  const BAT = ['AB', 'H', '2B', '3B', 'HR', 'RBI', 'BB', 'K', 'AVG', 'OPS'];
+  const ARM = ['IP', 'H', 'R', 'ER', 'BB', 'K', 'ERA', 'WHIP'];
+  const FLD = ['TC', 'PO', 'A', 'E', 'FPCT'];
+
+  // ---- last night, if there is a last night. Both clubs, one panel each,
+  // in the order they batted: the visitors hit first and their line goes first.
+  const clubs = (b: StatBook): string[] => [
+    ...new Set(Object.values(b.bat).map((l) => l.tm)),
+  ];
+  // Whose name goes on the panel. The season owns its rosters; an exhibition
+  // has only the two clubs on the field, which are the two in this box score.
+  const named = (abbr: string): string =>
+    (s ? teamOf(s, abbr) : abbr === game.home.abbr ? game.home : game.away).name;
+  const boxPanels = box
+    ? clubs(box)
+        .map((abbr) => {
+          const bats = Object.entries(box.bat)
+            .filter(([, l]) => l.tm === abbr)
+            .map(([name, line]) => ({ name, line }));
+          const arms = Object.entries(box.arm)
+            .filter(([, l]) => l.tm === abbr)
+            .map(([name, line]) => ({ name, line }));
+          // ⚠️ THE GLOVES ARE THE OTHER CLUB'S. A club's batting line is its
+          // own half of the innings; its FIELDING line is the half it spent on
+          // the grass, which is stamped with its own abbreviation by
+          // recordPlay() — so this filter is right and reads wrong, and that is
+          // worth a sentence rather than a second lookup.
+          const gloves = Object.entries(box.field ?? {})
+            .filter(([, l]) => l.tm === abbr)
+            .sort((a, b) => chances(b[1]) - chances(a[1]))
+            .map(([name, line]) => ({ name, line }));
+          return (
+            panel(
+              `${named(abbr).toUpperCase()} — BATTING`,
+              // The rates are the season's, not the night's. See batRows().
+              // Without a season they are the night's, which is all there is.
+              head(BAT) + `<tbody>${batRows(bats, s?.stats)}</tbody>`,
+            ) +
+            panel(`${abbr} — PITCHING`, head(ARM) + `<tbody>${armRows(arms, false, s?.stats)}</tbody>`) +
+            (gloves.length
+              ? panel(`${abbr} — FIELDING`, head(FLD) + `<tbody>${fieldRows(gloves, s?.stats)}</tbody>`)
+              : '')
+          );
+        })
+        .join('')
+    : '';
+
+  const book = s?.stats;
+  const leaderBoards = leaderBoardsFor(book);
+
+  // ---- and your own club, everybody, in the order they bat. This is the one
+  // list where a man hitting .180 matters as much as the league leader does:
+  // he is in YOUR lineup and you can move him. See lineupPanel().
+  const you = s ? teamOf(s, s.you) : null;
+  const mine = !s || !you
+    ? ''
+    : book
+    ? panel(
+        `${you.name.toUpperCase()} — THE YEAR SO FAR`,
+        head(BAT) + `<tbody>${batRows(clubBatting(book, you.lineup.map((p) => p.name)))}</tbody>`,
+      ) +
+      panel(
+        `${you.abbr} — STAFF`,
+        head(['W-L', ...ARM]) +
+          `<tbody>${armRows(
+            clubArms(book, [...you.rotation, ...you.bullpen].map((p) => p.name)),
+            true,
+          )}</tbody>`,
+      ) +
+      // ⚠️ IN THE ORDER THEY BAT, same as the hitters above, and for the same
+      // reason: this is the list where you decide who to move. A man with six
+      // errors is a man you can sit, and until this table existed the only way
+      // to notice him was to watch every ball he booted.
+      panel(
+        `${you.abbr} — GLOVES`,
+        head(FLD) + `<tbody>${fieldRows(clubGloves(book, you.lineup.map((p) => p.name)))}</tbody>`,
+      )
+      : '<div class="panel dim">No games played yet.</div>';
+
+  // ⚠️ A BOX SCORE IS LABELLED WITH THE NIGHT IT IS OF, WHICH IS YESTERDAY.
+  // finalize() has already handed the result to playDay(), and playDay advances
+  // the cursor — so `s.day` on this screen is the game you are about to play
+  // and the box score of the one you just finished was headed "GAME 8 OF 28"
+  // while being the box score of game seven. The leaders screen is opened from
+  // the card and is about today; the box is only ever opened from the final.
+  const on = box && s ? s.day - 1 : s?.day ?? 0;
+  el.innerHTML =
+    `<div class="wrap">` +
+    `<h1>${s ? dayLabel(s, on) : 'EXHIBITION'}</h1>` +
+    `<h2>${box ? 'FINAL — THE BOX SCORE' : 'LEAGUE LEADERS'}</h2>` +
+    boxPanels +
+    leaderBoards +
+    mine +
+    `<button class="go" data-back="1">${
+      !s ? 'BACK TO THE FINAL' : box ? 'ON TO THE NEXT ONE' : 'BACK TO THE CARD'
+    } <kbd>SPACE</kbd></button>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  // Its own listener, removed on the way out — same reason as the card's.
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  }
+  addEventListener('keydown', onKey);
+  el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => leave();
+}
+
+/**
+ * THE RECORD BOOK — every season you have finished, and the best any of your
+ * men has ever had. Same overlay again; see showStats().
+ *
+ * ⚠️ IT IS REACHABLE FROM THE TITLE SCREEN, which is the only place it can
+ * usefully live: the book is about seasons that are OVER, and the one moment
+ * you want it is when you are deciding whether to start another. `back` is what
+ * the button at the bottom does, so the same screen serves the title screen and
+ * the end of a franchise.
+ */
+/**
+ * THE CHAMPION — the one screen a season is played to get to.
+ *
+ * ⚠️ A HUNDRED AND SIXTY-TWO GAMES USED TO END IN A LOG LINE. The year
+ * finished, a banner said who won it, two lines scrolled past in the play-by-play
+ * and the only button offered was the record book. Every number the season
+ * accumulated — the batting title, the ERA title, the final table — was
+ * reachable only by going and looking for it, on a screen labelled THE YEAR SO
+ * FAR, after the year had stopped.
+ *
+ * ⚠️ THE LEADERS ARE THE SAME SIX LISTS THE IN-SEASON SCREEN SHOWS, through
+ * leaderBoardsFor(). A separate "final" leaderboard would be a second copy of
+ * the qualifying rule, and the qualifying rule is the entire content of a
+ * leaderboard — see QUALIFY in stats.ts.
+ */
+function showChampion(s: Season, back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const champ = champion(s) ?? '—';
+  const table = standings(s);
+  const mine = table.findIndex((r) => r.abbr === s.you);
+  const won = champ === s.you;
+
+  const row = (r: (typeof table)[number], i: number): string =>
+    `<tr${r.abbr === s.you ? ' class="you"' : ''}><td class="team">${i + 1}. ${r.abbr}` +
+    `${r.abbr === champ ? ' ★' : ''}</td><td>${r.w}</td><td>${r.l}</td>` +
+    `<td>${r.rf}</td><td>${r.ra}</td></tr>`;
+
+  // The top of the table, and you — wherever you came. A thirty-row table is
+  // the record book's job; this screen answers "who won it and where did I
+  // finish", which is two rows and a handful of context.
+  const top = table.slice(0, 5);
+  const you = mine >= 5 && table[mine] ? row(table[mine]!, mine) : '';
+
+  el.innerHTML =
+    `<div class="wrap"><h1>BASEDBALL</h1>` +
+    `<h2>${won ? `${champ} WIN IT ALL` : `${champ} TAKE THE TITLE`}</h2>` +
+    `<div class="panel" style="text-align:center">` +
+    `<div style="font-size:28px;font-weight:bold;color:var(--good)">${champ}</div>` +
+    `<div class="dim">champions — ${teamOf(s, champ)?.name ?? ''}</div>` +
+    (won
+      ? ''
+      : `<div class="dim" style="margin-top:6px">${s.you} finished ${mine + 1} of ${table.length}</div>`) +
+    `</div>` +
+    `<div class="panel"><div class="dim penhead">THE FINAL TABLE</div>` +
+    `<div style="overflow-x:auto"><table class="line"><thead><tr>` +
+    `<th></th><th>W</th><th>L</th><th>RF</th><th>RA</th></tr></thead>` +
+    `<tbody>${top.map(row).join('')}${you}</tbody></table></div></div>` +
+    `<div class="dim penhead" style="margin-top:10px">THE YEAR'S LEADERS</div>` +
+    leaderBoardsFor(s.stats) +
+    `<button class="go" data-back="1">DONE <kbd>SPACE</kbd></button></div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  };
+  addEventListener('keydown', onKey);
+  const b = el.querySelector<HTMLButtonElement>('[data-back]');
+  if (b) b.onclick = leave;
+}
+
+/**
+ * THE PAUSE SCREEN — three doors and the one thing a player has to be told.
+ *
+ * ⚠️ IT DOES NOT PAUSE ANYTHING. pause() already did, before this was called.
+ * Everything on this screen is a look at a game that has already stopped, and
+ * a screen that stopped it instead would be the exact defect the flag exists
+ * to prevent — see the note on `paused`.
+ */
+function showPause(): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  // No room to draw in is not a reason to leave the game frozen.
+  if (!el) return resume();
+
+  el.innerHTML =
+    `<div class="wrap"><h1>BASEDBALL</h1><h2>PAUSED</h2>` +
+    `<div class="panel dim">The clock is stopped between pitches. Nothing is ` +
+    `running under this screen — not the arm, not the computer playing your half.` +
+    `</div>` +
+    `<button class="go" data-go="resume">RESUME <kbd>ESC</kbd></button>` +
+    `<button class="go" data-go="settings">SETTINGS</button>` +
+    `<button class="go" data-go="quit">QUIT TO MENU</button>` +
+    // ⚠️ IT SAYS WHAT QUITTING COSTS, because nothing is written on the way out
+    // — which is free in an exhibition and a re-played day in a franchise, and
+    // a player who finds that out afterwards has lost an evening he thought he
+    // had banked.
+    `<div class="panel dim">Quitting ends this game where it stands. No result, ` +
+    `no loss, nothing in the book. A franchise day you were halfway through is ` +
+    `never written, so CONTINUE puts you back on it and you play it again from ` +
+    `the first pitch.</div></div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const close = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      resume();
+    }
+  }
+  addEventListener('keydown', onKey);
+
+  const door = (name: string, fn: () => void): void => {
+    el.querySelector<HTMLButtonElement>(`[data-go="${name}"]`)!.onclick = fn;
+  };
+  door('resume', () => {
+    close();
+    resume();
+  });
+  // BACK comes back HERE rather than to the game, which is the whole of what
+  // makes one settings screen serve two doors.
+  door('settings', () => {
+    close();
+    showSettings(() => showPause());
+  });
+  // The same quit the final screen has had all along. Nothing to unwind.
+  door('quit', () => location.reload());
+}
+
+/**
+ * THE SETTINGS SCREEN — one screen behind two doors, the title card and the
+ * pause screen. `back` is what BACK does, and it is the only thing that differs
+ * between them.
+ *
+ * ⚠️ EVERY ROW PRESSES ITS OWN HOTKEY. The four knobs are live in every phase
+ * and always have been; this screen writes them down, it does not replace them.
+ * A row that copied the body out of press() would be a fifth setting that
+ * agrees with the fourth until the day it does not.
+ */
+function showSettings(back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const row = (key: string, label: string, value: string, blurb: string): string =>
+    `<button class="go" data-key="${key}" style="text-align:left;padding:10px 12px">` +
+    `<span class="dim" style="font-size:10px;letter-spacing:1px">${label}</span><br>` +
+    `<b style="color:var(--hot)">${value}</b> <kbd>${key.toUpperCase()}</kbd><br>` +
+    `<span class="dim" style="font-size:11px">${blurb}</span></button>`;
+
+  function paint(): void {
+    const level = levelOf(settings.level);
+    const cage = pitchSpeedOf(settings.pitchSpeed);
+    el!.innerHTML =
+      `<div class="wrap"><h1>BASEDBALL</h1><h2>SETTINGS</h2>` +
+      `<div class="panel"><div class="dim penhead">KEPT BETWEEN GAMES</div>` +
+      row('g', 'HOW HARD IS THE SWING', level.name, level.blurb) +
+      row('p', 'HOW FAST THE BALL COMES', cage.name, cage.blurb) +
+      `</div>` +
+      `<div class="panel"><div class="dim penhead">THIS SESSION ONLY</div>` +
+      row(
+        't',
+        'WHO PLAYS YOUR HALF',
+        auto ? 'AUTO' : 'MANUAL',
+        auto
+          ? 'The computer bats and pitches for you.'
+          : 'You are in the box and on the mound.',
+      ) +
+      row(
+        'f',
+        'HOW FAST THE DEAD TIME RUNS',
+        `${speed()}×`,
+        'Between pitches only. A pitch you are swinging at is never sped up.',
+      ) +
+      `</div>` +
+      `<div class="panel dim">All four are live in the game too — the key beside ` +
+      `a row works from the batter's box and the mound exactly as it does here.` +
+      `</div>` +
+      `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button></div>`;
+
+    el!.querySelectorAll<HTMLButtonElement>('[data-key]').forEach((b) => {
+      b.onclick = (): void => {
+        press(b.dataset['key']!);
+        paint();
+      };
+    });
+    el!.querySelector<HTMLButtonElement>('[data-back]')!.onclick = (): void => leave();
+  }
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  };
+
+  paint();
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+  addEventListener('keydown', onKey);
+}
+
+function showCareer(back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const c = loadCareer();
+  const t = totals(c);
+  const best = bestYear(c);
+
+  const line = (label: string, value: string): string =>
+    `<div class="penrow" style="grid-template-columns:1fr auto">` +
+    `<span class="dim">${label}</span><b>${value}</b></div>`;
+
+  const summary =
+    `<div class="panel">` +
+    `<div class="dim penhead">THE CAREER</div>` +
+    line('seasons managed', String(t.seasons)) +
+    line('record', `${t.w}-${t.l} · ${rate(winPct(t))}`) +
+    line('championships', String(t.titles)) +
+    line('clubs run', t.clubs.length ? t.clubs.join(' · ') : '—') +
+    line('longest barrel streak', String(streak.best)) +
+    (best
+      ? line(
+          'best year',
+          `${best.club} ${best.w}-${best.l}` + (best.champion === best.club ? ' — CHAMPIONS' : ''),
+        )
+      : '') +
+    `</div>`;
+
+  const marks = records(c);
+  const recordPanel = marks.length
+    ? `<div class="panel"><div class="dim penhead">SINGLE-SEASON RECORDS</div>` +
+      marks
+        .map(
+          (r) =>
+            `<div class="penrow" style="grid-template-columns:150px 1fr auto">` +
+            `<span class="dim">${r.label}</span><b>${r.name} <span class="dim">${r.club}</span></b>` +
+            `<span class="tot">${r.value}</span></div>`,
+        )
+        .join('') +
+      `</div>`
+    : '';
+
+  // Newest first — the season you just finished is the one you came here to see.
+  const rows = [...c.years]
+    .reverse()
+    .map((y, i) => {
+      const won = y.champion === y.club;
+      return (
+        `<tr${won ? ' class="you"' : ''}><td class="team">${c.years.length - i}. ${y.club}` +
+        // ⚠️ THE LENGTH OF THE YEAR IS A COLUMN. A 9-5 and a 96-66 stacked in
+        // one table with no games column read as one scale and are not.
+        `${won ? ' ★' : ''}</td><td class="dim">${y.games ?? DEFAULT_GAMES}</td>` +
+        `<td>${y.w}</td><td>${y.l}</td><td>${y.finish}</td>` +
+        `<td>${y.champion}</td>` +
+        `<td class="team">${y.bat ? `${y.bat.name} ${rate(y.bat.avg)}` : '—'}</td>` +
+        `<td class="team">${y.arm ? `${y.arm.name} ${y.arm.era.toFixed(2)}` : '—'}</td></tr>`
+      );
+    })
+    .join('');
+
+  const table = c.years.length
+    ? `<div class="panel"><div class="dim penhead">EVERY SEASON</div>` +
+      `<div style="overflow-x:auto"><table class="line"><thead><tr>` +
+      `<th></th><th>G</th><th>W</th><th>L</th><th>FIN</th><th>CHAMP</th>` +
+      `<th>BEST BAT</th><th>BEST ARM</th>` +
+      `</tr></thead><tbody>${rows}</tbody></table></div></div>`
+    : `<div class="panel dim">Nothing in the book yet. Finish a franchise and it lands here.</div>`;
+
+  el.innerHTML =
+    `<div class="wrap"><h1>BASEDBALL</h1><h2>THE RECORD BOOK</h2>` +
+    summary +
+    recordPanel +
+    table +
+    `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button>` +
+    // ⚠️ IT SITS UNDER THE WHOLE BOOK, not up beside the title. This is the one
+    // control in the game that destroys something, so it is reached by having
+    // scrolled past everything it would destroy.
+    `<button class="go" data-reset="1" style="opacity:.75">EMPTY THE RECORD BOOK</button>` +
+    `</div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  }
+  addEventListener('keydown', onKey);
+  el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => leave();
+
+  // ⚠️ THE RECORD BOOK AND NOTHING ELSE. Your clubs live in asb-league and a
+  // season in progress in asb.season.v1, and neither is touched here — the
+  // confirm says so out loud, because anybody reading the word "empty" assumes
+  // the worst and is right to.
+  el.querySelector<HTMLButtonElement>('[data-reset]')!.onclick = () => {
+    if (
+      !confirm(
+        'Empty the record book?\n\n' +
+          'Every season you have filed and your longest barrel streak go, for good.\n\n' +
+          'Your clubs and your saved season stay exactly where they are.',
+      )
+    ) {
+      return;
+    }
+    saveCareer(newCareer());
+    saveStreak(newStreak());
+    // ⚠️ AND THE MODULE'S COPY. `streak` is loaded once at module scope and this
+    // screen reads THAT rather than the store — wipe only the store and the
+    // book you just emptied goes on showing the old longest streak.
+    streak = newStreak();
+    // Re-draw in place, which means taking this screen's key handler off first.
+    removeEventListener('keydown', onKey);
+    showCareer(back);
+  };
+}
+
+/**
+ * The year is over — put it in the book.
+ *
+ * ⚠️ CALLED FROM BOTH ENDINGS, and it has to be. A season finishes two ways:
+ * you play the final (finalize()), or you were knocked out and the bracket
+ * played itself out in front of you (nextGame()). Filing from only the first
+ * would mean a career that remembers exclusively the years you reached the
+ * final, which is the opposite of a record.
+ *
+ * file() is idempotent on the season's seed, so calling it from both — and
+ * again on a reload of a finished save — files the year once.
+ */
+function retire(s: Season): void {
+  saveCareer(file(loadCareer(), s));
+}
+
+/** Start a ball game. `you` is which dugout is yours; away hits first. */
+function kickOff(
+  home: Team,
+  away: Team,
+  you: Side,
+  starters?: { home?: StarterPick; away?: StarterPick },
+): void {
+  YOU = you;
+  game = newGame(home, away, 9, starters);
+  lastGameIsStale = false;
+  penPick = 0;
+  atBat = newAtBat();
+  bunting = false;
+  previous = [];
+  replay = null;
+  flash = '';
+  lastGrade = '';
+  swingRead = null;
+  autoSwingAt = null;
+  chart = [];
+  releaseGrade = null;
+
+  const mine = you === 'home' ? home : away;
+  const theirs = you === 'home' ? away : home;
+  say(`${away.name} at ${home.name} — nine innings.`, 'half');
+  say(
+    `You are ${mine.name} against ${theirs.name}. ` +
+      (you === 'home' ? 'At home, so you pitch first.' : 'On the road, so you hit first.'),
+    'half',
+  );
+
+  elTitle.textContent = season
+    ? `BASEDBALL — ${season.you} FRANCHISE · ${dayLabel(season)}`
+    : 'BASEDBALL — EXHIBITION';
+  phase = youBat() ? 'idle' : 'calling';
+  elBanner.textContent = '';
+  render();
+  if (!looping) {
+    looping = true;
+    requestAnimationFrame(frame);
+  }
+}
+
+/**
+ * The next game on your schedule — or, if you are not on the card, the rest of
+ * the season.
+ *
+ * THE LOOP IS THE ELIMINATED CASE. Miss the bracket and days 15 and 16 have no
+ * game with your name on them; lose the semifinal and the final still has to
+ * be decided. Either way those days play themselves and you land on a screen
+ * that names a champion, rather than on a season with no ending.
+ *
+ * ponytail: the scouting book carries over from game to game and is never
+ * reset. That is a season-long read on you rather than a per-game one, which
+ * is the more interesting version and costs a line of nothing.
+ */
+/**
+ * The finished game's box score, over the top of the finished game.
+ *
+ * ⚠️ IT DOES NOT ADVANCE THE SEASON. Closing it puts you back on the final
+ * screen exactly as you left it, with Next game still there — the box score is
+ * something to read, not a step in the schedule, and a screen that quietly ate
+ * your click on the way past would be worse than no screen.
+ */
+function showBox(): void {
+  showStats(season, boxScore(game), () => render());
+}
+
+/**
+ * THE YEAR IS OVER AND SOMEBODY WON IT — the one ending, called from both.
+ *
+ * ⚠️ THERE ARE TWO WAYS TO REACH A CHAMPION AND THEY ARE NOT THE SAME CODE
+ * PATH. You are in the last game and it ends under you, or you are out and the
+ * rest of the year plays itself off the schedule screen — and the second is
+ * most players. Both branches carried their own copy of these five lines, so
+ * the champion screen shipped on one of them and the one nearly everybody
+ * lands on still ended in a banner. Found by playing a fourteen-game season to
+ * its end, not by the suite: 1239 tests were green while half the endings had
+ * no ending.
+ */
+function crownChampion(s: Season, champ: string): void {
+  elBanner.textContent = champ === s.you ? `${champ} WIN IT ALL.` : `${champ} TAKE THE TITLE.`;
+  say(`${champ} are champions.`, 'big');
+  // The year goes in the book. See retire().
+  retire(s);
+  say('Your year is in the record book — press K.', 'half');
+  // ...and it is SHOWN, not offered. A season is played to reach this.
+  showChampion(s, () => render());
+}
+
+function nextGame(): void {
+  let s = season;
+  if (!s) return;
+
+  // The day the game on the screen was played on. See the note below.
+  const from = s.day;
+  while (!seasonOver(s) && !yourGame(s)) s = playDay(s);
+  season = s;
+  saveSeason(s);
+
+  const m = yourGame(s);
+  if (!m) {
+    // ⚠️ THE GAME UNDERNEATH THIS SCREEN MAY NOT BE TONIGHT'S. Miss the bracket
+    // — which is most players — and the loop above just played the rest of the
+    // year without you, so the line score still on the screen is a night days
+    // or weeks ago and the marquee still names the day it was played on. Both
+    // are set by kickOff(), and this branch does not call kickOff. The result
+    // was `GAME 4 OF 14` over a game-four box score, under the word FINAL and
+    // somebody else's championship.
+    //
+    // Nothing lies now: the marquee says SEASON OVER (dayLabel's own word for a
+    // finished year) and the line score comes down rather than passing itself
+    // off as the game that ended the season. If you were IN the last game, the
+    // loop played no days, the score on the screen is yours, and it stays.
+    lastGameIsStale = s.day !== from;
+    elTitle.textContent = `BASEDBALL — ${s.you} FRANCHISE · ${dayLabel(s)}`;
+    // ⚠️ AND THE PHASE, OR THE KEYBOARD IS STILL PLAYING. press() routes N, B
+    // and K off `phase`, not off game.over, so a season simmed to its end from
+    // day one left SPACE throwing pitches in a game nobody could see and K
+    // doing nothing on the one screen the record book is offered from.
+    if (lastGameIsStale) phase = 'over';
+
+    const champ = champion(s);
+    // ⚠️ THE ELIMINATED ENDING FILES THE YEAR TOO. This is the branch a player
+    // who missed the bracket lands on, and it is most of them.
+    if (champ) crownChampion(s, champ);
+    // No kickOff, so nothing else will redraw the panels. Stay on the final
+    // screen; it now shows the finished bracket.
+    render();
+    return;
+  }
+
+  // ⚠️ THE MOMENT COMES BEFORE THE CARD, and that ordering is the feature.
+  // A trade made on the deadline has to be on the pre-game card that follows
+  // it — you should see the man you just acquired in the lineup you are about
+  // to send out. Showing the card first and asking afterwards would put the
+  // decision behind the game it was supposed to change.
+  const ask = momentOn(s);
+  if (ask) {
+    showMoment(s, ask, () => showPregame(season ?? s, m));
+    return;
+  }
+
+  // The card. It is the one place the season's own simulation — the other
+  // clubs' afternoon, the table, the wire — is ever shown.
+  showPregame(s, m);
+}
+
+/**
+ * The title screen: mode, then (franchise only) how long the year is, then
+ * club, then (exhibition only) opponent. One overlay that is removed once there
+ * is a game to start.
+ *
+ * ponytail: still no back button and still no phase enum — `mode`, `len` and
+ * `mine` being null IS the state, and a four-click form does not need more
+ * than three nullable locals.
+ *
+ * ⚠️ THE LENGTH IS ASKED BEFORE THE CLUB, and that order is the point. It is
+ * the only question on this screen that cannot be changed afterwards — the
+ * schedule is laid down at kickoff and a season cannot be lengthened mid-year
+ * without invalidating every standing in it — so it goes where a question you
+ * only get one shot at goes, which is first.
+ */
+function pregame(): void {
+  const el = document.getElementById('start')!;
+  const prompt = el.querySelector('h2')!;
+  const grid = el.querySelector('.keys')!;
+  const levels = el.querySelector('.levels');
+  const saved = loadSeason();
+
+  let mode: 'exhibition' | 'franchise' | 'league' | null = null;
+  let mine: Team | null = null;
+  /** What the league screen last had to say — a refusal, or a confirmation. */
+  let leagueSays: readonly string[] = [];
+  /**
+   * What is in the league screen's box, held here so a redraw does not throw
+   * away a paste somebody has just made. Seeded with the stored text when that
+   * text is the thing that is broken — the fix belongs in front of them.
+   */
+  let box = leagueStatus() === 'broken' ? (storedLeagueText() ?? '') : '';
+
+  /**
+   * What is typed in the shelf's name field, held for the same reason `box` is
+   * — the redraw that follows filing a league would otherwise eat the name
+   * somebody is still correcting after a refusal.
+   */
+  let slotName = '';
+
+  /**
+   * THE EDITOR'S THREE NULLABLE LOCALS, which are its whole navigation — same
+   * pattern as `mode` and `mine` above, and for the same reason.
+   *
+   * `editing` null means the editor is closed; non-null is a deep working copy
+   * of LEAGUE_SOURCE that survives moving between clubs and is thrown away by
+   * BACK. `editClub` null is the club picker. `editWho` null is nobody expanded.
+   */
+  let editing: Team[] | null = null;
+  let editClub: number | null = null;
+  let editWho: { group: Group; index: number } | null = null;
+
+  /** What this franchise will play under, edited in place by the rules screen. */
+  let rules: Rules = { ...DEFAULT_RULES };
+  /** Whether the player has pressed START on that screen. */
+  let ruled = false;
+
+  const card = (go: string, title: string, sub: string): string =>
+    `<button data-go="${go}"><b>${title}</b><br>${sub}</button>`;
+
+  /**
+   * A SETTING AS A DIAL — ◀ VALUE ▶, the control every baseball game since RBI
+   * has put its options behind.
+   *
+   * ⚠️ IT REPLACED SIX ROWS OF BUTTONS, and the reason is legibility rather
+   * than taste. Every setting drew its whole list at once, so the franchise
+   * screen was twenty-two buttons in which exactly six were lit — you had to
+   * hunt for the highlight in each row to find out what you had chosen. A dial
+   * shows the ANSWER, at size, and hides the alternatives behind two arrows
+   * that are always in the same place.
+   *
+   * The pips underneath are the one thing the old grid did better: with the
+   * list hidden you cannot see that a setting has four positions and you are on
+   * the second. Four marks under the value put that back for nothing.
+   *
+   * `step` is what the click handler switches on; the arrows carry the
+   * direction. Both ends wrap, so a dial can never be a dead end.
+   */
+  const dial = (
+    step: string,
+    title: string,
+    options: readonly { name: string; blurb: string }[],
+    at: number,
+  ): string => {
+    const cur = options[at] ?? options[0];
+    if (!cur) return '';
+    // One option is not a choice: the arrows stay, greyed, so the row does not
+    // change shape between a four-club league and a thirty-club one.
+    const dead = options.length > 1 ? '' : ' disabled';
+    return (
+      `<div class="dial"><div class="dialhead">${title}</div><div class="dialbody">` +
+      `<button class="arrow" data-step="${step}" data-by="-1"${dead}>&#9664;</button>` +
+      `<div class="dialval"><b>${escapeText(cur.name)}</b>` +
+      `<span>${escapeText(cur.blurb)}</span></div>` +
+      `<button class="arrow" data-step="${step}" data-by="1"${dead}>&#9654;</button>` +
+      `</div><div class="pips">` +
+      options.map((_, i) => `<i class="${i === at ? 'on' : ''}"></i>`).join('') +
+      `</div></div>`
+    );
+  };
+
+  /**
+   * THE FRANCHISE SETTINGS, as one list rather than six hand-written rows.
+   *
+   * Built fresh on every draw because the bracket's options depend on how many
+   * clubs the league has — see the note on the filter — and a list captured
+   * once would go stale the moment somebody imported a smaller league.
+   */
+  interface Row {
+    key: keyof Rules;
+    title: string;
+    choices: readonly { value: number; name: string; blurb: string }[];
+  }
+  const rowsOf = (): readonly Row[] => [
+    {
+      key: 'games',
+      title: 'HOW LONG IS THE SEASON',
+      choices: LENGTHS.map((l) => ({ value: l.games, name: `${l.games} GAMES`, blurb: l.blurb })),
+    },
+    { key: 'parity', title: 'HOW MUCH DOES TALENT DECIDE GAMES', choices: PARITY },
+    { key: 'streak', title: 'DO MEN RUN HOT AND COLD', choices: STREAK },
+    { key: 'offence', title: 'HOW MANY RUNS A NIGHT', choices: OFFENCE },
+    {
+      // ⚠️ ONLY THE BRACKETS THIS LEAGUE CAN FILL. An imported league can be
+      // four clubs, and offering an eight-club postseason to four of them is a
+      // control that cannot do what it says — newSeason() would clamp it back
+      // and the screen would go on claiming three rounds. Filtered here so the
+      // question is never asked; bracketFor() is still the one that decides.
+      key: 'bracket',
+      title: 'HOW MANY CLUBS MAKE THE PLAYOFFS',
+      choices: BRACKET.filter((c) => c.value <= LEAGUE.length),
+    },
+    { key: 'series', title: 'HOW LONG IS A PLAYOFF ROUND', choices: SERIES },
+  ];
+
+  /**
+   * THE RULES SCREEN — every setting on one page, each a row of buttons with
+   * the current pick lit.
+   *
+   * ⚠️ ONE PAGE, NOT A WIZARD. Season length was a step of its own when it was
+   * the only setting, and five sequential steps to start a franchise is four
+   * screens between a player and a ball game — which is pillar one. Everything
+   * is defaulted and every row is optional, so START is reachable on the first
+   * press and a player who wants none of this never has to read it.
+   *
+   * ⚠️ AND IT IS A SCREEN RATHER THAN A MENU YOU CAN REOPEN. Every one of these
+   * builds the season's rosters or its calendar at kickoff — see rules.ts — so
+   * there is nothing here that can honestly be changed in August.
+   */
+  const drawRules = (): void => {
+    prompt.textContent = 'HOW SHOULD THIS LEAGUE PLAY';
+    const rounds = roundsIn(rules.bracket);
+    grid.innerHTML =
+      rowsOf()
+        .map((r) =>
+          dial(
+            r.key,
+            r.title,
+            r.choices,
+            // ⚠️ FOUND, NOT REMEMBERED. The dial's position is looked up from
+            // the value in `rules` every draw rather than tracked beside it —
+            // cleanRules() is allowed to refuse or clamp what an arrow asked
+            // for, and an index kept in step with the arrow rather than with
+            // the setting would then point at a value the season is not
+            // playing under. Missing lands on 0, which is what a clamp means.
+            Math.max(
+              0,
+              r.choices.findIndex((c) => c.value === rules[r.key]),
+            ),
+          ),
+        )
+        .join('') +
+      `<button class="plate" data-go="start"><b>PLAY BALL</b>` +
+      `<span class="sub">${rules.games} GAMES · ${rounds} ROUND` +
+      `${rounds === 1 ? '' : 'S'} OF ${rules.series}</span></button>`;
+  };
+
+  /**
+   * THE LEAGUE SCREEN — export the clubs, edit them, paste them back.
+   *
+   * ⚠️ THE BOX IS TRANSPORT, NOT AN EDITOR, and the size is why it is built
+   * this way. The full document is a quarter of a megabyte over eight thousand
+   * lines (scripts/leaguedoc.ts prints it), so the flow that works is: fill the
+   * box, copy it out, edit it somewhere with a search function, paste it back.
+   * It therefore opens EMPTY — rendering a 230kB string into the DOM to show
+   * somebody a wall they are going to scroll past is a worse first screen than
+   * a button that says what it will do. And because re-casting one club is the
+   * edit people actually make, the box takes a single club too.
+   *
+   * ⚠️ IT RELOADS RATHER THAN SWAPPING THE LEAGUE UNDER A RUNNING PAGE. LEAGUE
+   * is a module constant read at import by teams.ts, sim.ts and by main.ts's
+   * own opening newGame(); half a dozen things already hold references into it.
+   * Rebuilding all of that live is a feature nobody asked for, and this is a
+   * single page that reloads in a blink and comes straight back here.
+   *
+   * ⚠️ A FRANCHISE IN PROGRESS SURVIVES IT, and the screen says so out loud
+   * because it is the first thing anybody would worry about. A season owns its
+   * rosters and loadSeason() now validates a save against those rather than
+   * against the current league — see franchise.ts — so importing a league is
+   * something you do BETWEEN franchises without losing the one you are in.
+   */
+  const drawLeague = (): void => {
+    prompt.textContent = 'IMPORT OR EXPORT';
+    const status = leagueStatus();
+    const ladder = [...LEAGUE].sort((a, b) => clubValue(b) - clubValue(a));
+    const deepest = ladder[0];
+    const thinnest = ladder.at(-1);
+    const where =
+      status === 'custom'
+        ? `Playing <b>your own league</b> — ${LEAGUE.length} clubs` +
+          (deepest && thinnest && deepest !== thinnest
+            ? `, deepest ${deepest.abbr}, thinnest ${thinnest.abbr}.`
+            : '.')
+        : status === 'broken'
+          ? 'A league is stored, but it no longer reads — the clubs that shipped are ' +
+            'playing instead. What is wrong with it is below, and the text is in the box.'
+          : `Playing <b>the league that shipped</b> — ${LEAGUE.length} clubs.`;
+
+    const notes = leagueSays.length ? leagueSays : storedLeagueProblems();
+    const said = notes.length
+      ? `<div class="says" style="grid-column:1/-1">${notes
+          .map((p) => `<div>${escapeText(p)}</div>`)
+          .join('')}</div>`
+      : '';
+
+    grid.innerHTML =
+      `<div class="dim" style="grid-column:1/-1;line-height:1.7">${where}<br>` +
+      'This is the league as a document — fill the box and copy it out to keep a league or ' +
+      'hand it to somebody, paste one back to load it. You can paste <b>one club</b> on its ' +
+      'own too — it goes over the club with the same abbreviation.<br>' +
+      'To change a club, <b>EDIT A CLUB</b> is the screen for it. ' +
+      'A franchise already in progress keeps the clubs it started with.' +
+      '</div>' +
+      said +
+      `<div style="grid-column:1/-1"><textarea id="leaguebox" spellcheck="false" ` +
+      `placeholder="Paste a league here — a JSON array of clubs, or one club on its own."` +
+      `>${escapeText(box)}</textarea></div>` +
+      `<button data-lg="fill"><b>FILL THE BOX</b><br>the clubs you are playing, ready to copy` +
+      `</button>` +
+      `<button data-lg="use"><b>USE WHAT IS IN THE BOX</b><br>checked before anything is kept` +
+      `</button>` +
+      `<button data-lg="edit"><b>EDIT A CLUB</b><br>names, ratings and rosters, without the JSON` +
+      `</button>` +
+      (status === 'none'
+        ? ''
+        : `<button data-lg="shipped"><b>BACK TO THE SHIPPED LEAGUE</b><br>` +
+          `drops the one you imported</button>`) +
+      shelf() +
+      `<button data-lg="back"><b>BACK</b><br>nothing is changed</button>`;
+  };
+
+  /**
+   * THE SHELF — every league you have kept, and the field for keeping another.
+   *
+   * ⚠️ IT IS ON THE LEAGUE SCREEN AND NOT BEHIND A CARD OF ITS OWN. A league
+   * you cannot find is a league you did not save: the same reason CUSTOMIZE
+   * ended up on the club picker as well as the mode screen. This screen is
+   * already the one place somebody thinks about leagues as documents, so the
+   * shelf goes where they are standing.
+   *
+   * ⚠️ WHAT IS FILED IS THE ACTIVE LEAGUE, NOT THE BOX. The box may hold a
+   * paste that has not been checked, or nothing at all; "keep this league"
+   * means the clubs you are playing, which is the only reading of it that is
+   * never a surprise. Paste first, USE it, then keep it.
+   */
+  const shelf = (): string => {
+    const slots = listSlots();
+    const rows = slots
+      .map(
+        (n) =>
+          `<button data-slot="${escapeText(n)}"><b>LOAD ${escapeText(n.toUpperCase())}</b><br>` +
+          `play these clubs instead</button>` +
+          `<button data-drop="${escapeText(n)}"><b>DROP ${escapeText(n.toUpperCase())}</b><br>` +
+          `off the shelf — the league you are playing is untouched</button>`,
+      )
+      .join('');
+    return (
+      `<div class="chalk">THE SHELF · ${slots.length} KEPT</div>` +
+      `<div class="dim" style="grid-column:1/-1;line-height:1.7">` +
+      'Keep the clubs you are playing under a name, and load any of them back later. ' +
+      'A kept league is a copy — loading one replaces what you are playing, and a franchise ' +
+      'already in progress still keeps the clubs it started with.</div>' +
+      `<div style="grid-column:1/-1"><input id="slotbox" spellcheck="false" maxlength="${MAX_SLOT_NAME}" ` +
+      `placeholder="Name it — deadball, my thirty, 1994…" value="${escapeText(slotName)}"></div>` +
+      `<button data-lg="keep"><b>KEEP THIS LEAGUE</b><br>files the clubs you are playing ` +
+      `under that name</button>` +
+      rows
+    );
+  };
+
+  /**
+   * THE CLUB EDITOR — the same customization the paste box does, with the JSON
+   * taken off the front of it.
+   *
+   * ⚠️ IT SAVES THROUGH saveCustomLeague() LIKE ANY OTHER PASTE, and that is
+   * the whole architecture of this screen. Nothing here validates, nothing here
+   * writes to localStorage, and nothing here knows what a legal club is. It
+   * edits a deep copy, serialises it, and hands it to the same gate a typed
+   * document goes through — so an edit made with the mouse is held to exactly
+   * the rules a hand-written one is, and there is still one storage path. When
+   * the save is refused, the complaints land in `leagueSays` and are drawn by
+   * this screen in the same red block the paste box uses.
+   *
+   * ⚠️ THE WORKING COPY IS OF LEAGUE_SOURCE, NOT LEAGUE, for the reason FILL
+   * THE BOX takes the source: the played clubs have had parity applied, and
+   * editing those would compress every rating a second time on the way back in.
+   *
+   * ponytail: three nullable locals ARE the navigation, same as the screen this
+   * hangs off. No router, no breadcrumb, no dirty flag — leaving without saving
+   * drops the working copy, which is what a cancel is.
+   */
+  /**
+   * Fill in every look preview on the screen.
+   *
+   * ⚠️ IT RUNS AFTER innerHTML AND ON EVERY EDIT, and it has to be both. The
+   * canvas is created by the same string that creates the selects, so it cannot
+   * be painted before it exists; and the whole reason it is there is to answer
+   * the change somebody just made, which the input handler deliberately does
+   * NOT redraw the form for — see the note on that listener.
+   *
+   * ponytail: query the canvases and paint them. No component, no observer, no
+   * per-preview state. There are at most a handful open at once, because only
+   * the open man has a form under him.
+   */
+  const paintLookPreviews = (): void => {
+    if (editing === null || editClub === null) return;
+    const club = editing[editClub]!;
+    const kit = uniformFor(club);
+    for (const el2 of grid.querySelectorAll<HTMLCanvasElement>('canvas.edlook')) {
+      const group = el2.dataset['lookGroup'] as Group | undefined;
+      const index = Number(el2.dataset['lookIndex']);
+      if (!group || !Number.isInteger(index)) continue;
+      const who = ((club[group] ?? []) as readonly Player[])[index];
+      const c2 = el2.getContext('2d');
+      if (!who || !c2) continue;
+      c2.clearRect(0, 0, el2.width, el2.height);
+      c2.fillStyle = '#101a12';
+      c2.fillRect(0, 0, el2.width, el2.height);
+      const arm = groupOf(group).of === 'arm';
+      // ⚠️ THE MAN AND HIS BAT ARE SCALED TOGETHER, BY THE BAT.
+      //
+      // The preview was 108 tall with the feet 12 off the bottom, which fits a
+      // stick nailed to the shoulder and does not fit a real one: the bat at
+      // rest reaches from his feet to 149px above them, and the box is 150.
+      // Measured in a browser at 1:1 the barrel tip landed on y = 0 and the
+      // round cap was shaved off.
+      //
+      // ⚠️ THE FIT IS DERIVED FROM THE POSE, NOT TYPED IN. `rig` asks the pose
+      // table how tall the thing being drawn is, so re-authoring the swing
+      // re-fits this panel instead of quietly clipping it again. The 8 is the
+      // barrel's round cap (half of an 8px stroke) plus a pixel.
+      const rig = (BATTER_Y - PLATE_Y) - barrelOf(REST_POSE).y;
+      const k = Math.min(1, (el2.height - 8) / rig);
+      const feet = el2.height - 4;
+      drawFigure(c2, {
+        look: lookOf(who, club, group),
+        uniform: kit,
+        build: buildOf(who, club, group),
+        x: el2.width / 2,
+        y: feet,
+        h: BATTER_H * k,
+        // ⚠️ AN ARM IS PREVIEWED IN HIS DELIVERY, NOT HOLDING A BAT. It is the
+        // pose you actually see him in for the whole half you spend hitting,
+        // and previewing him in a batting stance would be showing somebody a
+        // picture the game never draws.
+        stance: arm ? 'pitch' : 'bat',
+      });
+      // The same bat the field draws, hung off a plate this panel does not
+      // have: the batter stands PLATE_X - BATTER_X to the side of it and
+      // BATTER_Y - PLATE_Y below it, so the offsets come off the at-bat
+      // layout rather than off two numbers typed again here.
+      if (!arm) {
+        drawBat(c2, REST_POSE, {
+          x: el2.width / 2 + (PLATE_X - BATTER_X) * k,
+          y: feet - (BATTER_Y - PLATE_Y) * k,
+          scale: k,
+        });
+      }
+    }
+  };
+
+  /** What the last import did, so the screen can say so. Cleared on leaving. */
+  let artSays: readonly string[] = [];
+
+  /**
+   * THE ART PACK — where drawings come in, and the one screen that reports what
+   * did not land.
+   *
+   * ⚠️ IT IS ON THE LEAGUE SCREEN AND NOT INSIDE A PLAYER, because a part is
+   * GLOBAL. `machine/crest/1` is the vent stack every machine in the league
+   * wears; importing it from inside Rustbelt Rhonda's form would say it belonged
+   * to her, and the next person would import it twenty-five more times.
+   *
+   * ⚠️ AN UNMATCHED FILE IS NAMED, NOT DROPPED. That is the 09-03 lesson: a
+   * control that appears to do nothing because the thing it did had no way to
+   * report itself. Somebody who names a file wrong has to be told which name
+   * the game wanted, so the list of every slot is one click away.
+   */
+  const artPanel = (): string => {
+    const slots = artSlots();
+    const have = slots.filter((s) => hasArt(s.id)).length;
+
+    /**
+     * ⚠️ THE SLOTS ARE A GRID, NOT A TEXT DUMP — 09-17. This screen used to
+     * answer "what is in my art pack" with a button that printed thirty-six
+     * filenames into a paragraph, and nothing at all for "which of them did I
+     * actually import". The count in the header said `4 of 36` and there was no
+     * way on earth to find out WHICH four. That is the 09-03 lesson again, one
+     * screen over: a control whose effect has no way to report itself.
+     *
+     * So every slot is a cell, a filled one shows the drawing, and the filename
+     * is printed on the cell that wants it rather than in a list somebody has to
+     * match up by eye. WHAT TO CALL THEM stops being a button.
+     */
+    const cells = slots
+      .map((s) => {
+        const on = hasArt(s.id);
+        return (
+          `<div class="artslot${on ? ' on' : ''}">` +
+          (on
+            ? `<canvas class="artpic" width="64" height="64" data-art-id="${escapeText(s.id)}"></canvas>`
+            : `<div class="artpic empty">—</div>`) +
+          `<b>${escapeText(s.label.split('—')[1]?.trim() ?? s.label)}</b>` +
+          `<i>${escapeText(s.file)}</i>` +
+          // ⚠️ ONE PART, NOT THE WHOLE LIBRARY. removeArt() has existed in
+          // art.ts since the pack shipped and nothing ever called it, so the
+          // only way out of one bad import was REMOVE ALL and re-importing the
+          // other thirty-five.
+          (on
+            ? `<button class="edtiny" data-ed-go="artdrop" data-art-id="${escapeText(s.id)}">✕ REMOVE</button>`
+            : '') +
+          '</div>'
+        );
+      })
+      .join('');
+
+    return (
+      `<div class="edgroup" style="grid-column:1/-1">` +
+      `<div class="edhead">THE ART PACK <i>${have} of ${slots.length}</i></div>` +
+      `<div class="dim" style="line-height:1.7;padding:2px 0 8px">` +
+      'Drawings replace the shells one part at a time, and everything is optional — ' +
+      'a part with no file keeps the shape it already draws. ' +
+      '<b>Draw them in greyscale</b>: each one is tinted to the club that wears it, ' +
+      'so one cap serves all thirty. Name a file after the part it holds — the name ' +
+      'is printed under every slot below. They live on this machine, not in the league ' +
+      'document, so a league you hand somebody lands on their own parts.</div>' +
+      `<div class="edmix"><span>` +
+      `<label class="edtiny" style="cursor:pointer">IMPORT DRAWINGS` +
+      `<input type="file" id="artin" accept="image/*" multiple hidden></label>` +
+      `<button class="edtiny" data-ed-go="artclear"${have ? '' : ' disabled'}>REMOVE ALL</button>` +
+      `</span></div>` +
+      (artSays.length
+        ? `<div class="says">${artSays.map((p) => `<div>${escapeText(p)}</div>`).join('')}</div>`
+        : '') +
+      `<div class="artgrid">${cells}</div>` +
+      '</div>'
+    );
+  };
+
+  /**
+   * Paint the thumbnails, for the same reason paintLookPreviews() exists: the
+   * canvases do not exist until the innerHTML above has landed.
+   *
+   * ⚠️ UNTINTED, ON PURPOSE. Everywhere else a part is tinted to the club that
+   * wears it, but this screen is answering "what did I import" — and showing
+   * somebody their own greyscale drawing in the Albany blue they never chose is
+   * the screen telling them their file is wrong. The tint is a club's business;
+   * the library is the drawing's.
+   */
+  const paintArtSlots = (): void => {
+    for (const el2 of grid.querySelectorAll<HTMLCanvasElement>('canvas.artpic')) {
+      const id = el2.dataset['artId'];
+      const img = id ? sprite(id) : undefined;
+      const c2 = el2.getContext('2d');
+      if (!img || !c2) continue;
+      c2.clearRect(0, 0, el2.width, el2.height);
+      // Fit inside the cell with the aspect kept — the same rule the draw path
+      // uses, so a tall crest reads here the way it will on a man.
+      const k = Math.min(el2.width / img.width, el2.height / img.height);
+      const w = img.width * k;
+      const h = img.height * k;
+      c2.drawImage(img, (el2.width - w) / 2, (el2.height - h) / 2, w, h);
+    }
+  };
+
+  const drawEditor = (): void => {
+    const league = editing!;
+
+    // ---- the field row. One function for all four kinds, because they differ
+    // only in which element they render into the same labelled cell.
+    const control = (f: Field, on: Record<string, unknown>, at: string): string => {
+      const v = escapeText(valueOf(on, f));
+      const id = `${at} data-key="${escapeText(f.key)}"`;
+      if (f.kind === 'choice') {
+        return (
+          `<select ${id}>` +
+          (f.choices ?? [])
+            .map(
+              (c) =>
+                `<option value="${escapeText(c)}"${c === valueOf(on, f) ? ' selected' : ''}>` +
+                `${escapeText(c)}</option>`,
+            )
+            .join('') +
+          '</select>'
+        );
+      }
+      // ⚠️ THE OPTION'S VALUE IS THE INDEX AND ITS TEXT IS THE PART'S NAME.
+      // That is the whole of Field.kind 'part': a person picks "vent stack" and
+      // the league document stores 1.
+      if (f.kind === 'part') {
+        const at2 = Number(valueOf(on, f));
+        return (
+          `<select ${id}>` +
+          (f.choices ?? [])
+            .map(
+              (c, n) =>
+                `<option value="${n}"${n === at2 ? ' selected' : ''}>${escapeText(c)}</option>`,
+            )
+            .join('') +
+          '</select>'
+        );
+      }
+      // Native, offline, and it hands back exactly the #rrggbb canvas wants.
+      if (f.kind === 'colour') {
+        return `<input type="color" ${id} value="${v || '#888888'}">`;
+      }
+      if (f.kind === 'number') {
+        return (
+          `<input type="number" ${id} value="${v}" min="${f.min ?? 0}" ` +
+          `max="${f.max ?? 99}" step="${f.step ?? 0.01}">`
+        );
+      }
+      // A bio and a blurb are sentences; a name is a word. Same element, but
+      // the long one gets the whole row so it is not typed through a slot.
+      return `<input type="text" ${id} value="${v}"${f.kind === 'line' ? ' class="wide"' : ''}>`;
+    };
+
+    const rows = (fields: readonly Field[], on: Record<string, unknown>, at: string): string =>
+      fields
+        .map(
+          (f) =>
+            `<label class="edrow${f.kind === 'line' ? ' wide' : ''}">` +
+            `<span>${escapeText(f.label)}</span>${control(f, on, at)}</label>`,
+        )
+        .join('');
+
+    const notes = leagueSays.length
+      ? `<div class="says" style="grid-column:1/-1">${leagueSays
+          .map((p) => `<div>${escapeText(p)}</div>`)
+          .join('')}</div>`
+      : '';
+
+    // ---- the club picker.
+    if (editClub === null) {
+      prompt.textContent = 'EDIT A CLUB';
+      grid.innerHTML =
+        notes +
+        `<div class="dim" style="grid-column:1/-1;line-height:1.7">` +
+        'Pick a club. Everything you change is kept in memory until you press ' +
+        '<b>SAVE THE LEAGUE</b>, which checks the whole thing the same way a paste is ' +
+        'checked, and reloads.</div>' +
+        league
+          .map(
+            (c, n) =>
+              `<button data-ed-go="club" data-index="${n}"><b>${escapeText(c.abbr)}</b><br>` +
+              `${escapeText(c.name)}</button>`,
+          )
+          .join('') +
+        artPanel() +
+        `<div class="edbar" style="grid-column:1/-1">` +
+        `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
+        `</button>` +
+        `<button data-ed-go="paste"><b>IMPORT OR EXPORT</b><br>` +
+        `the whole league as JSON — drops changes</button>` +
+        `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
+      return;
+    }
+
+    const club = league[editClub]!;
+    prompt.textContent = `${club.abbr} — EDIT`;
+
+    // ---- one roster list, with the open man's fields under his own row.
+    const list = (g: (typeof GROUPS)[number]): string => {
+      const people = (club[g.key] ?? []) as unknown as readonly Record<string, unknown>[];
+      const body = people
+        .map((who, i) => {
+          const open = editWho?.group === g.key && editWho.index === i;
+          const at = `data-ed="person" data-group="${g.key}" data-index="${i}"`;
+          const head =
+            `<div class="edman${open ? ' open' : ''}">` +
+            `<button data-ed-go="who" data-group="${g.key}" data-index="${i}">` +
+            `${i + 1}. ${escapeText(String(who['name'] ?? '—'))}</button>` +
+            `<button class="edtiny" data-ed-go="up" data-group="${g.key}" data-index="${i}"` +
+            `${i === 0 ? ' disabled' : ''}>▲</button>` +
+            `<button class="edtiny" data-ed-go="down" data-group="${g.key}" data-index="${i}"` +
+            `${i === people.length - 1 ? ' disabled' : ''}>▼</button>` +
+            `<button class="edtiny" data-ed-go="del" data-group="${g.key}" data-index="${i}"` +
+            `${people.length <= g.min ? ' disabled' : ''}>✕</button>` +
+            '</div>';
+          if (!open) return head;
+          const fields = g.of === 'hitter' ? HITTER_FIELDS : ARM_FIELDS;
+          const mix =
+            g.of === 'arm'
+              ? `<div class="edmix"><span>arsenal — shares, not percentages</span>` +
+                rows(
+                  ARSENAL_FIELDS,
+                  (who['arsenal'] ?? {}) as Record<string, unknown>,
+                  `data-ed="arsenal" data-group="${g.key}" data-index="${i}"`,
+                ) +
+                '</div>'
+              : '';
+          /**
+           * ✅ THE LOOK BLOCK COVERS EVERYBODY — 2026-09-17. It used to read
+           * `g.of === 'hitter' ? ... : ''`, and the note here said that was the
+           * DATA's fault rather than a decision: `Pitcher` carried no id and no
+           * build, so an arm's face was rolled off his name and his club and
+           * there was nowhere on the record to store a choice. It carries all
+           * three fields now, so the rotation and the bullpen get the same six
+           * dropdowns, the same preview and the same RANDOMIZE as the lineup —
+           * 390 men who could not be dressed at all.
+           *
+           * ⚠️ AN ARM'S DEFAULT BUILD IS HIS CLUB'S, NOT 'human'. A hitter with
+           * no build written is a human; an arm with none is whatever his club
+           * mostly is, because that is what lookForArm() has always drawn him
+           * as. Defaulting him to 'human' here would offer a Detroit Foundry
+           * reliever a list of haircuts and then draw him as a chassis.
+           *
+           * ⚠️ THE PREVIEW IS THE POINT. Picking "crest 3" out of a dropdown
+           * with nothing to look at is not customization, it is data entry —
+           * and the parts only mean anything assembled. The canvas is filled in
+           * after this HTML lands; see paintLookPreviews().
+           */
+          const build = buildOf(who as unknown as Player, club, g.key);
+          const look =
+            `<div class="edmix"><span>how he looks — ` +
+            `${escapeText(build)} parts, his club's kit` +
+            `<button class="edtiny" data-ed-go="roll" data-group="${g.key}" ` +
+            `data-index="${i}">RANDOMIZE</button></span>` +
+            `<canvas class="edlook" width="120" height="150" ` +
+            `data-look-group="${g.key}" data-look-index="${i}"></canvas>` +
+            rows(
+              lookFields(build),
+              lookOf(who as unknown as Player, club, g.key) as unknown as Record<string, unknown>,
+              `data-ed="look" data-group="${g.key}" data-index="${i}"`,
+            ) +
+            '</div>';
+          /**
+           * ⚠️ THE BUILD SELECT SHOWS WHAT HE IS, NOT WHAT IS WRITTEN DOWN.
+           * An arm's build is optional, so `who.build` is undefined for most of
+           * them — and an unselected `<select>` shows its FIRST option, which is
+           * 'human'. So the form said "Build: human" with "machine parts" in the
+           * look block two inches below it, on the same man.
+           *
+           * Seeding the displayed record with the resolved build is the same
+           * trick lookOf() plays: show him the face and the species he has
+           * actually been wearing, so that saving is a change to what he was
+           * rather than a change from a default nobody chose. Nothing is
+           * written until somebody touches a field.
+           */
+          const shown = g.of === 'arm' ? { ...who, build } : who;
+          return `${head}<div class="edform">${rows(fields, shown, at)}${mix}${look}</div>`;
+        })
+        .join('');
+      return (
+        `<div class="edgroup" style="grid-column:1/-1">` +
+        `<div class="edhead">${g.label} <i>${people.length}</i>` +
+        `<button class="edtiny" data-ed-go="add" data-group="${g.key}"` +
+        `${people.length >= g.max ? ' disabled' : ''}>+ ADD</button></div>` +
+        body +
+        '</div>'
+      );
+    };
+
+    grid.innerHTML =
+      notes +
+      `<div class="edgroup" style="grid-column:1/-1"><div class="edhead">THE CLUB</div>` +
+      `<div class="edform">${rows(CLUB_FIELDS, club as unknown as Record<string, unknown>, 'data-ed="club"')}` +
+      rows(
+        IDENTITY_FIELDS,
+        (club.identity ?? {}) as unknown as Record<string, unknown>,
+        'data-ed="identity"',
+      ) +
+      /**
+       * ⚠️ THE EIGHT ARE A STARTING POINT, NOT A LIST YOU PICK FROM. Every
+       * field above stays editable after one lands — the archetype is copied
+       * onto the club, not referenced — so this is the difference between a
+       * dropdown of eight ways to play and a way to write a ninth. Four knobs
+       * typed from nothing is a form nobody fills in; four knobs with
+       * GRINDERS already in them is a form somebody edits.
+       */
+      `<div class="edmix"><span>start from one of the eight — every field stays yours</span>` +
+      Object.keys(IDENTITIES)
+        .map(
+          (k) =>
+            `<button class="edtiny" data-preset="${k}">${escapeText(
+              IDENTITIES[k as IdentityKey].name,
+            )}</button>`,
+        )
+        .join('') +
+      '</div>' +
+      /**
+       * ⚠️ THE PARK IS THE CLUB'S BUILDING, NOT THE CLUB'S ADVANTAGE, and the
+       * blurb has to say so or every league anybody builds will be thirty
+       * bandboxes. atPark() gives it to BOTH lineups; naming a park 1.2 makes
+       * for a high-scoring night, not a club that wins more.
+       */
+      `<div class="edmix"><span>the park — both clubs hit here, so this is the ` +
+      `scoreboard, not an edge. name it to switch it on, clear the name to drop it. ` +
+      `what it does to the ball is derived from the fences — see the rank on the card` +
+      `</span></div>` +
+      rows(
+        PARK_FIELDS,
+        (club.park ?? {}) as unknown as Record<string, unknown>,
+        'data-ed="park"',
+      ) +
+      /**
+       * ⚠️ THE KIT DRESSES ALL 26 MEN AND IS THE CHEAPEST EDIT IN HERE. One
+       * club, three colours, and every figure on the screen changes — which is
+       * the whole reason the uniform lives on the club and not on the player.
+       * A club that has never been touched is already wearing one of sixteen
+       * hashed kits, so this block opens on what it is actually wearing.
+       */
+      `<div class="edmix"><span>the kit — three colours, worn by all 26. ` +
+      `a club you have not dressed wears one of sixteen by default` +
+      `<button class="edtiny" data-ed-go="kitclear">RESET</button></span></div>` +
+      rows(
+        UNIFORM_FIELDS,
+        uniformFor(club) as unknown as Record<string, unknown>,
+        'data-ed="uniform"',
+      ) +
+      '</div></div>' +
+      GROUPS.map(list).join('') +
+      `<div class="edbar" style="grid-column:1/-1">` +
+      `<button data-ed-go="clubs"><b>ANOTHER CLUB</b><br>your changes are kept</button>` +
+      `<button data-ed-go="save"><b>SAVE THE LEAGUE</b><br>checked, then the page reloads` +
+      `</button>` +
+      `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
+  };
+
+  // ⚠️ THE DIFFICULTY SITS ON THE FIRST SCREEN, BEFORE THE MODE, because it is
+  // the only setting on it that decides whether the game is playable at all for
+  // the person reading — and pillar one is that it be reachable. It is drawn on
+  // the mode screen only: once you are picking clubs the question has been
+  // answered, and it stays answerable all game from the meta strip anyway.
+  const drawLevels = (): void => {
+    if (!levels) return;
+    levels.innerHTML = mode
+      ? ''
+      : dial(
+          'level',
+          'HOW HARD IS THE SWING',
+          LEVELS.map((l) => ({ name: l.name, blurb: l.blurb })),
+          Math.max(
+            0,
+            LEVELS.findIndex((l) => l.key === settings.level),
+          ),
+        );
+  };
+
+  /**
+   * A CLUB'S COLOUR, out of its three letters.
+   *
+   * ⚠️ DERIVED, NOT STORED, and deliberately so. `Team` has no colour field and
+   * adding one would mean thirty hand-picked values plus a rule about what an
+   * IMPORTED club that omits it should look like. A hash of the abbreviation is
+   * stable, unique enough across thirty, and gives somebody's twelve-club
+   * league its own set of caps for free.
+   *
+   * Only the hue moves. Saturation and lightness are pinned where dark text
+   * stays readable on top, so no club can draw itself an unreadable patch.
+   */
+  const clubHue = (abbr: string): number => {
+    let h = 0;
+    for (let i = 0; i < abbr.length; i++) h = (h * 31 + abbr.charCodeAt(i)) >>> 0;
+    return h % 360;
+  };
+
+  /** What a roster rank is worth saying, in colour. */
+  const RANK_COLOUR: Record<string, string> = {
+    STACKED: 'var(--good)',
+    STRONG: 'var(--good)',
+    EVEN: 'var(--dim)',
+    LIGHT: 'var(--hot)',
+    THIN: 'var(--bad)',
+  };
+
+  /**
+   * ONE CLUB, AS A CARD.
+   *
+   * ⚠️ IT SAYS WHAT THE CLUB IS, and that is the point of the change rather
+   * than the cap patch. The picker was thirty identical tiles carrying a
+   * three-letter code and a name, so choosing was choosing blind — and then the
+   * pre-game screen immediately told you the club you had just taken was 28th
+   * of 30 and swings for the fences. Both of those facts already existed
+   * (value.ts, identity.ts); they were simply not on the screen where the
+   * decision is made.
+   */
+  const clubCard = (c: Team, n: number): string => {
+    const label = strengthLabel(strengthRank(c, LEAGUE), LEAGUE.length);
+    const who = c.identity?.name ?? '';
+    return (
+      `<button class="clubcard" data-i="${n}">` +
+      `<span class="patch" style="background:hsl(${clubHue(c.abbr)} 45% 62%)">` +
+      `${escapeText(c.abbr)}</span>` +
+      `<span class="nm">${escapeText(c.name)}</span>` +
+      `<span class="who"><b style="color:${RANK_COLOUR[label] ?? 'var(--dim)'}">` +
+      `${escapeText(label)}</b>${who ? ` · ${escapeText(who)}` : ''}</span>` +
+      // ⚠️ THE PARK IS ON THE PICKER TOO, and not only on the franchise card.
+      // An exhibition never sees that card — you pick two clubs and the next
+      // thing is a pitch — so without this the building you chose to play in
+      // was invisible in the one mode where choosing it is the whole screen.
+      // The separator is inside the second half rather than between the two,
+      // because this line wraps on a narrow card and a dangling "·" at the end
+      // of the first row reads as a missing word.
+      (c.park
+        ? `<span class="who dim">${escapeText(c.park.name)}` +
+          `<span> ${c.park.left}/${c.park.center}/${c.park.right}</span></span>`
+        : '') +
+      `</button>`
+    );
+  };
+
+  const draw = (): void => {
+    drawLevels();
+    if (!mode) {
+      prompt.textContent = 'PICK A MODE';
+      const resume =
+        saved && !seasonOver(saved)
+          ? card('resume', 'CONTINUE', `${saved.you} — ${dayLabel(saved).toLowerCase()}`)
+          : '';
+      // The book is offered only once there is something in it. A RECORD BOOK
+      // card on a fresh install is a door to an empty room.
+      const t = totals(loadCareer());
+      const book = t.seasons
+        ? card(
+            'book',
+            'RECORD BOOK',
+            `${t.seasons} season${t.seasons === 1 ? '' : 's'}` +
+              `, ${t.titles} title${t.titles === 1 ? '' : 's'}`,
+          )
+        : '';
+      // The league card says what is loaded rather than what it does, because
+      // "the clubs that shipped" is the answer to the question somebody opening
+      // this screen actually has.
+      const status = leagueStatus();
+      const leagueSub =
+        status === 'custom'
+          ? `your own clubs — ${LEAGUE.length} of them`
+          : status === 'broken'
+            ? 'the league you stored will not read'
+            : `names, ratings and rosters — ${LEAGUE.length} clubs`;
+      grid.innerHTML =
+        resume +
+        card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
+        card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
+        book +
+        card('league', 'CUSTOMIZE', leagueSub) +
+        // The other door onto the pause screen's settings. Offered here with
+        // no conditions on it: the four knobs decide whether the game is
+        // playable at all for the person reading, and a door to them that
+        // only exists once a game is running is the wrong way round.
+        card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half');
+      return;
+    }
+    if (mode === 'league') {
+      // The editor is a room off the league screen rather than a mode of its
+      // own: you get to it from there and BACK puts you back on it.
+      if (editing) {
+        drawEditor();
+        // The canvases exist only now, and drawEditor() writes innerHTML.
+        // Both passes are no-ops on the screen that has none of their canvases.
+        paintLookPreviews();
+        paintArtSlots();
+      } else drawLeague();
+      return;
+    }
+    // The questions you only get to answer once. See the header.
+    if (mode === 'franchise' && !ruled) {
+      drawRules();
+      return;
+    }
+    prompt.textContent = mine
+      ? `${mine.abbr} — NOW PICK YOUR OPPONENT`
+      : mode === 'franchise'
+        ? 'PICK THE CLUB YOU RUN'
+        : 'PICK YOUR CLUB';
+    grid.innerHTML =
+      `<div class="chalk">${
+        mine ? `WHO ${escapeText(mine.abbr)} PLAYS` : `${LEAGUE.length} CLUBS · ROSTER RANK AND HOW THEY PLAY`
+      }</div>` +
+      LEAGUE.map((c, n) => (c === mine ? '' : clubCard(c, n))).join('') +
+      // ⚠️ THE SAME data-go THE MODE SCREEN USES. This is the screen where
+      // somebody decides they want a different club rather than a different
+      // one of these thirty, and it was a dead end — the editor was reachable
+      // only from a card two screens back.
+      (mine ? '' : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters'));
+  };
+
+  /**
+   * Draw, and put the cursor on the first thing drawn.
+   *
+   * ⚠️ A CONSOLE MENU IS NEVER POINTING AT NOTHING, and that is a rule about
+   * what ENTER means rather than about how it looks. Without this the first
+   * press only woke the cursor and the second one pressed whatever it had
+   * woken onto — so ENTER did two different things depending on whether you
+   * had touched the d-pad yet, and on the club screen the second of them
+   * starts a franchise over the one you have saved.
+   *
+   * preventScroll, because putting the cursor on the first club must not yank
+   * a list somebody has scrolled back up to the top of.
+   */
+  const drawn = (): void => {
+    draw();
+    el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+  };
+
+  const start = (): void => {
+    el.remove();
+    nextGame();
+  };
+
+  // ⚠️ THE DIFFICULTY DIAL LIVES IN ITS OWN CONTAINER, so its arrows never
+  // reach the grid's handler. It walks LEVELS rather than a Rules row, but by
+  // the same rule and with the same wrap — one implementation, called from the
+  // two places the two containers make necessary.
+  levels?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button');
+    if (btn?.dataset['step'] !== 'level') return;
+    const by = Number(btn.dataset['by']);
+    const at = Math.max(0, LEVELS.findIndex((l) => l.key === settings.level));
+    const next = LEVELS[((at + by) % LEVELS.length + LEVELS.length) % LEVELS.length]!;
+    settings = { ...settings, level: next.key };
+    saveSettings(settings);
+    drawLevels();
+  });
+
+  /**
+   * TYPING IN THE EDITOR. Every control on that screen lands here.
+   *
+   * ⚠️ IT DOES NOT REDRAW, and that is the whole reason it is a separate
+   * listener from the click one. Rebuilding the grid on each keystroke replaces
+   * the element being typed into, which drops focus and puts the caret back at
+   * the start — you get one character per click. The working copy is the model
+   * and the DOM is already showing what was typed, so there is nothing to
+   * repaint until something STRUCTURAL happens, and those are all buttons.
+   *
+   * The one visible cost is that a man's name in the list above his form does
+   * not follow along as it is retyped. It catches up the moment anything is
+   * clicked, and chasing it would mean the redraw this exists to avoid.
+   */
+  grid.addEventListener('input', (e) => {
+    const el2 = e.target as HTMLInputElement | HTMLSelectElement;
+    const kind = el2.dataset?.['ed'];
+    if (!kind || editing === null || editClub === null) return;
+    const key = el2.dataset['key'] ?? '';
+    const club = editing[editClub]!;
+
+    if (kind === 'club') {
+      const f = CLUB_FIELDS.find((x) => x.key === key);
+      if (f) editing = replaceClub(editing, editClub, withClubField(club, key, coerce(f, el2.value))) as Team[];
+      return;
+    }
+    if (kind === 'identity') {
+      const f = IDENTITY_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withIdentityField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+      }
+      return;
+    }
+    if (kind === 'park') {
+      const f = PARK_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withParkField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+      }
+      return;
+    }
+    if (kind === 'uniform') {
+      const f = UNIFORM_FIELDS.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withUniformField(club, key, coerce(f, el2.value)),
+        ) as Team[];
+        // Every man on the club just changed colour.
+        paintLookPreviews();
+      }
+      return;
+    }
+
+    const group = el2.dataset['group'] as Group | undefined;
+    const index = Number(el2.dataset['index']);
+    if (!group || !Number.isInteger(index)) return;
+
+    if (kind === 'arsenal') {
+      editing = replaceClub(
+        editing,
+        editClub,
+        withArsenalShare(club, group, index, key, Number(el2.value) || 0),
+      ) as Team[];
+      return;
+    }
+    if (kind === 'look') {
+      const who = ((club[group] ?? []) as readonly Player[])[index];
+      if (!who) return;
+      /**
+       * ⚠️ buildOf(), NOT who.build — AND THIS IS THE ONE THAT BROKE THE ARMS.
+       * An arm's build is optional, so `who.build` is undefined for every arm
+       * nobody has set one on: lookFields(undefined) reaches partsFor(undefined),
+       * which is PARTS[undefined], which is undefined, and `.frames.map()` on it
+       * throws inside this listener. The change event dies there — so every one
+       * of the six dropdowns rendered, moved when you dragged it, and then did
+       * NOTHING, silently, on every arm in the league.
+       *
+       * The form was already computing the same answer with buildOf(); this was
+       * the one place that still asked the record directly.
+       */
+      const f = lookFields(buildOf(who, club, group)).find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withLookField(club, group, index, key, coerce(f, el2.value)),
+        ) as Team[];
+        paintLookPreviews();
+      }
+      return;
+    }
+    if (kind === 'person') {
+      const fields = groupOf(group).of === 'hitter' ? HITTER_FIELDS : ARM_FIELDS;
+      const f = fields.find((x) => x.key === key);
+      if (f) {
+        editing = replaceClub(
+          editing,
+          editClub,
+          withPersonField(club, group, index, key, coerce(f, el2.value)),
+        ) as Team[];
+        // ⚠️ CHANGING HIS BUILD CHANGES WHICH PARTS HIS LOOK MEANS, so the
+        // dropdowns under him are now offering the wrong vocabulary — a human
+        // being shown vent stacks. This is the one person field that has to
+        // redraw the form rather than only the preview.
+        if (key === 'build') drawn();
+        else paintLookPreviews();
+      }
+    }
+  });
+
+  /**
+   * IMPORTING DRAWINGS.
+   *
+   * ⚠️ EVERY FILE GETS A LINE, INCLUDING THE ONES THAT FAILED. Three things can
+   * go wrong and all three are silent by nature — a name that matches no part,
+   * a file too big, and something that is not an image at all — so each one is
+   * reported by name. A bulk import that quietly took four of seven files is
+   * indistinguishable from a broken button.
+   *
+   * ⚠️ `<input type="file">` AND NOTHING ELSE. Native, offline, multi-select,
+   * no dependency, and it works from a `file://` page — which is the whole
+   * distribution story. The file never leaves the machine.
+   */
+  grid.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    if (input.id !== 'artin' || !input.files) return;
+    const files = [...input.files];
+    input.value = '';
+    void (async () => {
+      const said: string[] = [];
+      let ok = 0;
+      for (const file of files) {
+        const id = idForFilename(file.name);
+        if (!id) {
+          said.push(`${file.name} — no part is called that. See WHAT TO CALL THEM.`);
+          continue;
+        }
+        if (file.size > MAX_ART_BYTES) {
+          said.push(`${file.name} — ${Math.round(file.size / 1024)} kB is too big for a sprite.`);
+          continue;
+        }
+        try {
+          await putArt(id, file);
+          ok++;
+        } catch {
+          said.push(`${file.name} — could not be read as an image.`);
+        }
+      }
+      artSays = [
+        `${ok} drawing${ok === 1 ? '' : 's'} in.`,
+        ...said,
+      ];
+      drawn();
+    })();
+  });
+
+  grid.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button');
+    if (!btn) return;
+
+    const go = btn.dataset['go'];
+    if (go === 'book') {
+      // The title screen stays underneath; the book hands control straight back
+      // to it, so this is a look rather than a step.
+      showCareer(() => drawn());
+      return;
+    }
+    // Same shape as the book, and for the same reason — the title screen is
+    // still underneath and BACK hands control straight back to it.
+    if (go === 'settings') {
+      showSettings(() => drawn());
+      return;
+    }
+    if (go === 'resume') {
+      season = saved;
+      start();
+      return;
+    }
+    if (go === 'exhibition' || go === 'franchise' || go === 'league') {
+      mode = go;
+      leagueSays = [];
+      // ⚠️ CUSTOMIZE LANDS ON THE EDITOR, NOT ON THE JSON BOX. The box came
+      // first and so it was the front door for a while, which meant the answer
+      // to "can I rename my club" was "export a quarter-megabyte document".
+      // The editor is the customization; the box is transport for a league you
+      // want to keep or hand to somebody, and it is one button away.
+      if (go === 'league') {
+        editing = workingCopy(LEAGUE_SOURCE);
+        editClub = null;
+        editWho = null;
+      }
+      drawn();
+      return;
+    }
+
+    // ---- the league screen. Everything here either changes nothing or ends
+    // in a reload, because LEAGUE is a module constant half the file already
+    // holds a reference into. See drawLeague().
+    // ---- the shelf. Both of these are on the league screen, so they read the
+    // two fields back for the same reason the buttons below them do.
+    const slotGo = btn.dataset['slot'];
+    const slotDrop = btn.dataset['drop'];
+    if (slotGo !== undefined || slotDrop !== undefined) {
+      box = (document.getElementById('leaguebox') as HTMLTextAreaElement | null)?.value ?? box;
+      slotName = (document.getElementById('slotbox') as HTMLInputElement | null)?.value ?? slotName;
+      if (slotGo !== undefined) {
+        // Ends in a reload like every other way of changing the league — see
+        // the note above `lg`.
+        const problems = loadSlot(slotGo, LEAGUE_SOURCE);
+        if (problems === null) location.reload();
+        else {
+          leagueSays = problems;
+          drawn();
+        }
+      } else {
+        deleteSlot(slotDrop!);
+        leagueSays = [`Dropped "${slotDrop}". The league you are playing is unchanged.`];
+        drawn();
+      }
+      return;
+    }
+
+    const lg = btn.dataset['lg'];
+    if (lg) {
+      const boxEl = document.getElementById('leaguebox') as HTMLTextAreaElement | null;
+      // Read back before ANY redraw — the element is about to be replaced, and
+      // a paste that only lived in the DOM would go with it.
+      box = boxEl?.value ?? box;
+      slotName = (document.getElementById('slotbox') as HTMLInputElement | null)?.value ?? slotName;
+      if (lg === 'back') {
+        mode = null;
+        leagueSays = [];
+        drawn();
+      } else if (lg === 'fill') {
+        // ⚠️ LEAGUE_SOURCE, NOT LEAGUE. The played clubs have had parity
+        // applied; the source is what an import goes back in as. Filling the
+        // box with the compressed ones would move every rating a little every
+        // time somebody edited a bio. See league.ts.
+        box = serialiseLeague(LEAGUE_SOURCE);
+        leagueSays = [];
+        draw();
+        const filled = document.getElementById('leaguebox') as HTMLTextAreaElement | null;
+        filled?.focus();
+        filled?.select();
+      } else if (lg === 'shipped') {
+        clearCustomLeague();
+        location.reload();
+      } else if (lg === 'use') {
+        const problems = saveCustomLeague(box, LEAGUE_SOURCE);
+        if (problems === null) location.reload();
+        else {
+          leagueSays = problems;
+          drawn();
+        }
+      } else if (lg === 'keep') {
+        // ⚠️ LEAGUE_SOURCE, NOT LEAGUE, for the reason FILL THE BOX gives —
+        // what is filed has to be the uncompressed document, or loading a slot
+        // would apply parity to a league that had already had it applied once.
+        const problems = saveSlot(slotName, serialiseLeague(LEAGUE_SOURCE));
+        if (problems === null) {
+          leagueSays = [`Kept as "${slotName.trim()}".`];
+          slotName = '';
+        } else leagueSays = problems;
+        drawn();
+      } else if (lg === 'edit') {
+        editing = workingCopy(LEAGUE_SOURCE);
+        editClub = null;
+        editWho = null;
+        leagueSays = [];
+        drawn();
+      }
+      return;
+    }
+
+    // ---- one of the eight, copied onto the club being edited. It redraws
+    // rather than only writing the model, because unlike a keystroke this
+    // changes six controls at once and the form has to catch up.
+    const preset = btn.dataset['preset'];
+    if (preset && editing && editClub !== null) {
+      editing = replaceClub(
+        editing,
+        editClub,
+        withIdentity(editing[editClub]!, IDENTITIES[preset as IdentityKey]),
+      ) as Team[];
+      drawn();
+      return;
+    }
+
+    // ---- the club editor. Every branch either moves the cursor around the
+    // working copy or ends the same way the paste box does — through
+    // saveCustomLeague(), then a reload. See drawEditor().
+    const ed = btn.dataset['edGo'];
+    if (ed && editing) {
+      const group = btn.dataset['group'] as Group | undefined;
+      const index = Number(btn.dataset['index']);
+      const at = editClub;
+
+      if (ed === 'back') {
+        // The editor is the front door now, so BACK is out to the modes rather
+        // than back to the box behind it.
+        editing = null;
+        editClub = null;
+        editWho = null;
+        mode = null;
+        leagueSays = [];
+      } else if (ed === 'paste') {
+        editing = null;
+        editClub = null;
+        editWho = null;
+        leagueSays = [];
+      } else if (ed === 'clubs') {
+        editClub = null;
+        editWho = null;
+      } else if (ed === 'club') {
+        editClub = index;
+        editWho = null;
+      } else if (ed === 'who') {
+        // Clicking the man who is already open closes him. A list where the
+        // only way to collapse a form is to open a different one is a list you
+        // cannot see the bottom of.
+        editWho =
+          group && editWho?.group === group && editWho.index === index
+            ? null
+            : group
+              ? { group, index }
+              : null;
+      } else if (ed === 'artdrop') {
+        // ⚠️ ONE PART. The grid names the slot it came from, so the message can
+        // say what went rather than "removed" — somebody who drops the wrong
+        // one has to be able to see which one they actually dropped.
+        const id = btn.dataset['artId'];
+        const slot = artSlots().find((s) => s.id === id);
+        if (id) {
+          void removeArt(id).then(() => {
+            artSays = [`${slot?.file ?? id} removed. That part draws its shell again.`];
+            drawn();
+          });
+        }
+      } else if (ed === 'artclear') {
+        void clearArt().then(() => {
+          artSays = ['Every drawing removed. The shells are back.'];
+          drawn();
+        });
+      } else if (ed === 'kitclear' && at !== null) {
+        // Back to the kit the abbr hashes to, which is what a club that has
+        // never been dressed is already wearing.
+        editing = replaceClub(editing, at, withoutUniform(editing[at]!)) as Team[];
+      } else if (ed === 'roll' && at !== null && group) {
+        editing = replaceClub(
+          editing,
+          at,
+          // ⚠️ Math.random, and it is the one place in this codebase that is
+          // allowed one. Rule 3 bans it from anything the engine replays; this
+          // rolls a FACE, which nothing replays and nothing reads back. Seeding
+          // it would also defeat the button — a deterministic re-roll hands
+          // back the same man every press.
+          withRandomLook(editing[at]!, group, index, Math.random),
+        ) as Team[];
+      } else if (at !== null && group) {
+        const club = editing[at]!;
+        if (ed === 'add') {
+          // ⚠️ addPerson TAKES THE WHOLE LEAGUE, unlike its three neighbours. A
+          // new man's id and name have to be free across all thirty clubs —
+          // see takenIn() in editor.ts — so it returns the league, not the club.
+          editing = addPerson(editing, at, group) as Team[];
+          editWho = { group, index: ((club[group] ?? []) as readonly unknown[]).length };
+        } else if (ed === 'del') {
+          editing = replaceClub(editing, at, removePerson(club, group, index)) as Team[];
+          editWho = null;
+        } else if (ed === 'up' || ed === 'down') {
+          const by = ed === 'up' ? -1 : 1;
+          editing = replaceClub(editing, at, movePerson(club, group, index, by)) as Team[];
+          // The cursor follows the man, not the slot — he is what was grabbed.
+          if (editWho?.group === group && editWho.index === index) {
+            editWho = { group, index: index + by };
+          }
+        }
+      }
+
+      if (ed === 'save') {
+        // ⚠️ SERIALISED AND PUT BACK THROUGH THE SAME GATE. Handing the objects
+        // to the engine directly would skip every rule in league.ts, and the
+        // editor is exactly the thing most likely to produce a club that is
+        // nearly legal — nine hitters minus the one you just deleted, an out
+        // pitch you removed from the mix.
+        const problems = saveCustomLeague(serialiseLeague(editing!), LEAGUE_SOURCE);
+        if (problems === null) location.reload();
+        else leagueSays = problems;
+      }
+      drawn();
+      return;
+    }
+    // ---- an arrow on a dial. One handler for all seven, because they differ
+    // in exactly one thing: which list is being walked.
+    const step = btn.dataset['step'];
+    if (step) {
+      const by = Number(btn.dataset['by']);
+      // Both ends wrap. A dial you can drive off the end of is a control that
+      // silently stops responding, and there is nothing at either end worth
+      // stopping at — see the note on dial().
+      const wrap = (at: number, n: number): number => ((at + by) % n + n) % n;
+
+      // Only the rules dials reach here. The difficulty one is drawn into the
+      // `levels` container, which has a listener of its own — see below.
+      const row = rowsOf().find((r) => r.key === step);
+      if (row && row.choices.length > 0) {
+        const at = Math.max(0, row.choices.findIndex((c) => c.value === rules[row.key]));
+        const next = row.choices[wrap(at, row.choices.length)]!;
+        // ⚠️ STILL THROUGH cleanRules(). The value came off a list this screen
+        // drew from rules.ts, so it is already legal — but cleanRules is the
+        // one function that decides what a legal Rules is, and a second opinion
+        // here is exactly how the two drift apart. It is also what clamps the
+        // bracket, which no arrow should be able to route around.
+        rules = cleanRules({ ...rules, [row.key]: next.value });
+        drawRules();
+      }
+      return;
+    }
+    if (go === 'start') {
+      ruled = true;
+      drawn();
+      return;
+    }
+
+    const picked = LEAGUE[Number(btn.dataset['i'])]!;
+    if (mode === 'franchise') {
+      // A fresh season replaces whatever was saved — there is one slot, and
+      // the CONTINUE card above is the only way back to the old one.
+      clearSeason();
+      season = newSeason(picked.abbr, Date.now() >>> 0, rules.games, rules);
+      saveSeason(season);
+      start();
+      return;
+    }
+    if (!mine) {
+      mine = picked;
+      drawn();
+      return;
+    }
+    // Exhibition: you are the home club, so you bat last.
+    el.remove();
+    kickOff(mine, picked, 'home');
+  });
+
+  // The title screen owns the whole keyboard while it is up. See installDpad.
+  installDpad(el, { swallow: 'all' });
+
+  drawn();
+}
+
+pregame();
+
+/**
+ * Bring the part library up.
+ *
+ * ⚠️ IT IS FIRE-AND-FORGET, AND THE GAME DOES NOT WAIT FOR IT. Reading
+ * IndexedDB is async and the title screen is already on. Until it lands every
+ * lookup misses and the shells draw, which is the shipped state and is what an
+ * empty library looks like anyway — so the only visible effect of the delay is
+ * that art appears a frame or two late on the very first screen. Blocking the
+ * boot on a database nobody is required to have would be the worse trade.
+ */
+void loadArt();
