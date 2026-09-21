@@ -2820,6 +2820,15 @@ function installDpad(root: HTMLElement, opts: { swallow: 'all' | 'handled' }): (
     // Gone, or hidden behind something else. #start is removed outright when a
     // game starts; #pre is a permanent element that gets emptied and hidden.
     if (!root.isConnected || root.style.display === 'none') return;
+    // ⚠️ AND COVERED COUNTS AS HIDDEN. #pre opens OVER #start and leaves it
+    // connected and displayed, so the title screen's cursor went on eating
+    // SPACE and ENTER for every screen opened off it — stopPropagation() above
+    // reaches the window handler those screens leave their BACK key on. The
+    // record book has advertised `BACK SPACE` from the title card since the day
+    // it shipped and that key has never once worked. #pre is the only thing
+    // that can be in front of anything, and when it is, it owns the keyboard.
+    const front = document.getElementById('pre');
+    if (front && front !== root && front.style.display !== 'none') return;
     const on = document.activeElement as HTMLElement | null;
     // A box is a place to type. Leave it — including its arrows.
     if (on?.tagName === 'TEXTAREA' || on?.tagName === 'INPUT') return;
