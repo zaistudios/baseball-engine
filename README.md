@@ -544,6 +544,15 @@ SPACE on the title screen threw a pitch nobody could see and G cycled the
 difficulty behind a dial that went on showing the old value. The screen in
 front owns the keyboard now, which is what being in front means.
 
+⚠️ **AND COVERED COUNTS AS BEING BEHIND.** That capture ran off "is `#start`
+still connected and displayed", and a screen opened out of `#pre` — the record
+book, the settings screen — sits **over** the title screen without removing it.
+So the title's cursor went on swallowing SPACE and ENTER for every screen opened
+off it, and the record book has advertised `BACK SPACE` from its title card
+since the day it shipped with that key doing nothing at all. `#pre` is the only
+thing that can be in front of anything; when it is up, the screen underneath
+stands down.
+
 ⚠️ **AND THE GAME NO LONGER EATS WHAT YOU TYPE.** That same handler
 `preventDefault`s every key it knows, which is most of the alphabet — so
 typing `{"abbr":"OKC"}` into the league box put `{"":"O"}` in it and squared
