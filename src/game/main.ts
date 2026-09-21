@@ -38,8 +38,17 @@ import {
   type ReleaseGrade,
 } from '../core/delivery.ts';
 import type { PitchType, Outcome } from '../core/hitTables.ts';
-import { extend, loadStreak, saveStreak, type Streak } from './streak.ts';
-import { bestYear, file, loadCareer, records, saveCareer, totals, winPct } from './career.ts';
+import { extend, loadStreak, newStreak, saveStreak, type Streak } from './streak.ts';
+import {
+  bestYear,
+  file,
+  loadCareer,
+  newCareer,
+  records,
+  saveCareer,
+  totals,
+  winPct,
+} from './career.ts';
 import { clubValue, showScale, strengthLabel, strengthRank } from './value.ts';
 import {
   COMMAND,
@@ -337,6 +346,57 @@ const book: Read = newRead();
 type Phase = 'idle' | 'windup' | 'resolve' | 'calling' | 'winding' | 'throw' | 'over';
 
 let phase: Phase = 'idle';
+
+/**
+ * THE CLOCK IS STOPPED.
+ *
+ * ⚠️ AN OVERLAY IS NOT A PAUSE — the note over dpadOffPre() says it about the
+ * five screens that came before this one. #pre covers the canvas and takes the
+ * keyboard, and the frame loop goes right on running underneath it, autoStep()
+ * included. This flag is what actually stops the game. The screen is only what
+ * you look at once it has.
+ */
+let paused = false;
+/** When it stopped, so resume() can hand back every millisecond it took. */
+let pausedAt = 0;
+
+/**
+ * STOP THE GAME BETWEEN PITCHES, AND ONLY THERE.
+ *
+ * ⚠️ IDLE ONLY, AND THAT IS THE WHOLE DESIGN. This engine grades TIMING against
+ * performance.now(), never geometry, so a pause taken with a delivery, a swing
+ * or a throw in the air would leave a graded deadline sitting in the past and
+ * measure the next press against a clock that moved while nobody was playing.
+ * At idle nothing graded is in flight, so there is nothing to corrupt.
+ *
+ * `looping` because the title screen has a keyboard and no game behind it: ESC
+ * before kickoff must not drop a pause screen over the mode cards.
+ */
+function pause(): void {
+  if (paused || !looping || phase !== 'idle') return;
+  paused = true;
+  pausedAt = performance.now();
+  showPause();
+}
+
+/**
+ * Start it again, and give the time back.
+ *
+ * ⚠️ EVERY ABSOLUTE TIMESTAMP STILL LIVE AT IDLE MOVES FORWARD, and these two
+ * are the entire list — the caption's clock and the break card's. Without the
+ * shift, a half-time card you paused on would be gone the instant you came
+ * back, expired by a stretch of wall clock nothing was playing through. The
+ * file's other deadlines — arriveAt, deliveryAt, throwAt, flashUntil — cannot
+ * be live at idle, which is the other half of why pause() is idle-only.
+ */
+function resume(): void {
+  if (!paused) return;
+  const held = performance.now() - pausedAt;
+  sceneAt += held;
+  breakFrom += held;
+  paused = false;
+}
+
 let atBat: AtBatState = newAtBat();
 let previous: PitchType[] = [];
 
@@ -2518,6 +2578,21 @@ function press(key: string): void {
     return;
   }
 
+  // THE PAUSE. Between pitches only — pause() refuses anywhere else and says
+  // there why. ESC in any other phase is a key that does nothing, on purpose.
+  if (key === 'escape') {
+    pause();
+    return;
+  }
+
+  // ⚠️ THE KEYBOARD OUTLIVES THE GAME UNDERNEATH IT. #pre covers the canvas but
+  // this function stays live under every screen in the file, so SPACE on the
+  // pause screen would start a delivery nothing is stepping, and SPACE on a
+  // screen opened from the title would start one in a game that never kicked
+  // off. The four knobs above are the settings screen's own controls and stay
+  // live everywhere; everything below here wants a game that is running.
+  if (paused || !looping) return;
+
   if (phase === 'over' && key === 'b') {
     showBox();
     return;
@@ -2656,7 +2731,8 @@ addEventListener('keydown', (e) => {
     // shipped — this list never forwarded it, so the key printed on the screen
     // did nothing at all. Exactly the dead key the note above describes, found
     // the only way it ever is: by somebody pressing it. 'p' is the pitch speed.
-    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', ',', '.'].includes(k) ||
+    // 'escape' is the pause, forwarded here for exactly the reason above it.
+    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', ',', '.', 'escape'].includes(k) ||
     /^[1-9]$/.test(k)
   ) {
     e.preventDefault();
@@ -2744,6 +2820,15 @@ function installDpad(root: HTMLElement, opts: { swallow: 'all' | 'handled' }): (
     // Gone, or hidden behind something else. #start is removed outright when a
     // game starts; #pre is a permanent element that gets emptied and hidden.
     if (!root.isConnected || root.style.display === 'none') return;
+    // ⚠️ AND COVERED COUNTS AS HIDDEN. #pre opens OVER #start and leaves it
+    // connected and displayed, so the title screen's cursor went on eating
+    // SPACE and ENTER for every screen opened off it — stopPropagation() above
+    // reaches the window handler those screens leave their BACK key on. The
+    // record book has advertised `BACK SPACE` from the title card since the day
+    // it shipped and that key has never once worked. #pre is the only thing
+    // that can be in front of anything, and when it is, it owns the keyboard.
+    const front = document.getElementById('pre');
+    if (front && front !== root && front.style.display !== 'none') return;
     const on = document.activeElement as HTMLElement | null;
     // A box is a place to type. Leave it — including its arrows.
     if (on?.tagName === 'TEXTAREA' || on?.tagName === 'INPUT') return;
@@ -4795,6 +4880,9 @@ function frame(): void {
 }
 
 function step(): void {
+  // ⚠️ THE FIRST LINE, ABOVE EVERYTHING. This is the pause. The screen over the
+  // canvas stops nothing at all — see the note on the flag.
+  if (paused) return;
   const now = performance.now();
 
   // The replay-less caption expires on its own clock. Checked first, and only
@@ -6170,6 +6258,149 @@ function showChampion(s: Season, back: () => void): void {
   if (b) b.onclick = leave;
 }
 
+/**
+ * THE PAUSE SCREEN — three doors and the one thing a player has to be told.
+ *
+ * ⚠️ IT DOES NOT PAUSE ANYTHING. pause() already did, before this was called.
+ * Everything on this screen is a look at a game that has already stopped, and
+ * a screen that stopped it instead would be the exact defect the flag exists
+ * to prevent — see the note on `paused`.
+ */
+function showPause(): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  // No room to draw in is not a reason to leave the game frozen.
+  if (!el) return resume();
+
+  el.innerHTML =
+    `<div class="wrap"><h1>BASEDBALL</h1><h2>PAUSED</h2>` +
+    `<div class="panel dim">The clock is stopped between pitches. Nothing is ` +
+    `running under this screen — not the arm, not the computer playing your half.` +
+    `</div>` +
+    `<button class="go" data-go="resume">RESUME <kbd>ESC</kbd></button>` +
+    `<button class="go" data-go="settings">SETTINGS</button>` +
+    `<button class="go" data-go="quit">QUIT TO MENU</button>` +
+    // ⚠️ IT SAYS WHAT QUITTING COSTS, because nothing is written on the way out
+    // — which is free in an exhibition and a re-played day in a franchise, and
+    // a player who finds that out afterwards has lost an evening he thought he
+    // had banked.
+    `<div class="panel dim">Quitting ends this game where it stands. No result, ` +
+    `no loss, nothing in the book. A franchise day you were halfway through is ` +
+    `never written, so CONTINUE puts you back on it and you play it again from ` +
+    `the first pitch.</div></div>`;
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+
+  const close = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      resume();
+    }
+  }
+  addEventListener('keydown', onKey);
+
+  const door = (name: string, fn: () => void): void => {
+    el.querySelector<HTMLButtonElement>(`[data-go="${name}"]`)!.onclick = fn;
+  };
+  door('resume', () => {
+    close();
+    resume();
+  });
+  // BACK comes back HERE rather than to the game, which is the whole of what
+  // makes one settings screen serve two doors.
+  door('settings', () => {
+    close();
+    showSettings(() => showPause());
+  });
+  // The same quit the final screen has had all along. Nothing to unwind.
+  door('quit', () => location.reload());
+}
+
+/**
+ * THE SETTINGS SCREEN — one screen behind two doors, the title card and the
+ * pause screen. `back` is what BACK does, and it is the only thing that differs
+ * between them.
+ *
+ * ⚠️ EVERY ROW PRESSES ITS OWN HOTKEY. The four knobs are live in every phase
+ * and always have been; this screen writes them down, it does not replace them.
+ * A row that copied the body out of press() would be a fifth setting that
+ * agrees with the fourth until the day it does not.
+ */
+function showSettings(back: () => void): void {
+  dpadOffPre();
+  const el = document.getElementById('pre');
+  if (!el) return back();
+
+  const row = (key: string, label: string, value: string, blurb: string): string =>
+    `<button class="go" data-key="${key}" style="text-align:left;padding:10px 12px">` +
+    `<span class="dim" style="font-size:10px;letter-spacing:1px">${label}</span><br>` +
+    `<b style="color:var(--hot)">${value}</b> <kbd>${key.toUpperCase()}</kbd><br>` +
+    `<span class="dim" style="font-size:11px">${blurb}</span></button>`;
+
+  function paint(): void {
+    const level = levelOf(settings.level);
+    const cage = pitchSpeedOf(settings.pitchSpeed);
+    el!.innerHTML =
+      `<div class="wrap"><h1>BASEDBALL</h1><h2>SETTINGS</h2>` +
+      `<div class="panel"><div class="dim penhead">KEPT BETWEEN GAMES</div>` +
+      row('g', 'HOW HARD IS THE SWING', level.name, level.blurb) +
+      row('p', 'HOW FAST THE BALL COMES', cage.name, cage.blurb) +
+      `</div>` +
+      `<div class="panel"><div class="dim penhead">THIS SESSION ONLY</div>` +
+      row(
+        't',
+        'WHO PLAYS YOUR HALF',
+        auto ? 'AUTO' : 'MANUAL',
+        auto
+          ? 'The computer bats and pitches for you.'
+          : 'You are in the box and on the mound.',
+      ) +
+      row(
+        'f',
+        'HOW FAST THE DEAD TIME RUNS',
+        `${speed()}×`,
+        'Between pitches only. A pitch you are swinging at is never sped up.',
+      ) +
+      `</div>` +
+      `<div class="panel dim">All four are live in the game too — the key beside ` +
+      `a row works from the batter's box and the mound exactly as it does here.` +
+      `</div>` +
+      `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button></div>`;
+
+    el!.querySelectorAll<HTMLButtonElement>('[data-key]').forEach((b) => {
+      b.onclick = (): void => {
+        press(b.dataset['key']!);
+        paint();
+      };
+    });
+    el!.querySelector<HTMLButtonElement>('[data-back]')!.onclick = (): void => leave();
+  }
+
+  const leave = (): void => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    removeEventListener('keydown', onKey);
+    back();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === ' ' || e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      leave();
+    }
+  };
+
+  paint();
+  el.style.display = 'flex';
+  el.scrollTop = 0;
+  addEventListener('keydown', onKey);
+}
+
 function showCareer(back: () => void): void {
   dpadOffPre();
   const el = document.getElementById('pre');
@@ -6244,7 +6475,12 @@ function showCareer(back: () => void): void {
     summary +
     recordPanel +
     table +
-    `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button></div>`;
+    `<button class="go" data-back="1">BACK <kbd>SPACE</kbd></button>` +
+    // ⚠️ IT SITS UNDER THE WHOLE BOOK, not up beside the title. This is the one
+    // control in the game that destroys something, so it is reached by having
+    // scrolled past everything it would destroy.
+    `<button class="go" data-reset="1" style="opacity:.75">EMPTY THE RECORD BOOK</button>` +
+    `</div>`;
   el.style.display = 'flex';
   el.scrollTop = 0;
 
@@ -6262,6 +6498,31 @@ function showCareer(back: () => void): void {
   }
   addEventListener('keydown', onKey);
   el.querySelector<HTMLButtonElement>('[data-back]')!.onclick = () => leave();
+
+  // ⚠️ THE RECORD BOOK AND NOTHING ELSE. Your clubs live in asb-league and a
+  // season in progress in asb.season.v1, and neither is touched here — the
+  // confirm says so out loud, because anybody reading the word "empty" assumes
+  // the worst and is right to.
+  el.querySelector<HTMLButtonElement>('[data-reset]')!.onclick = () => {
+    if (
+      !confirm(
+        'Empty the record book?\n\n' +
+          'Every season you have filed and your longest barrel streak go, for good.\n\n' +
+          'Your clubs and your saved season stay exactly where they are.',
+      )
+    ) {
+      return;
+    }
+    saveCareer(newCareer());
+    saveStreak(newStreak());
+    // ⚠️ AND THE MODULE'S COPY. `streak` is loaded once at module scope and this
+    // screen reads THAT rather than the store — wipe only the store and the
+    // book you just emptied goes on showing the old longest streak.
+    streak = newStreak();
+    // Re-draw in place, which means taking this screen's key handler off first.
+    removeEventListener('keydown', onKey);
+    showCareer(back);
+  };
 }
 
 /**
@@ -7284,7 +7545,12 @@ function pregame(): void {
         card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
         card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
         book +
-        card('league', 'CUSTOMIZE', leagueSub);
+        card('league', 'CUSTOMIZE', leagueSub) +
+        // The other door onto the pause screen's settings. Offered here with
+        // no conditions on it: the four knobs decide whether the game is
+        // playable at all for the person reading, and a door to them that
+        // only exists once a game is running is the wrong way round.
+        card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half');
       return;
     }
     if (mode === 'league') {
@@ -7533,6 +7799,12 @@ function pregame(): void {
       // The title screen stays underneath; the book hands control straight back
       // to it, so this is a look rather than a step.
       showCareer(() => drawn());
+      return;
+    }
+    // Same shape as the book, and for the same reason — the title screen is
+    // still underneath and BACK hands control straight back to it.
+    if (go === 'settings') {
+      showSettings(() => drawn());
       return;
     }
     if (go === 'resume') {

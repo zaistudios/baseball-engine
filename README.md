@@ -544,6 +544,15 @@ SPACE on the title screen threw a pitch nobody could see and G cycled the
 difficulty behind a dial that went on showing the old value. The screen in
 front owns the keyboard now, which is what being in front means.
 
+⚠️ **AND COVERED COUNTS AS BEING BEHIND.** That capture ran off "is `#start`
+still connected and displayed", and a screen opened out of `#pre` — the record
+book, the settings screen — sits **over** the title screen without removing it.
+So the title's cursor went on swallowing SPACE and ENTER for every screen opened
+off it, and the record book has advertised `BACK SPACE` from its title card
+since the day it shipped with that key doing nothing at all. `#pre` is the only
+thing that can be in front of anything; when it is up, the screen underneath
+stands down.
+
 ⚠️ **AND THE GAME NO LONGER EATS WHAT YOU TYPE.** That same handler
 `preventDefault`s every key it knows, which is most of the alphabet — so
 typing `{"abbr":"OKC"}` into the league box put `{"":"O"}` in it and squared
@@ -1092,6 +1101,43 @@ the covers run to their bags, the throw races the batter down the line and an
 umpire calls it. That is `src/web/overhead.ts`, the same module the roguelike
 screen uses — it moved out of that screen the day this one wanted it. Both pass
 their own canvas, camera and field colours; neither owns it.
+
+### <kbd>ESC</kbd> stops it, and an overlay never did
+
+**The pause is between pitches, and nowhere else.** <kbd>ESC</kbd> at `idle`
+puts up RESUME / SETTINGS / QUIT TO MENU and the game underneath actually
+stops — the arm, the break card's clock, and the computer playing your half in
+watch mode. <kbd>ESC</kbd> during a windup, a delivery or a throw does nothing
+at all.
+
+⚠️ **The five screens before this one paused nothing.** `#pre` covers the
+canvas and takes the keyboard, and the frame loop ran right on underneath every
+one of them. The pause is a flag gating `step()`; the screen is what you look
+at once the clock has stopped. And because this engine grades TIMING against
+`performance.now()` rather than geometry, a pause with a graded moment in the
+air would measure your next press against a clock nobody played through — which
+is the whole of why it is idle-only. The two deadlines that ARE live at idle,
+the caption's and the break card's, are handed back every millisecond they were
+held for, so a half-time card you paused on is still there with the time it had
+left when you come back.
+
+**QUIT TO MENU just ends the game.** No result, no loss, nothing in the book. A
+franchise day you were halfway through is never written, so CONTINUE puts you
+back on it and you play it again from the first pitch. The screen says so
+before you press it.
+
+**One settings screen, two doors** — a card on the title menu beside CUSTOMIZE,
+and a button on the pause screen. Four rows: the difficulty (<kbd>G</kbd>) and
+the pitch speed (<kbd>P</kbd>), both kept between games, and watch mode
+(<kbd>T</kbd>) and the game speed (<kbd>F</kbd>) for the session. Every row
+presses its own hotkey rather than owning a second copy of it, and all four
+keys stay live in every phase exactly as they were — the screen writes them
+down, it does not replace them.
+
+**The record book has a button that empties it.** Under the whole book rather
+than beside its title, behind one confirm. It takes the seasons and the longest
+barrel streak and nothing else: your clubs and a season in progress are not
+touched, and the confirm says that out loud.
 
 ### The check swing, and the swing that takes time to get there
 
