@@ -150,18 +150,37 @@ export function platoonContact(batter: Hand, pitcher: Hand, pitch: PitchType): n
  * and the difficulty assist already use, which is why the bar under the
  * verdict narrows for free — drawSwingBar() draws bandsFor() off this number.
  *
- * At the top of the miss range a hyperbola leaves roughly a third of the
- * window rather than none: a foot off the plate has to be nearly unhittable,
- * not a rule that a swing cannot be a hit.
+ * ⚠️ THE BLACK IS FREE, AND THE SHAPE IS NOT DECORATION. The first CHASE_FREE
+ * of the miss costs nothing at all, and past it the cost goes up with the
+ * SQUARE of the rest. A flat penalty from the edge outward cannot do this job:
+ * the average ball off the plate is a NEAR miss, so a curve steep at the edge
+ * spends its whole league-wide budget on pitches that ought to be hittable,
+ * and by the time the K rate is back inside its guardrail there is nothing
+ * left to charge the pitch nobody should have swung at. Free near the edge and
+ * steep at the far end is the only shape that pays for both.
+ *
+ * Which leaves, at CHASE_FREE 0.4 and CHASE_COST 2: a ball nicking the black
+ * hittable, a ball half a plate out at 0.93, and one most of a foot off the
+ * plate at 0.51 — half the window, and about six milliseconds of PERFECT.
  *
  * ponytail: one hyperbola, tuned against scripts/balance.ts and not derived.
- * Re-run it after touching CHASE_COST — the K rate is the line this shows up
- * on league-wide, and it is the knob, not AI_TIMING_BANDS.
+ * Re-run it after touching either constant. The K rate is the line this shows
+ * up on league-wide and CHASE_COST is the knob — pointedly not AI_TIMING_BANDS
+ * or CHASE, which describe how often the computer goes after one, not what
+ * going after one is worth.
+ *
+ * ⚠️ THE RUNS FLOOR BINDS BEFORE THE K CEILING. 500 games at CHASE_COST 3
+ * read 23.7% K and 4.03 runs; the league runs out of runs a little before it
+ * runs out of strikeouts, so tune against runs per team and check the K rate
+ * second.
  */
-export const CHASE_COST = 1.15;
+export const CHASE_FREE = 0.4;
+export const CHASE_COST = 2;
 
-export const chaseContact = (missDistance = 0): number =>
-  missDistance > 0 ? 1 / (1 + CHASE_COST * missDistance) : 1;
+export const chaseContact = (missDistance = 0): number => {
+  const past = missDistance - CHASE_FREE;
+  return past > 0 ? 1 / (1 + CHASE_COST * past ** 2) : 1;
+};
 
 export interface SwingInput {
   /** Signed ms: negative early, positive late. See timing.ts. */
