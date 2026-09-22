@@ -3574,11 +3574,26 @@ function drawMoment(now: number): void {
   ctx.textAlign = 'left';
 }
 
-/** Where the pitch crosses, given its nominal location. */
-function spotXY(location: PitchLocation, inZone: boolean): [number, number] {
+/**
+ * WHERE THE PITCH CROSSES, given its nominal location and how far off the
+ * plate it actually missed.
+ *
+ * ⚠️ THE BALL USED TO MISS BY A CONSTANT. Every ball in the game was drawn
+ * at 0.78 — one nominal distance for the pitch that nicked the black and the
+ * pitch nobody could reach — while the hitter was, as of this branch, being
+ * charged a narrower window for the difference between them. An invisible
+ * penalty is an unfair penalty: you cannot lay off what the screen will not
+ * show you. So the picture reads the same number the swing was graded on.
+ *
+ * The unit is zone half-widths past the EDGE, and the edge is at 0.5 of the
+ * zone from its middle — which is the whole of the arithmetic below. A strike
+ * still sits at 0.22, well inside, because a called strike is a called strike
+ * whatever corner it caught.
+ */
+function spotXY(location: PitchLocation, inZone: boolean, missDistance = 0): [number, number] {
   const cx = ZONE.x + ZONE.w / 2;
   const cy = ZONE.y + ZONE.h / 2;
-  const off = inZone ? 0.22 : 0.78;
+  const off = inZone ? 0.22 : 0.5 + missDistance / 2;
   const { dx, dy } = locationOffset(location);
   return [cx + dx * ZONE.w * off, cy + dy * ZONE.h * off];
 }
@@ -3830,7 +3845,7 @@ function drawBall(now: number): void {
   const flight = arriveAt - launchAt;
   const t = Math.max(0, Math.min(1, (now - launchAt) / flight));
 
-  const [tx, ty] = spotXY(pitch.location, pitch.inZone);
+  const [tx, ty] = spotXY(pitch.location, pitch.inZone, pitch.missDistance);
 
   // THE BREAK. Off the straight line on the way in, and back onto the spot by
   // the time it gets there — movementOf() owns the shape, the sign and the
