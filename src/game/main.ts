@@ -6352,8 +6352,9 @@ function showPause(): void {
 
   el.innerHTML =
     `<div class="wrap"><h1>BASEDBALL</h1><h2>PAUSED</h2>` +
-    `<div class="panel dim">The clock is stopped between pitches. Nothing is ` +
-    `running under this screen — not the arm, not the computer playing your half.` +
+    `<div class="panel dim">The clock is stopped. Nothing is running under this ` +
+    `screen — not the arm, not the ball, not the computer playing your half. ` +
+    `Everything picks up exactly where it froze, with the time it had left.` +
     `</div>` +
     `<button class="go" data-go="resume">RESUME <kbd>ESC</kbd></button>` +
     `<button class="go" data-go="settings">SETTINGS</button>` +
