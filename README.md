@@ -2297,6 +2297,78 @@ more than the tape loop did (`putaway` 55% of his usual plate, `around` 35%,
 tripled to 1.8–3.1% of plate appearances against a real 1%. It is 0.045 now, not
 0.12. Anyone adding another off-the-plate approach has to re-measure this.
 
+## Chasing costs a narrower window
+
+Every ball in this game used to be the same ball. The engine carried `inZone`
+and nothing else, and the renderer drew all of them at exactly `0.78` — so a
+pitch that nicked the black and a pitch in the other batter's box were one
+pitch to the hitter and one picture on the screen. The only cost of chasing was
+that a swing cannot be called a ball.
+
+A pitch now carries `missDistance`: how far off the plate it actually went, in
+zone half-widths past the edge, rolled where `inZone` is decided in **both**
+pitch producers — the computer's `throwPitch()` and the one you call yourself
+through `pitchToSpot()`. It is drawn from a squared range, so a near miss is
+the ordinary case and a genuinely wild one is uncommon rather than rare.
+
+**It narrows the TIMING BANDS and touches no outcome table.** `chaseContact()`
+turns the distance into one more factor in `effectiveContact` — the same seam
+the platoon split, the approach, the clutch, the pitcher's stuff and the
+difficulty assist already use — and `effectiveContact` is read by exactly one
+thing, `grade()`. So a swing timed dead-on at a ball a foot off the plate still
+grades PERFECT and can still leave the yard. The window to find it in is simply
+tiny. Chasing costs you the window, never the table you roll on once you are
+through it; there is a test that rolls 500 outcomes at both distances and
+asserts they come out identical.
+
+Because it is multiplicative, a 1.35 bat keeps its edge over a 0.85 bat at
+every distance. Both windows shrink, until the good bat still has one out there
+and the bad bat has nothing — which is the difference the contact stat is
+supposed to buy, without a second mechanism to say so.
+
+**The black is free, and the shape is the whole tuning problem.** `CHASE_FREE`
+(0.4) of the miss costs nothing at all, and past it the cost goes up with the
+square of the rest. A penalty that bites at the edge cannot work: the average
+ball off the plate is a *near* miss, so a curve steep there spends its whole
+league-wide budget on pitches that ought to be hittable, and by the time the K
+rate is back inside its guardrail there is nothing left to charge the pitch
+nobody should have swung at. Free near the edge, steep at the far end, is the
+only shape that pays for both. At `CHASE_COST` 2 that leaves a ball half a
+plate out at 0.93 of its window and one most of a foot off the plate at 0.51 —
+half the window, and about six milliseconds of PERFECT.
+
+500 games, against the same run with the factor switched off:
+
+| | before | after |
+|---|---|---|
+| runs per team | 4.33 | 4.18 |
+| K rate | 22.2% | 23.2% |
+| hits per team | 8.30 | 8.10 |
+| walks per team | 3.02 | 3.12 |
+| errors per team | 0.68 | 0.71 |
+
+⚠️ **`CHASE_COST` is the knob, and the runs floor binds before the K ceiling.**
+Not `AI_TIMING_BANDS` and not `CHASE` — those describe how often the computer
+goes after one, not what going after one is worth. At `CHASE_COST` 3 the league
+reads 23.7% K and 4.03 runs: it runs out of runs slightly before it runs out of
+strikeouts.
+
+**And it is drawn.** `spotXY()` reads the distance instead of the old constant,
+so a pitch that barely missed is drawn barely missing and a pitch in the other
+batter's box is drawn out there. An invisible penalty is an unfair penalty —
+you cannot lay off what the screen will not show you.
+
+⚠️ **The swing is graded twice, and both sites carry the factor.**
+`resolveSwing()` grades it for the book; `main.ts` grades it again for the word
+on screen and the bar under it, on *both* halves — your at-bat and the
+computer's while you are on the mound. A chase factor in one and not the other
+is the word and the play log describing different at-bats, which is the defect
+the comment above that second grade has warned about since it was written.
+
+⚠️ **This shifted the seeded RNG stream.** Every seeded season in the project
+replays differently from here. Second time that has happened; see the note at
+`hit.ts:469` for the first.
+
 ## Handedness
 
 Every player bats from a side and every pitcher throws from one, and

@@ -22,7 +22,7 @@
 import { makeRng } from '../core/rng.ts';
 import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
 import type { Player } from '../core/roster.ts';
-import { ALL_LOCATIONS, locationOffset } from '../core/hit.ts';
+import { ALL_LOCATIONS, chaseContact, locationOffset } from '../core/hit.ts';
 import type { SwingInput, PitchLocation } from '../core/hit.ts';
 import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
 import {
@@ -1295,9 +1295,12 @@ function resolvePitch(): void {
       saveSettings(settings);
     }
     // Graded with the SAME multipliers resolveSwing() will use, the assist
-    // included, or the word on screen and the outcome in the book come from
-    // different at-bats.
-    const scale = stats.contact * stuff * assist();
+    // and the chase included, or the word on screen and the outcome in the
+    // book come from different at-bats. ⚠️ chaseContact() IS THE NEWEST WAY
+    // TO GET THAT WRONG: leave it off here and a swing at a ball off the plate
+    // is graded one way for the flash and the bar and another way for the
+    // play log. Every factor below belongs on both sides of this pair.
+    const scale = stats.contact * stuff * assist() * chaseContact(pitch.missDistance);
     const g = grade(offset, scale, stats.vision);
     lastGrade = g.toUpperCase();
 
@@ -1311,6 +1314,8 @@ function resolvePitch(): void {
       twoStrikes: atBat.strikes >= 2,
       runnersInScoringPosition: risp,
       stuff,
+      // How far off the plate he put it. The other half of `scale` above.
+      missDistance: pitch.missDistance,
       foulBoost: FOUL_BOOST,
       // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
       foulPopAngle: parkFoulAngle(game.home.park),
@@ -1736,6 +1741,10 @@ function resolveTheirSwing(): void {
         twoStrikes,
         runnersInScoringPosition: risp,
         stuff,
+        // Your command, charged to his swing. A pitch you missed the spot with
+        // is the same pitch to him as one the computer missed a spot with —
+        // see the note on missDistance in pitchToSpot().
+        missDistance: pitch.missDistance,
         foulBoost: FOUL_BOOST,
         // The building both clubs are hitting in. Same park for the computer's
         // swings as for yours — see parkFoulAngle() in teams.ts.
@@ -1743,7 +1752,16 @@ function resolveTheirSwing(): void {
       };
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
-      const g = grade(offset, stats.contact * stuff, stats.vision);
+      // ⚠️ THE SAME MULTIPLIERS, ON THIS HALF TOO. This site grades the swing
+      // a second time for the flash and the chart line, which is the pair the
+      // note in resolvePitch() describes — so it carries the chase factor for
+      // the same reason: SWING AND MISS on the screen and a ball in play in
+      // the log would be two different at-bats.
+      const g = grade(
+        offset,
+        stats.contact * stuff * chaseContact(pitch.missDistance),
+        stats.vision,
+      );
       scored = g === 'miss' ? 'swinging strike' : 'in play';
       // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
       // `atBat === before` and so started calling every two-strike foul the
@@ -3296,11 +3314,26 @@ function drawMoment(now: number): void {
   ctx.textAlign = 'left';
 }
 
-/** Where the pitch crosses, given its nominal location. */
-function spotXY(location: PitchLocation, inZone: boolean): [number, number] {
+/**
+ * WHERE THE PITCH CROSSES, given its nominal location and how far off the
+ * plate it actually missed.
+ *
+ * ⚠️ THE BALL USED TO MISS BY A CONSTANT. Every ball in the game was drawn
+ * at 0.78 — one nominal distance for the pitch that nicked the black and the
+ * pitch nobody could reach — while the hitter was, as of this branch, being
+ * charged a narrower window for the difference between them. An invisible
+ * penalty is an unfair penalty: you cannot lay off what the screen will not
+ * show you. So the picture reads the same number the swing was graded on.
+ *
+ * The unit is zone half-widths past the EDGE, and the edge is at 0.5 of the
+ * zone from its middle — which is the whole of the arithmetic below. A strike
+ * still sits at 0.22, well inside, because a called strike is a called strike
+ * whatever corner it caught.
+ */
+function spotXY(location: PitchLocation, inZone: boolean, missDistance = 0): [number, number] {
   const cx = ZONE.x + ZONE.w / 2;
   const cy = ZONE.y + ZONE.h / 2;
-  const off = inZone ? 0.22 : 0.78;
+  const off = inZone ? 0.22 : 0.5 + missDistance / 2;
   const { dx, dy } = locationOffset(location);
   return [cx + dx * ZONE.w * off, cy + dy * ZONE.h * off];
 }
@@ -3497,7 +3530,7 @@ function drawBall(now: number): void {
   const flight = arriveAt - launchAt;
   const t = Math.max(0, Math.min(1.15, (now - launchAt) / flight));
 
-  const [tx, ty] = spotXY(pitch.location, pitch.inZone);
+  const [tx, ty] = spotXY(pitch.location, pitch.inZone, pitch.missDistance);
 
   // THE BREAK. Off the straight line on the way in, and back onto the spot by
   // the time it gets there — movementOf() owns the shape, the sign and the

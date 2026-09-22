@@ -83,9 +83,19 @@ export function takePitch(state: AtBatState, inZone: boolean, hitBatter = false)
 }
 
 /**
- * Batter swung. A pitch out of the zone is still swung at the same way - the
- * penalty for chasing is that the outcome tables punish bad timing, and a
- * swing can never be called a ball.
+ * Batter swung. A swing can never be called a ball, whatever it was thrown at.
+ *
+ * ⚠️ THIS USED TO SAY a pitch out of the zone is swung at the same way as a
+ * strike, and that the only penalty for chasing is that a swing cannot be a
+ * ball. It has not been true since ZAIS-9. The pitch carries how far off the
+ * plate it missed and the swing carries it through to chaseContact(), which
+ * NARROWS THE TIMING WINDOWS in proportion: the further out he went after it,
+ * the better he had to time it.
+ *
+ * What did not change, and is the point of the distinction: it narrows the
+ * WINDOW and never the outcome. Nothing here reaches an outcome table, so a
+ * swing timed dead-on at a ball in the other batter's box still grades PERFECT
+ * and can still leave the yard. See chaseContact() in hit.ts.
  */
 export function swingAt(state: AtBatState, input: SwingInput, rng: Rng): AtBatState {
   assertLive(state);

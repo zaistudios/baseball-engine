@@ -133,6 +133,55 @@ export function platoonContact(batter: Hand, pitcher: Hand, pitch: PitchType): n
   return batter === pitcher ? (breaking ? 0.82 : 0.93) : breaking ? 1.08 : 1.04;
 }
 
+/**
+ * WHAT CHASING COSTS, as a multiplier on the hitter's effective contact.
+ *
+ * ⚠️ IT NARROWS THE TIMING BANDS AND TOUCHES NO OUTCOME TABLE. A ball off
+ * the plate does not change what the bat does to it; it changes how long you
+ * have to get the bat there. So a swing timed dead-on at a pitch in the other
+ * batter's box can still leave the yard — the window to find it in is simply
+ * tiny. Zane's call on ZAIS-8, and the reason this is a contact factor and not
+ * a whiff roll, a strikeout weight, or an index into hitTables.ts.
+ *
+ * ⚠️ MULTIPLICATIVE, WHICH IS THE WHOLE OF "A GOOD BAT STILL HAS A WINDOW".
+ * 1.35 contact keeps its edge over 0.85 contact at every distance; both just
+ * shrink together, until the good bat has a window out there and the bad one
+ * has nothing. Same seam platoonContact(), the pitcher's stuff, the approach
+ * and the difficulty assist already use, which is why the bar under the
+ * verdict narrows for free — drawSwingBar() draws bandsFor() off this number.
+ *
+ * ⚠️ THE BLACK IS FREE, AND THE SHAPE IS NOT DECORATION. The first CHASE_FREE
+ * of the miss costs nothing at all, and past it the cost goes up with the
+ * SQUARE of the rest. A flat penalty from the edge outward cannot do this job:
+ * the average ball off the plate is a NEAR miss, so a curve steep at the edge
+ * spends its whole league-wide budget on pitches that ought to be hittable,
+ * and by the time the K rate is back inside its guardrail there is nothing
+ * left to charge the pitch nobody should have swung at. Free near the edge and
+ * steep at the far end is the only shape that pays for both.
+ *
+ * Which leaves, at CHASE_FREE 0.4 and CHASE_COST 2: a ball nicking the black
+ * hittable, a ball half a plate out at 0.93, and one most of a foot off the
+ * plate at 0.51 — half the window, and about six milliseconds of PERFECT.
+ *
+ * ponytail: one hyperbola, tuned against scripts/balance.ts and not derived.
+ * Re-run it after touching either constant. The K rate is the line this shows
+ * up on league-wide and CHASE_COST is the knob — pointedly not AI_TIMING_BANDS
+ * or CHASE, which describe how often the computer goes after one, not what
+ * going after one is worth.
+ *
+ * ⚠️ THE RUNS FLOOR BINDS BEFORE THE K CEILING. 500 games at CHASE_COST 3
+ * read 23.7% K and 4.03 runs; the league runs out of runs a little before it
+ * runs out of strikeouts, so tune against runs per team and check the K rate
+ * second.
+ */
+export const CHASE_FREE = 0.4;
+export const CHASE_COST = 2;
+
+export const chaseContact = (missDistance = 0): number => {
+  const past = missDistance - CHASE_FREE;
+  return past > 0 ? 1 / (1 + CHASE_COST * past ** 2) : 1;
+};
+
 export interface SwingInput {
   /** Signed ms: negative early, positive late. See timing.ts. */
   offsetMs: number;
@@ -185,6 +234,15 @@ export interface SwingInput {
    * is not negotiable.
    */
   foulPopAngle?: number;
+  /**
+   * HOW FAR OFF THE PLATE THIS PITCH MISSED, straight off
+   * ThrownPitch.missDistance. Absent or 0 is a strike and costs nothing.
+   *
+   * ⚠️ IT IS THE PITCH'S NUMBER, NEVER THE SWING'S. It is not rolled in
+   * here: a draw taken at swing time would desynchronise a seeded replay
+   * against the same swing taken from the CLI. See chaseContact().
+   */
+  missDistance?: number;
   /**
    * THE PITCHER'S STUFF, as a multiplier on the hitter's effective contact.
    * Below 1 is a pitch that is hard to time. Computed by stuffFactor() in
@@ -938,7 +996,9 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
     platoon *
     approachContact *
     // The arm's break and his own clutch, from stuffFactor() in pitcher.ts.
-    (input.stuff ?? 1);
+    (input.stuff ?? 1) *
+    // ...and how far off the plate he put it. See chaseContact().
+    chaseContact(input.missDistance);
 
   // ⚠️ THE ASSIST GOES IN HERE AND NOWHERE ELSE. effectiveContact is read by
   // exactly one thing — grade() — so multiplying it here widens the windows and
