@@ -1,43 +1,13 @@
-Read both playtest items against the code and the vault. **No spec note covers either one**, so no implementation issue gets written until you answer below. One correction to my own issue body first, because it was wrong and it changes item 2.
+Item 1 is written: [ZAIS-9](mention://issue/01a0c771-0a54-725a-80f0-6c2ac63e3c1c) — *Chasing costs a narrower window: a continuous miss distance, scaled into the timing bands*. Builder's, with your four answers as its DECIDED block.
 
-## ⚠️ Correction: the fielders DO move. All nine, every frame.
+**Your call on 2 made it a small job.** `bandsFor()` scales every window by one contact multiplier, and everything in the game reads that same number — `resolveSwing()`, the word on screen, and the bar underneath it. So "chasing costs you" is one more factor in a product that already carries the platoon split, the pitcher's stuff and the difficulty assist. Nothing in the outcome tables moves, which is what keeps the home run off the plate possible, and contact rating buying reach out there falls out for free because the whole thing is multiplicative.
 
-My issue body said *"nobody moves to the ball — the landing spot selects a name."* That is true of `src/core/fielding.ts` (no positions, no range ratings — dice by design) and **false of what you are looking at**. The overhead replay moves every one of the nine:
+The real work is the number that doesn't exist yet: a continuous miss distance, born where `inZone` is decided, carried to the swing, and read by `spotXY()` so a ball that barely missed is **drawn** barely missing. Today every ball out of the zone is drawn at exactly one distance, so without that last step you'd be punished for something the screen never showed you.
 
-- `src/game/plot.ts:594` `roleFor()` gives each man a job every play — `chase`, `cover-first`, `cover-second`, `relay`, `shade`.
-- `src/game/overhead.ts:944-971` walks all nine per frame, eases them out of their posts, and `src/game/main.ts:3489` drives a `runCycle()` so their legs move.
-- `REACTION_MS = 110` (`plot.ts:539`) holds them still for a tenth of a second first, deliberately.
+Guardrails on it are `npm run sim` — runs per team 4.1–4.6 and K rate at or under 23.5%, against today's 4.33 and 22.3%. The computer chases too, so this shows up league-wide whether we like it or not.
 
-So "fielders not fully moving" is not "no fielder AI." It is something specific on screen, and I can point at three candidates in the code — but I am not going to guess a second time:
+**I parked it in backlog rather than starting it.** ZAIS-7 is already live with Builder and it edits `main.ts` in the same neighbourhood — two runs in that file at once buys a merge conflict and nothing else. It promotes the moment ZAIS-7 lands, or say the word and I flip it now.
 
-1. **`SHADE = 0.12`** (`plot.ts:623`) — seven of the nine move **12% of the way** to the ball and are drawn `dim`. That is the nearest thing in the code to "not *fully* moving."
-2. **`chaseReach()`** (`plot.ts:516-526`) — the chaser is **built to not arrive** on a hit: 0.84 of the way on a single, 0.72 on a double, 0.58 on a triple.
-3. The at-bat view has **no fielders in it at all**. They exist only in the cut, which starts 300ms after contact.
+**Item 2 is still open and I didn't guess at it.** "Not sure yet, but it needs to feel fluid" isn't something I can turn into steps — the three candidates I found (seven fielders moving 12% of the way and drawn dim, the chaser built not to arrive, no fielders in the at-bat view at all) are three different jobs with three different sizes. One filmstrip from Eyes tells us which one you're actually looking at, and `scripts/filmstrip.ts` already exists. Say go and that's the next thing I route.
 
-⚠️ **This is the second time you have said this.** 09-12 was *"scripted, not fluid"*; the fix shipped for it was the run cycle on 09-19 — and the complaint came back on 09-22. Guessing a third time is the expensive move.
-
-## Item 1 — you are right that chasing is free, and it is deliberate
-
-`src/core/atBat.ts:86` states it outright: *"the penalty for chasing is that the outcome tables punish bad timing, and a swing can never be called a ball."* Only you can overturn that.
-
-**There is no "how far outside" number anywhere in the engine.** `inZone` is a boolean (`pitcher.ts:572`), `PitchLocation` is nine categorical buckets (`hit.ts:38-47`), and `grade(offsetMs, contact, vision)` (`timing.ts:87`) never sees location at all. The only distance that exists is one constant in the renderer — `const off = inZone ? 0.22 : 0.78` (`main.ts:3303`). **Every ball out of the zone sits at exactly 0.78.** The pitch you described — one that "barely touches the zone" — does not exist yet.
-
-## The four questions
-
-**1. Does the engine get a continuous miss distance?**
-*Recommendation: yes.* Without it there is nothing to scale and item 1 cannot be built at all. The coarse version off the nine buckets can only say "outside," which is the thing you are already unhappy with. It also buys the renderer a real spread instead of one constant.
-
-**2. What does chasing actually cost — and what does `contact` buy out there?**
-*Recommendation: narrow the timing bands, not the outcome table.* `bandsFor()` (`timing.ts:117`) already scales every window by `contact`, so shrinking it by distance gives you exactly what you described for free: a high-contact hitter keeps a usable window further out, a low-contact one loses it near the plate. Pushing the outcome table toward strikeout instead would kill the home run on a ball off the plate — the thing you specifically said should stay possible.
-
-**3. Item 2 — presentation or simulation?**
-*Recommendation: neither yet — send Eyes to film it first.* A filmstrip of one ball in play already has a tool (`scripts/filmstrip.ts`, landed at `33d7125`). My read of this was wrong once today; the cheap move is one capture that names which of the three candidates above you are actually seeing. Rewriting `fielding.ts` into a real fielding sim is the largest job on this project and I will not open it on a guess.
-
-**4. The error rate — up, down, or unchanged?**
-*Recommendation: unchanged.* `ERROR_RATE = 0.05` (`fielding.ts:44`) against a real MLB ~1.5%, and the comment says it was raised on purpose so you would actually see one. "Similar to actual baseball" reads as *lower*, which would make errors roughly three times rarer than they are now. I think what you want is errors that are **attributed and visible** — a name and a play — not fewer of them. Tell me if I have that backwards.
-
-## What this displaces
-
-**The Ball Off The Bat.** It is spec'd (`Basedball - Spec - The Ball Off The Bat`), you unblocked it on 09-20 with Option A, and **it is still not built** — `main.ts:3106` still reads `if (phase === 'windup' && pitch) drawBall(now)`, so the ball still vanishes the instant it is hit. One job at a time: item 1 here is one clean job and would go next, but it takes the slot that spec is holding.
-
-Answer 1, 2 and 4, and say go on 3, and I will write item 1 as a single issue for Builder.
+One thing worth knowing while you decide: **the ball off the bat still isn't on `origin/main`.** `main.ts:3106` there is unchanged, so the ball still vanishes the instant it's hit. ZAIS-1 sits in review with Eyes. If the at-bat view going dark at contact is part of what reads as "not fluid," that one is already spec'd and already decided — it just needs landing.
