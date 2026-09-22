@@ -133,6 +133,36 @@ export function platoonContact(batter: Hand, pitcher: Hand, pitch: PitchType): n
   return batter === pitcher ? (breaking ? 0.82 : 0.93) : breaking ? 1.08 : 1.04;
 }
 
+/**
+ * WHAT CHASING COSTS, as a multiplier on the hitter's effective contact.
+ *
+ * ⚠️ IT NARROWS THE TIMING BANDS AND TOUCHES NO OUTCOME TABLE. A ball off
+ * the plate does not change what the bat does to it; it changes how long you
+ * have to get the bat there. So a swing timed dead-on at a pitch in the other
+ * batter's box can still leave the yard — the window to find it in is simply
+ * tiny. Zane's call on ZAIS-8, and the reason this is a contact factor and not
+ * a whiff roll, a strikeout weight, or an index into hitTables.ts.
+ *
+ * ⚠️ MULTIPLICATIVE, WHICH IS THE WHOLE OF "A GOOD BAT STILL HAS A WINDOW".
+ * 1.35 contact keeps its edge over 0.85 contact at every distance; both just
+ * shrink together, until the good bat has a window out there and the bad one
+ * has nothing. Same seam platoonContact(), the pitcher's stuff, the approach
+ * and the difficulty assist already use, which is why the bar under the
+ * verdict narrows for free — drawSwingBar() draws bandsFor() off this number.
+ *
+ * At the top of the miss range a hyperbola leaves roughly a third of the
+ * window rather than none: a foot off the plate has to be nearly unhittable,
+ * not a rule that a swing cannot be a hit.
+ *
+ * ponytail: one hyperbola, tuned against scripts/balance.ts and not derived.
+ * Re-run it after touching CHASE_COST — the K rate is the line this shows up
+ * on league-wide, and it is the knob, not AI_TIMING_BANDS.
+ */
+export const CHASE_COST = 1.15;
+
+export const chaseContact = (missDistance = 0): number =>
+  missDistance > 0 ? 1 / (1 + CHASE_COST * missDistance) : 1;
+
 export interface SwingInput {
   /** Signed ms: negative early, positive late. See timing.ts. */
   offsetMs: number;
@@ -185,6 +215,15 @@ export interface SwingInput {
    * is not negotiable.
    */
   foulPopAngle?: number;
+  /**
+   * HOW FAR OFF THE PLATE THIS PITCH MISSED, straight off
+   * ThrownPitch.missDistance. Absent or 0 is a strike and costs nothing.
+   *
+   * ⚠️ IT IS THE PITCH'S NUMBER, NEVER THE SWING'S. It is not rolled in
+   * here: a draw taken at swing time would desynchronise a seeded replay
+   * against the same swing taken from the CLI. See chaseContact().
+   */
+  missDistance?: number;
   /**
    * THE PITCHER'S STUFF, as a multiplier on the hitter's effective contact.
    * Below 1 is a pitch that is hard to time. Computed by stuffFactor() in
@@ -938,7 +977,9 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
     platoon *
     approachContact *
     // The arm's break and his own clutch, from stuffFactor() in pitcher.ts.
-    (input.stuff ?? 1);
+    (input.stuff ?? 1) *
+    // ...and how far off the plate he put it. See chaseContact().
+    chaseContact(input.missDistance);
 
   // ⚠️ THE ASSIST GOES IN HERE AND NOWHERE ELSE. effectiveContact is read by
   // exactly one thing — grade() — so multiplying it here widens the windows and
