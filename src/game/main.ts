@@ -1924,6 +1924,10 @@ function resolveTheirSwing(): void {
         twoStrikes,
         runnersInScoringPosition: risp,
         stuff,
+        // Your command, charged to his swing. A pitch you missed the spot with
+        // is the same pitch to him as one the computer missed a spot with —
+        // see the note on missDistance in pitchToSpot().
+        missDistance: pitch.missDistance,
         foulBoost: FOUL_BOOST,
         // The building both clubs are hitting in. Same park for the computer's
         // swings as for yours — see parkFoulAngle() in teams.ts.
@@ -1932,7 +1936,16 @@ function resolveTheirSwing(): void {
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
       markContact();
-      const g = grade(offset, stats.contact * stuff, stats.vision);
+      // ⚠️ THE SAME MULTIPLIERS, ON THIS HALF TOO. This site grades the swing
+      // a second time for the flash and the chart line, which is the pair the
+      // note in resolvePitch() describes — so it carries the chase factor for
+      // the same reason: SWING AND MISS on the screen and a ball in play in
+      // the log would be two different at-bats.
+      const g = grade(
+        offset,
+        stats.contact * stuff * chaseContact(pitch.missDistance),
+        stats.vision,
+      );
       scored = g === 'miss' ? 'swinging strike' : 'in play';
       // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
       // `atBat === before` and so started calling every two-strike foul the

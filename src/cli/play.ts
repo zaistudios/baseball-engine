@@ -145,7 +145,17 @@ async function main() {
 
       const offsetMs = computeOffsetMs(press.at, arrival);
       const before = ab;
-      ab = swingAt(ab, { offsetMs, pitchType: pitch.type, location: pitch.location }, rng);
+      ab = swingAt(
+        ab,
+        {
+          offsetMs,
+          pitchType: pitch.type,
+          location: pitch.location,
+          // Chasing costs a narrower window here too. See chaseContact().
+          missDistance: pitch.missDistance,
+        },
+        rng,
+      );
 
       const sign = offsetMs < 0 ? 'early' : 'late';
       write(`     swing — ${Math.abs(offsetMs).toFixed(0)}ms ${sign} (${pitch.type})\n`);
