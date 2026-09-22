@@ -221,6 +221,9 @@ export function playAiAtBat(
       twoStrikes: ab.strikes >= 2,
       runnersInScoringPosition: risp,
       stuff,
+      // What it cost him to go after one off the plate. CHASE above decides
+      // whether he offers at it; this decides what the offer is worth.
+      missDistance: pitch.missDistance,
       foulBoost: FOUL_BOOST,
       // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
       foulPopAngle: parkFoulAngle(g.home.park),
