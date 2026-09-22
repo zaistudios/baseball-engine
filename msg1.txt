@@ -1,0 +1,26 @@
+feat: the pause gives every clock its time back, and opens everywhere
+
+resume() handed the held milliseconds to two timestamps, because at idle two
+was the whole live list. That is what kept the pause at idle — not the timing
+rule, which says the opposite once you read it properly. Shift EVERY absolute
+reading by the same `held` and no interval moves at all: arriveAt minus
+swingStartedAt is the difference it always was, so a swing paused through the
+windup grades exactly as it would have.
+
+So the list is the feature. The ball's launch and arrival, the swing's start
+and its check, the delivery, the release, the throw and its release, the
+flash, the caption, the moment card, the break card, the computer's swing, and
+the replay's own scaled clock. One left off does not throw. It quietly expires
+behind the pause screen, or grades the next press against ten seconds nobody
+played, and the box score is written from the verdict it changed.
+
+With resume() honest, pause() has nothing left to protect and drops the phase
+gate. ESC stops a live game on the mound at `calling`, mid-delivery, and with
+the ball in the air. The title screen and the final screen still refuse: one
+has a keyboard and no game behind it, the other has its own buttons and
+nothing running.
+
+The complaint that opened this: a man on the mound could not stop his own game
+without first throwing a pitch and waiting out the result.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

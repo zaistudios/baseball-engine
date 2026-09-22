@@ -1,0 +1,300 @@
+diff --git a/README.md b/README.md
+index 06252c2..b1f70d3 100644
+--- a/README.md
++++ b/README.md
+@@ -1104,22 +1104,39 @@ their own canvas, camera and field colours; neither owns it.
+ 
+ ### <kbd>ESC</kbd> stops it, and an overlay never did
+ 
+-**The pause is between pitches, and nowhere else.** <kbd>ESC</kbd> at `idle`
+-puts up RESUME / SETTINGS / QUIT TO MENU and the game underneath actually
+-stops — the arm, the break card's clock, and the computer playing your half in
+-watch mode. <kbd>ESC</kbd> during a windup, a delivery or a throw does nothing
+-at all.
++**The pause works everywhere a live game does.** <kbd>ESC</kbd> puts up
++RESUME / SETTINGS / QUIT TO MENU and the game underneath actually stops — on
++the mound picking a pitch, mid-delivery, with the ball in the air, on a break
++card, and with the computer playing your half in watch mode. The two places it
++refuses are the title screen, which has a keyboard and no game behind it, and
++the final screen, which has its own buttons and nothing left to stop.
+ 
+ ⚠️ **The five screens before this one paused nothing.** `#pre` covers the
+ canvas and takes the keyboard, and the frame loop ran right on underneath every
+ one of them. The pause is a flag gating `step()`; the screen is what you look
+-at once the clock has stopped. And because this engine grades TIMING against
+-`performance.now()` rather than geometry, a pause with a graded moment in the
+-air would measure your next press against a clock nobody played through — which
+-is the whole of why it is idle-only. The two deadlines that ARE live at idle,
+-the caption's and the break card's, are handed back every millisecond they were
+-held for, so a half-time card you paused on is still there with the time it had
+-left when you come back.
++at once the clock has stopped.
++
++⚠️ **Pausing mid-flight is safe for the reason it looked dangerous.** This
++engine grades TIMING against `performance.now()` rather than geometry, and the
++first read of that rule was that a pause with a graded moment in the air would
++measure your next press against a clock nobody played through. It would — if
++`resume()` handed the held milliseconds back to *some* of the clocks. Hand them
++back to **all** of them and no interval moves at all: `arriveAt -
++swingStartedAt` is the difference it always was, so a swing you paused through
++grades exactly as it would have. The pause was idle-only for a year because of
++that one word.
++
++So `resume()` carries a list — every `performance.now()` reading in the file,
++the ball's launch and arrival, the swing's start and its check, the delivery,
++the throw, the flash, the caption, the break card, the computer's swing and the
++replay's own scaled clock. **A timestamp left off that list is a grading bug,
++not a cosmetic one.** It does not throw. It quietly expires while the screen is
++up, and the box score is written from the verdict it changed. Add a timestamp
++to the file, add it there.
++
++One thing that is a real change to how the game reads, stated out loud: a pause
++taken with the ball in the air is a frozen look at a pitch you are about to
++swing at. The grade does not move, but the look at it is new.
+ 
+ **QUIT TO MENU just ends the game.** No result, no loss, nothing in the book. A
+ franchise day you were halfway through is never written, so CONTINUE puts you
+@@ -1134,6 +1151,28 @@ presses its own hotkey rather than owning a second copy of it, and all four
+ keys stay live in every phase exactly as they were — the screen writes them
+ down, it does not replace them.
+ 
++### <kbd>F</kbd> is a watch-mode control, and only that
++
++**The game speed only runs the clock faster in AUTO.** 1× / 2× / 4× / 8× is how
++you leave a game running and come back to a result, and *leaving it running* is
++the whole of what it is for — so the moment you are the one playing, it is off.
++In MANUAL every part of the game runs at 1×: the dead time between pitches, the
++break cards, the replays, and **the pitch you throw from the mound**, which used
++to fly at whatever <kbd>F</kbd> said because scaling asked "is the hitter human"
++rather than "is anyone playing". No grade moved with it — a delivery is graded
++on release against `deliveryAt`, which is unscaled by design — but an 8× pitch
++off your own arm is not a speed setting a person asked for.
++
++<kbd>F</kbd> still cycles, and the strip and the settings row still show the
++number you picked; a button that snapped back to `1×` every time you left AUTO
++would read as a broken key. It goes dim instead and says **AUTO only**. Press
++<kbd>T</kbd> and it takes effect on the next thing the clock measures.
++
++One function decides it — `speed()` in `src/game/main.ts` returns 1 unless
++`auto`. Every consumer already read through it (`pauseFor`, `breakLen`,
++`sceneMs`, `flightScale`, the four replay lengths), which is why the rule has
++one place to live and no second one to fall out of step with.
++
+ **The record book has a button that empties it.** Under the whole book rather
+ than beside its title, behind one confirm. It takes the seasons and the longest
+ barrel streak and nothing else: your clubs and a season in progress are not
+diff --git a/src/game/main.ts b/src/game/main.ts
+index 6b6f6cd..45fdf75 100644
+--- a/src/game/main.ts
++++ b/src/game/main.ts
+@@ -361,39 +361,73 @@ let paused = false;
+ let pausedAt = 0;
+ 
+ /**
+- * STOP THE GAME BETWEEN PITCHES, AND ONLY THERE.
++ * STOP THE GAME. ANYWHERE.
+  *
+- * ⚠️ IDLE ONLY, AND THAT IS THE WHOLE DESIGN. This engine grades TIMING against
+- * performance.now(), never geometry, so a pause taken with a delivery, a swing
+- * or a throw in the air would leave a graded deadline sitting in the past and
+- * measure the next press against a clock that moved while nobody was playing.
+- * At idle nothing graded is in flight, so there is nothing to corrupt.
++ * ⚠️ IT USED TO BE IDLE ONLY, AND THAT WAS THE WRONG READ OF THE RIGHT RULE.
++ * The rule is that this engine grades TIMING against performance.now(), never
++ * geometry — and the conclusion drawn from it was that a pause with a delivery
++ * or a swing in the air would leave a graded deadline sitting in the past. It
++ * would, if resume() handed the time back to some of the clocks. Hand it back
++ * to ALL of them and no interval changes at all: `arriveAt - swingStartedAt` is
++ * the difference it always was, so the swing grades exactly as it would have.
++ * The timing rule does not forbid the pause; it dictates what resume() owes.
++ *
++ * What idle-only actually cost was the complaint that opened this: a man on the
++ * mound at 'calling' could not stop his own game without first throwing a pitch
++ * and waiting out the result. Twenty-odd of them, some sessions.
+  *
+  * `looping` because the title screen has a keyboard and no game behind it: ESC
+- * before kickoff must not drop a pause screen over the mode cards.
++ * before kickoff must not drop a pause screen over the mode cards. `over` for
++ * the mirror of it — the final screen has its own buttons and there is nothing
++ * left running to stop.
+  */
+ function pause(): void {
+-  if (paused || !looping || phase !== 'idle') return;
++  if (paused || !looping || phase === 'over') return;
+   paused = true;
+   pausedAt = performance.now();
+   showPause();
+ }
+ 
+ /**
+- * Start it again, and give the time back.
+- *
+- * ⚠️ EVERY ABSOLUTE TIMESTAMP STILL LIVE AT IDLE MOVES FORWARD, and these two
+- * are the entire list — the caption's clock and the break card's. Without the
+- * shift, a half-time card you paused on would be gone the instant you came
+- * back, expired by a stretch of wall clock nothing was playing through. The
+- * file's other deadlines — arriveAt, deliveryAt, throwAt, flashUntil — cannot
+- * be live at idle, which is the other half of why pause() is idle-only.
++ * Start it again, and give the time back — to every clock, not to some.
++ *
++ * ⚠️ THE LIST BELOW IS THE FEATURE. An absolute timestamp left out of it does
++ * not throw and does not look broken: it quietly expires while the screen is
++ * up, or grades the next press against a clock that ran for ten seconds while
++ * nobody was playing. That is a GRADING bug wearing a cosmetic bug's clothes —
++ * a swing you paused through comes back a different verdict, and the box score
++ * is written from the verdict. Every `let` in this file holding a
++ * performance.now() reading belongs here. If you add one, add it here.
++ *
++ * Shifting all of them by the same `held` is what makes it safe: every interval
++ * the engine measures is a difference between two of these, and a constant
++ * added to both sides of a subtraction cancels.
++ *
++ * The stale ones are shifted unconditionally on purpose. A dead `throwAt` from
++ * two innings ago moving forward by `held` is still behind now — the sum of
++ * every pause can never exceed the wall clock those pauses happened in — so
++ * there is no phase test to get wrong here, and no live value to miss.
+  */
+ function resume(): void {
+   if (!paused) return;
+   const held = performance.now() - pausedAt;
+   sceneAt += held;
+   breakFrom += held;
++  momentFrom += held;
++  flashUntil += held;
++  launchAt += held;
++  arriveAt += held;
++  deliveryAt += held;
++  throwAt += held;
++  if (swingStartedAt !== null) swingStartedAt += held;
++  if (checkedAt !== null) checkedAt += held;
++  if (releasedAt !== null) releasedAt += held;
++  if (thrownAt !== null) thrownAt += held;
++  if (autoSwingAt !== null) autoSwingAt += held;
++  // The replay runs on its own scaled clock (see replayNow) — but the shift is
++  // the same one, because scaling multiplies the elapsed difference and the
++  // constant cancels inside it just as it does everywhere else.
++  if (replay) replay.startedAt += held;
+   paused = false;
+ }
+ 
+@@ -796,25 +830,55 @@ let autoSwingAt: number | null = null;
+ /** 8x is a real setting, not a joke — it is how you leave a game running. */
+ const SPEEDS = [1, 2, 4, 8] as const;
+ let speedIdx = 0;
+-const speed = (): number => SPEEDS[speedIdx]!;
+ 
+ /**
+- * Dead time between pitches, divided by the speed. Always applies.
++ * WHAT `F` IS SET TO, which is not the same question as how fast the game is
++ * running. The two display sites read this; nothing that moves a clock does.
++ */
++const speedPick = (): number => SPEEDS[speedIdx]!;
++
++/**
++ * HOW FAST THE CLOCK ACTUALLY RUNS, AND IT IS 1 WHENEVER YOU ARE PLAYING.
++ *
++ * ⚠️ THE MULTIPLIER IS A WATCH-MODE CONTROL AND NOTHING ELSE. It is how you
++ * leave a game running, and "leave it running" is the whole of what it is for
++ * — so the moment you are the one playing, it is off. Dead time, break cards,
++ * replays and the pitch you throw from the mound all run at 1x in MANUAL.
++ *
++ * `F` still cycles and still shows the number you picked. It just does not
++ * take effect until AUTO does. One function, so there is no consumer that can
++ * disagree with another about when the setting is live: pauseFor, breakLen,
++ * sceneMs, flightScale and the four replay lengths all read through here.
++ *
++ * ⚠️ THIS IS WHAT TAKES THE 8x OFF THE PITCH YOU THROW. flightScale() below
++ * scales on `auto || !youBat()`, and on your half on the mound `!youBat()` is
++ * true — so a pitch you delivered used to fly at whatever F said. No grade
++ * moves: the mound is graded on release against `deliveryAt`, which is
++ * unscaled by design (see the note on it). Only the picture's length changes.
++ */
++const speed = (): number => (auto ? SPEEDS[speedIdx]! : 1);
++
++/**
++ * Dead time between pitches, divided by the speed — which is 1 in MANUAL, so
++ * in practice this is "dead time, compressed in watch mode". See speed().
+  *
+- * ⚠️ THE BALL FLIGHT IS SCALED ONLY IN AUTO — see deliver(). Speeding up the
+- * pitch while YOU are swinging is not a speed setting, it is a difficulty
+- * change: the timing windows are ±12/±35/±80ms, and at 4x the ball crosses in
+- * about a tenth of a second, which no human hits. Dead time is the part
+- * nobody is playing, so dead time is the part that gets cut.
++ * ⚠️ THE BALL FLIGHT IS NEVER SCALED WHILE YOU SWING — see deliver(). Speeding
++ * up the pitch while YOU are swinging is not a speed setting, it is a
++ * difficulty change: the timing windows are ±12/±35/±80ms, and at 4x the ball
++ * crosses in about a tenth of a second, which no human hits.
+  */
+ const pauseFor = (ms: number): number => performance.now() + ms / speed();
+ 
+ /**
+- * Ball flight compresses only when nobody is timing it — which is watch mode,
+- * and now also YOUR HALF ON THE MOUND. The ±12/±35/±80 windows belong to the
+- * hitter, and when the hitter is the computer its offset is unscaled (see
+- * pitchToThem), so the grade at 8x is the grade at 1x and the only thing speed
+- * buys you is a shorter afternoon.
++ * Ball flight compresses only when nobody is timing it. The ±12/±35/±80 windows
++ * belong to the hitter, and when the hitter is the computer its offset is
++ * unscaled (see pitchToThem), so the grade at 8x is the grade at 1x and the
++ * only thing speed buys you is a shorter afternoon.
++ *
++ * ⚠️ THE `!youBat()` ARM IS NOW 1 IN MANUAL, and it is speed() that made it so
++ * rather than this expression, which has not changed. On your half on the mound
++ * this branch is still taken — but speed() returns 1 unless AUTO is on, so the
++ * pitch you throw flies at 1x. See speed() for why that is the rule.
+  */
+ const flightScale = (): number => (auto || !youBat() ? speed() : 1);
+ 
+@@ -2578,8 +2642,10 @@ function press(key: string): void {
+     return;
+   }
+ 
+-  // THE PAUSE. Between pitches only — pause() refuses anywhere else and says
+-  // there why. ESC in any other phase is a key that does nothing, on purpose.
++  // THE PAUSE, in every phase a live game has. pause() refuses on the title
++  // screen and on the final screen and says there why. Above the `paused ||
++  // !looping` line below on purpose: ESC is the one key that has to work while
++  // a delivery, a swing or a throw is in the air.
+   if (key === 'escape') {
+     pause();
+     return;
+@@ -4041,9 +4107,21 @@ function renderMeta(): void {
+     '<button data-auto="1">' +
+     (auto ? 'AUTO — computer plays your half' : 'MANUAL — you play') +
+     ' <kbd>T</kbd></button>' +
+-    '<button data-speed="1" style="margin-left:8px">speed ' +
+-    speed() +
+-    '&times; <kbd>F</kbd></button>' +
++    // ⚠️ IT SHOWS WHAT YOU PICKED, NOT WHAT IS RUNNING — speedPick(), not
++    // speed(). In MANUAL the multiplier does nothing, and a button that reset
++    // itself to `1×` every time you left AUTO would read as a broken key. So
++    // the number stays and the button goes dim instead: `on` is the pitch
++    // button's pattern for "this one is currently doing something", and this
++    // one is only doing something in AUTO, above 1×.
++    '<button data-speed="1" style="margin-left:8px" class="' +
++    (auto && speedIdx > 0 ? 'on' : '') +
++    '" title="' +
++    (auto ? 'compressing everything the computer plays' : 'AUTO only — nothing is sped up while you play') +
++    '">speed ' +
++    speedPick() +
++    '&times; <kbd>F</kbd>' +
++    (auto ? '' : ' <span class="dim">(AUTO only)</span>') +
++    '</button>' +
+     '<button data-diff="1" style="margin-left:8px">' +
+     level.name +
+     ' <kbd>G</kbd></button>' +
+@@ -6364,8 +6442,12 @@ function showSettings(back: () => void): void {
+       row(
+         'f',
+         'HOW FAST THE DEAD TIME RUNS',
+-        `${speed()}×`,
+-        'Between pitches only. A pitch you are swinging at is never sped up.',
++        auto ? `${speedPick()}×` : `${speedPick()}× — AUTO only, not running`,
++        auto
++          ? 'Dead time, break cards and replays all compress by this. The ' +
++            'pitch itself is never sped up past the hitter.'
++          : 'Does nothing while you are playing — every part of a manual ' +
++            'game runs at 1×. F still cycles it; press T and it takes effect.',
+       ) +
+       `</div>` +
+       `<div class="panel dim">All four are live in the game too — the key beside ` +

@@ -1,0 +1,8 @@
+fix: the pause screen said "between pitches" and it is not that any more
+
+Its own panel was the last copy claiming the old rule, and it is the one a
+player reads at the moment he needs to believe it. It now says what the pause
+actually does, including the half that matters with a ball in the air: it
+picks up where it froze, with the time it had left.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

@@ -1,0 +1,163 @@
+diff --git a/README.md b/README.md
+index 06252c2..b1f70d3 100644
+--- a/README.md
++++ b/README.md
+@@ -1104,22 +1104,39 @@ their own canvas, camera and field colours; neither owns it.
+ 
+ ### <kbd>ESC</kbd> stops it, and an overlay never did
+ 
+-**The pause is between pitches, and nowhere else.** <kbd>ESC</kbd> at `idle`
+-puts up RESUME / SETTINGS / QUIT TO MENU and the game underneath actually
+-stops — the arm, the break card's clock, and the computer playing your half in
+-watch mode. <kbd>ESC</kbd> during a windup, a delivery or a throw does nothing
+-at all.
++**The pause works everywhere a live game does.** <kbd>ESC</kbd> puts up
++RESUME / SETTINGS / QUIT TO MENU and the game underneath actually stops — on
++the mound picking a pitch, mid-delivery, with the ball in the air, on a break
++card, and with the computer playing your half in watch mode. The two places it
++refuses are the title screen, which has a keyboard and no game behind it, and
++the final screen, which has its own buttons and nothing left to stop.
+ 
+ ⚠️ **The five screens before this one paused nothing.** `#pre` covers the
+ canvas and takes the keyboard, and the frame loop ran right on underneath every
+ one of them. The pause is a flag gating `step()`; the screen is what you look
+-at once the clock has stopped. And because this engine grades TIMING against
+-`performance.now()` rather than geometry, a pause with a graded moment in the
+-air would measure your next press against a clock nobody played through — which
+-is the whole of why it is idle-only. The two deadlines that ARE live at idle,
+-the caption's and the break card's, are handed back every millisecond they were
+-held for, so a half-time card you paused on is still there with the time it had
+-left when you come back.
++at once the clock has stopped.
++
++⚠️ **Pausing mid-flight is safe for the reason it looked dangerous.** This
++engine grades TIMING against `performance.now()` rather than geometry, and the
++first read of that rule was that a pause with a graded moment in the air would
++measure your next press against a clock nobody played through. It would — if
++`resume()` handed the held milliseconds back to *some* of the clocks. Hand them
++back to **all** of them and no interval moves at all: `arriveAt -
++swingStartedAt` is the difference it always was, so a swing you paused through
++grades exactly as it would have. The pause was idle-only for a year because of
++that one word.
++
++So `resume()` carries a list — every `performance.now()` reading in the file,
++the ball's launch and arrival, the swing's start and its check, the delivery,
++the throw, the flash, the caption, the break card, the computer's swing and the
++replay's own scaled clock. **A timestamp left off that list is a grading bug,
++not a cosmetic one.** It does not throw. It quietly expires while the screen is
++up, and the box score is written from the verdict it changed. Add a timestamp
++to the file, add it there.
++
++One thing that is a real change to how the game reads, stated out loud: a pause
++taken with the ball in the air is a frozen look at a pitch you are about to
++swing at. The grade does not move, but the look at it is new.
+ 
+ **QUIT TO MENU just ends the game.** No result, no loss, nothing in the book. A
+ franchise day you were halfway through is never written, so CONTINUE puts you
+diff --git a/src/game/main.ts b/src/game/main.ts
+index 6b6f6cd..45fdf75 100644
+--- a/src/game/main.ts
++++ b/src/game/main.ts
+@@ -361,39 +361,73 @@ let paused = false;
+ let pausedAt = 0;
+ 
+ /**
+- * STOP THE GAME BETWEEN PITCHES, AND ONLY THERE.
++ * STOP THE GAME. ANYWHERE.
+  *
+- * ⚠️ IDLE ONLY, AND THAT IS THE WHOLE DESIGN. This engine grades TIMING against
+- * performance.now(), never geometry, so a pause taken with a delivery, a swing
+- * or a throw in the air would leave a graded deadline sitting in the past and
+- * measure the next press against a clock that moved while nobody was playing.
+- * At idle nothing graded is in flight, so there is nothing to corrupt.
++ * ⚠️ IT USED TO BE IDLE ONLY, AND THAT WAS THE WRONG READ OF THE RIGHT RULE.
++ * The rule is that this engine grades TIMING against performance.now(), never
++ * geometry — and the conclusion drawn from it was that a pause with a delivery
++ * or a swing in the air would leave a graded deadline sitting in the past. It
++ * would, if resume() handed the time back to some of the clocks. Hand it back
++ * to ALL of them and no interval changes at all: `arriveAt - swingStartedAt` is
++ * the difference it always was, so the swing grades exactly as it would have.
++ * The timing rule does not forbid the pause; it dictates what resume() owes.
++ *
++ * What idle-only actually cost was the complaint that opened this: a man on the
++ * mound at 'calling' could not stop his own game without first throwing a pitch
++ * and waiting out the result. Twenty-odd of them, some sessions.
+  *
+  * `looping` because the title screen has a keyboard and no game behind it: ESC
+- * before kickoff must not drop a pause screen over the mode cards.
++ * before kickoff must not drop a pause screen over the mode cards. `over` for
++ * the mirror of it — the final screen has its own buttons and there is nothing
++ * left running to stop.
+  */
+ function pause(): void {
+-  if (paused || !looping || phase !== 'idle') return;
++  if (paused || !looping || phase === 'over') return;
+   paused = true;
+   pausedAt = performance.now();
+   showPause();
+ }
+ 
+ /**
+- * Start it again, and give the time back.
+- *
+- * ⚠️ EVERY ABSOLUTE TIMESTAMP STILL LIVE AT IDLE MOVES FORWARD, and these two
+- * are the entire list — the caption's clock and the break card's. Without the
+- * shift, a half-time card you paused on would be gone the instant you came
+- * back, expired by a stretch of wall clock nothing was playing through. The
+- * file's other deadlines — arriveAt, deliveryAt, throwAt, flashUntil — cannot
+- * be live at idle, which is the other half of why pause() is idle-only.
++ * Start it again, and give the time back — to every clock, not to some.
++ *
++ * ⚠️ THE LIST BELOW IS THE FEATURE. An absolute timestamp left out of it does
++ * not throw and does not look broken: it quietly expires while the screen is
++ * up, or grades the next press against a clock that ran for ten seconds while
++ * nobody was playing. That is a GRADING bug wearing a cosmetic bug's clothes —
++ * a swing you paused through comes back a different verdict, and the box score
++ * is written from the verdict. Every `let` in this file holding a
++ * performance.now() reading belongs here. If you add one, add it here.
++ *
++ * Shifting all of them by the same `held` is what makes it safe: every interval
++ * the engine measures is a difference between two of these, and a constant
++ * added to both sides of a subtraction cancels.
++ *
++ * The stale ones are shifted unconditionally on purpose. A dead `throwAt` from
++ * two innings ago moving forward by `held` is still behind now — the sum of
++ * every pause can never exceed the wall clock those pauses happened in — so
++ * there is no phase test to get wrong here, and no live value to miss.
+  */
+ function resume(): void {
+   if (!paused) return;
+   const held = performance.now() - pausedAt;
+   sceneAt += held;
+   breakFrom += held;
++  momentFrom += held;
++  flashUntil += held;
++  launchAt += held;
++  arriveAt += held;
++  deliveryAt += held;
++  throwAt += held;
++  if (swingStartedAt !== null) swingStartedAt += held;
++  if (checkedAt !== null) checkedAt += held;
++  if (releasedAt !== null) releasedAt += held;
++  if (thrownAt !== null) thrownAt += held;
++  if (autoSwingAt !== null) autoSwingAt += held;
++  // The replay runs on its own scaled clock (see replayNow) — but the shift is
++  // the same one, because scaling multiplies the elapsed difference and the
++  // constant cancels inside it just as it does everywhere else.
++  if (replay) replay.startedAt += held;
+   paused = false;
+ }
+ 
+@@ -2578,8 +2642,10 @@ function press(key: string): void {
+     return;
+   }
+ 
+-  // THE PAUSE. Between pitches only — pause() refuses anywhere else and says
+-  // there why. ESC in any other phase is a key that does nothing, on purpose.
++  // THE PAUSE, in every phase a live game has. pause() refuses on the title
++  // screen and on the final screen and says there why. Above the `paused ||
++  // !looping` line below on purpose: ESC is the one key that has to work while
++  // a delivery, a swing or a throw is in the air.
+   if (key === 'escape') {
+     pause();
+     return;

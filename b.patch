@@ -1,0 +1,145 @@
+diff --git a/README.md b/README.md
+index 06252c2..b1f70d3 100644
+--- a/README.md
++++ b/README.md
+@@ -1134,6 +1151,28 @@ presses its own hotkey rather than owning a second copy of it, and all four
+ keys stay live in every phase exactly as they were — the screen writes them
+ down, it does not replace them.
+ 
++### <kbd>F</kbd> is a watch-mode control, and only that
++
++**The game speed only runs the clock faster in AUTO.** 1× / 2× / 4× / 8× is how
++you leave a game running and come back to a result, and *leaving it running* is
++the whole of what it is for — so the moment you are the one playing, it is off.
++In MANUAL every part of the game runs at 1×: the dead time between pitches, the
++break cards, the replays, and **the pitch you throw from the mound**, which used
++to fly at whatever <kbd>F</kbd> said because scaling asked "is the hitter human"
++rather than "is anyone playing". No grade moved with it — a delivery is graded
++on release against `deliveryAt`, which is unscaled by design — but an 8× pitch
++off your own arm is not a speed setting a person asked for.
++
++<kbd>F</kbd> still cycles, and the strip and the settings row still show the
++number you picked; a button that snapped back to `1×` every time you left AUTO
++would read as a broken key. It goes dim instead and says **AUTO only**. Press
++<kbd>T</kbd> and it takes effect on the next thing the clock measures.
++
++One function decides it — `speed()` in `src/game/main.ts` returns 1 unless
++`auto`. Every consumer already read through it (`pauseFor`, `breakLen`,
++`sceneMs`, `flightScale`, the four replay lengths), which is why the rule has
++one place to live and no second one to fall out of step with.
++
+ **The record book has a button that empties it.** Under the whole book rather
+ than beside its title, behind one confirm. It takes the seasons and the longest
+ barrel streak and nothing else: your clubs and a season in progress are not
+diff --git a/src/game/main.ts b/src/game/main.ts
+index 6b6f6cd..45fdf75 100644
+--- a/src/game/main.ts
++++ b/src/game/main.ts
+@@ -796,25 +830,55 @@ let autoSwingAt: number | null = null;
+ /** 8x is a real setting, not a joke — it is how you leave a game running. */
+ const SPEEDS = [1, 2, 4, 8] as const;
+ let speedIdx = 0;
+-const speed = (): number => SPEEDS[speedIdx]!;
+ 
+ /**
+- * Dead time between pitches, divided by the speed. Always applies.
++ * WHAT `F` IS SET TO, which is not the same question as how fast the game is
++ * running. The two display sites read this; nothing that moves a clock does.
++ */
++const speedPick = (): number => SPEEDS[speedIdx]!;
++
++/**
++ * HOW FAST THE CLOCK ACTUALLY RUNS, AND IT IS 1 WHENEVER YOU ARE PLAYING.
++ *
++ * ⚠️ THE MULTIPLIER IS A WATCH-MODE CONTROL AND NOTHING ELSE. It is how you
++ * leave a game running, and "leave it running" is the whole of what it is for
++ * — so the moment you are the one playing, it is off. Dead time, break cards,
++ * replays and the pitch you throw from the mound all run at 1x in MANUAL.
++ *
++ * `F` still cycles and still shows the number you picked. It just does not
++ * take effect until AUTO does. One function, so there is no consumer that can
++ * disagree with another about when the setting is live: pauseFor, breakLen,
++ * sceneMs, flightScale and the four replay lengths all read through here.
++ *
++ * ⚠️ THIS IS WHAT TAKES THE 8x OFF THE PITCH YOU THROW. flightScale() below
++ * scales on `auto || !youBat()`, and on your half on the mound `!youBat()` is
++ * true — so a pitch you delivered used to fly at whatever F said. No grade
++ * moves: the mound is graded on release against `deliveryAt`, which is
++ * unscaled by design (see the note on it). Only the picture's length changes.
++ */
++const speed = (): number => (auto ? SPEEDS[speedIdx]! : 1);
++
++/**
++ * Dead time between pitches, divided by the speed — which is 1 in MANUAL, so
++ * in practice this is "dead time, compressed in watch mode". See speed().
+  *
+- * ⚠️ THE BALL FLIGHT IS SCALED ONLY IN AUTO — see deliver(). Speeding up the
+- * pitch while YOU are swinging is not a speed setting, it is a difficulty
+- * change: the timing windows are ±12/±35/±80ms, and at 4x the ball crosses in
+- * about a tenth of a second, which no human hits. Dead time is the part
+- * nobody is playing, so dead time is the part that gets cut.
++ * ⚠️ THE BALL FLIGHT IS NEVER SCALED WHILE YOU SWING — see deliver(). Speeding
++ * up the pitch while YOU are swinging is not a speed setting, it is a
++ * difficulty change: the timing windows are ±12/±35/±80ms, and at 4x the ball
++ * crosses in about a tenth of a second, which no human hits.
+  */
+ const pauseFor = (ms: number): number => performance.now() + ms / speed();
+ 
+ /**
+- * Ball flight compresses only when nobody is timing it — which is watch mode,
+- * and now also YOUR HALF ON THE MOUND. The ±12/±35/±80 windows belong to the
+- * hitter, and when the hitter is the computer its offset is unscaled (see
+- * pitchToThem), so the grade at 8x is the grade at 1x and the only thing speed
+- * buys you is a shorter afternoon.
++ * Ball flight compresses only when nobody is timing it. The ±12/±35/±80 windows
++ * belong to the hitter, and when the hitter is the computer its offset is
++ * unscaled (see pitchToThem), so the grade at 8x is the grade at 1x and the
++ * only thing speed buys you is a shorter afternoon.
++ *
++ * ⚠️ THE `!youBat()` ARM IS NOW 1 IN MANUAL, and it is speed() that made it so
++ * rather than this expression, which has not changed. On your half on the mound
++ * this branch is still taken — but speed() returns 1 unless AUTO is on, so the
++ * pitch you throw flies at 1x. See speed() for why that is the rule.
+  */
+ const flightScale = (): number => (auto || !youBat() ? speed() : 1);
+ 
+@@ -4041,9 +4107,21 @@ function renderMeta(): void {
+     '<button data-auto="1">' +
+     (auto ? 'AUTO — computer plays your half' : 'MANUAL — you play') +
+     ' <kbd>T</kbd></button>' +
+-    '<button data-speed="1" style="margin-left:8px">speed ' +
+-    speed() +
+-    '&times; <kbd>F</kbd></button>' +
++    // ⚠️ IT SHOWS WHAT YOU PICKED, NOT WHAT IS RUNNING — speedPick(), not
++    // speed(). In MANUAL the multiplier does nothing, and a button that reset
++    // itself to `1×` every time you left AUTO would read as a broken key. So
++    // the number stays and the button goes dim instead: `on` is the pitch
++    // button's pattern for "this one is currently doing something", and this
++    // one is only doing something in AUTO, above 1×.
++    '<button data-speed="1" style="margin-left:8px" class="' +
++    (auto && speedIdx > 0 ? 'on' : '') +
++    '" title="' +
++    (auto ? 'compressing everything the computer plays' : 'AUTO only — nothing is sped up while you play') +
++    '">speed ' +
++    speedPick() +
++    '&times; <kbd>F</kbd>' +
++    (auto ? '' : ' <span class="dim">(AUTO only)</span>') +
++    '</button>' +
+     '<button data-diff="1" style="margin-left:8px">' +
+     level.name +
+     ' <kbd>G</kbd></button>' +
+@@ -6364,8 +6442,12 @@ function showSettings(back: () => void): void {
+       row(
+         'f',
+         'HOW FAST THE DEAD TIME RUNS',
+-        `${speed()}×`,
+-        'Between pitches only. A pitch you are swinging at is never sped up.',
++        auto ? `${speedPick()}×` : `${speedPick()}× — AUTO only, not running`,
++        auto
++          ? 'Dead time, break cards and replays all compress by this. The ' +
++            'pitch itself is never sped up past the hitter.'
++          : 'Does nothing while you are playing — every part of a manual ' +
++            'game runs at 1×. F still cycles it; press T and it takes effect.',
+       ) +
+       `</div>` +
+       `<div class="panel dim">All four are live in the game too — the key beside ` +

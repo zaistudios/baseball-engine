@@ -1,0 +1,24 @@
+feat: the speed multiplier only runs the clock in AUTO
+
+F is how you leave a game running and come back to a result. Leaving it
+running is the whole of what it is for, so the moment you are the one playing
+it has no business touching anything. It did: dead time, break cards, replays
+and the pitch off your own arm all compressed in MANUAL.
+
+The mound one is the one a person feels. flightScale() scales on `auto ||
+!youBat()`, and on your half on the mound `!youBat()` is true — so a pitch you
+delivered flew at whatever F said. No grade moved with it, because a delivery
+is graded on release against deliveryAt and that was never scaled. It was just
+an 8x pitch nobody asked for.
+
+One function decides it now. speed() returns 1 unless auto, and every consumer
+already read through it — pauseFor, breakLen, sceneMs, flightScale, the four
+replay lengths — so there is no second place for the rule to fall out of step
+with the first.
+
+F still cycles, and both read-outs still show the number you picked: a button
+that snapped back to 1x every time you left AUTO would read as a broken key.
+It goes dim and says AUTO only instead, which is speedPick() beside speed() —
+what you set is not the same question as what is running.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
