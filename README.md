@@ -1151,6 +1151,28 @@ presses its own hotkey rather than owning a second copy of it, and all four
 keys stay live in every phase exactly as they were — the screen writes them
 down, it does not replace them.
 
+### <kbd>F</kbd> is a watch-mode control, and only that
+
+**The game speed only runs the clock faster in AUTO.** 1× / 2× / 4× / 8× is how
+you leave a game running and come back to a result, and *leaving it running* is
+the whole of what it is for — so the moment you are the one playing, it is off.
+In MANUAL every part of the game runs at 1×: the dead time between pitches, the
+break cards, the replays, and **the pitch you throw from the mound**, which used
+to fly at whatever <kbd>F</kbd> said because scaling asked "is the hitter human"
+rather than "is anyone playing". No grade moved with it — a delivery is graded
+on release against `deliveryAt`, which is unscaled by design — but an 8× pitch
+off your own arm is not a speed setting a person asked for.
+
+<kbd>F</kbd> still cycles, and the strip and the settings row still show the
+number you picked; a button that snapped back to `1×` every time you left AUTO
+would read as a broken key. It goes dim instead and says **AUTO only**. Press
+<kbd>T</kbd> and it takes effect on the next thing the clock measures.
+
+One function decides it — `speed()` in `src/game/main.ts` returns 1 unless
+`auto`. Every consumer already read through it (`pauseFor`, `breakLen`,
+`sceneMs`, `flightScale`, the four replay lengths), which is why the rule has
+one place to live and no second one to fall out of step with.
+
 **The record book has a button that empties it.** Under the whole book rather
 than beside its title, behind one confirm. It takes the seasons and the longest
 barrel streak and nothing else: your clubs and a season in progress are not
