@@ -260,6 +260,15 @@ export interface ThrownPitch {
    */
   location: PitchLocation;
   /**
+   * HOW FAR OFF THE PLATE IT MISSED, in zone half-widths past the edge — 0 on
+   * a strike, growing outward. See MISS_DISTANCE_MIN/MAX for the range and
+   * chaseContact() in hit.ts for the one thing allowed to read it.
+   *
+   * Optional so every caller that predates it — the CLI, the roguelike, a few
+   * hundred tests — still compiles, and absent still means "costs nothing".
+   */
+  missDistance?: number;
+  /**
    * The knockdown. Only ever true on a pitch that is inside AND out of the
    * zone, so it can never contradict a called strike. If the batter swings it
    * is a normal swing — you cannot be hit by a pitch you went after.
@@ -298,6 +307,30 @@ export interface ThrownPitch {
  * pitcher's willingness to miss silently raises it. Re-measure, do not assume.
  */
 export const HBP_CHANCE = 0.045;
+
+/**
+ * HOW FAR OFF THE PLATE A BALL ACTUALLY MISSED, in ZONE HALF-WIDTHS past the
+ * edge of the strike zone. 0.1 nicks the black; 1.0 is a full plate-half
+ * outside it, most of a foot. A strike is 0.
+ *
+ * ⚠️ IT IS A RANGE, AND THAT IS THE ENTIRE POINT. Every ball in this game
+ * used to be one constant — the renderer drew all of them at 0.78 and the
+ * engine knew nothing but `inZone` — so a pitch that nicked the edge and a
+ * pitch in the other batter's box were the same pitch to the hitter and the
+ * same pitch on the screen. Squared, so a near miss is the common case and the
+ * genuinely wild one is uncommon without being rare, which is how arms miss.
+ *
+ * ⚠️ IT GRADES TIMING AND NOTHING ELSE. chaseContact() in hit.ts turns it
+ * into one factor in the contact multiplier, and that is the only place it is
+ * ever allowed to land. It may not roll a whiff, index an outcome table, or
+ * decide where a ball goes once it has been hit.
+ */
+export const MISS_DISTANCE_MIN = 0.08;
+export const MISS_DISTANCE_MAX = 1.1;
+
+/** One draw, shared by both pitch producers so they miss the same way. */
+export const rollMissDistance = (rng: Rng): number =>
+  MISS_DISTANCE_MIN + (MISS_DISTANCE_MAX - MISS_DISTANCE_MIN) * rng.next() ** 2;
 
 export interface Count {
   balls: number;
@@ -570,6 +603,7 @@ export function throwPitch(
   }
 
   const inZone = rng.next() < zoneRate;
+  const missDistance = inZone ? 0 : rollMissDistance(rng);
 
   // A pitch that misses the zone never misses it down the middle, and a
   // painter never gives you one down the middle at all.
@@ -593,6 +627,7 @@ export function throwPitch(
     speedMph: PITCH_SPEED_MPH[type] + (pitcher.speedBonus ?? 0),
     inZone,
     location,
+    missDistance,
     hitBatter,
     approach,
     // A knuckleballer tips nothing, whatever tier they are — nobody can read
@@ -1118,6 +1153,10 @@ export function pitchToSpot(
     speedMph: PITCH_SPEED_MPH[type] + (pitcher.speedBonus ?? 0),
     inZone,
     location,
+    // The same roll his own pitches take, from the same range: how far an arm
+    // missed by is the arm's business, not a question of whose hand is on the
+    // keys. Taken here, above hitBatter, so the draw order is fixed.
+    missDistance: inZone ? 0 : rollMissDistance(rng),
     // ⚠️ THE SAME RULE THE COMPUTER PITCHES UNDER. Until 2026-08-29 this was a
     // hardcoded `false`: his wild ones could hit your batters and yours could
     // never hit his, every game, in the half you are on the mound.
