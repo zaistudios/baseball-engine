@@ -22,7 +22,7 @@
 import { makeRng } from '../core/rng.ts';
 import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
 import type { Player } from '../core/roster.ts';
-import { ALL_LOCATIONS, locationOffset } from '../core/hit.ts';
+import { ALL_LOCATIONS, chaseContact, locationOffset } from '../core/hit.ts';
 import type { SwingInput, PitchLocation, HitResult } from '../core/hit.ts';
 import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
 import {
@@ -1475,9 +1475,12 @@ function resolvePitch(): void {
       saveSettings(settings);
     }
     // Graded with the SAME multipliers resolveSwing() will use, the assist
-    // included, or the word on screen and the outcome in the book come from
-    // different at-bats.
-    const scale = stats.contact * stuff * assist();
+    // and the chase included, or the word on screen and the outcome in the
+    // book come from different at-bats. ⚠️ chaseContact() IS THE NEWEST WAY
+    // TO GET THAT WRONG: leave it off here and a swing at a ball off the plate
+    // is graded one way for the flash and the bar and another way for the
+    // play log. Every factor below belongs on both sides of this pair.
+    const scale = stats.contact * stuff * assist() * chaseContact(pitch.missDistance);
     const g = grade(offset, scale, stats.vision);
     lastGrade = g.toUpperCase();
 
@@ -1491,6 +1494,8 @@ function resolvePitch(): void {
       twoStrikes: atBat.strikes >= 2,
       runnersInScoringPosition: risp,
       stuff,
+      // How far off the plate he put it. The other half of `scale` above.
+      missDistance: pitch.missDistance,
       foulBoost: FOUL_BOOST,
       // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
       foulPopAngle: parkFoulAngle(game.home.park),
