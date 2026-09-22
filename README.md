@@ -1104,22 +1104,39 @@ their own canvas, camera and field colours; neither owns it.
 
 ### <kbd>ESC</kbd> stops it, and an overlay never did
 
-**The pause is between pitches, and nowhere else.** <kbd>ESC</kbd> at `idle`
-puts up RESUME / SETTINGS / QUIT TO MENU and the game underneath actually
-stops — the arm, the break card's clock, and the computer playing your half in
-watch mode. <kbd>ESC</kbd> during a windup, a delivery or a throw does nothing
-at all.
+**The pause works everywhere a live game does.** <kbd>ESC</kbd> puts up
+RESUME / SETTINGS / QUIT TO MENU and the game underneath actually stops — on
+the mound picking a pitch, mid-delivery, with the ball in the air, on a break
+card, and with the computer playing your half in watch mode. The two places it
+refuses are the title screen, which has a keyboard and no game behind it, and
+the final screen, which has its own buttons and nothing left to stop.
 
 ⚠️ **The five screens before this one paused nothing.** `#pre` covers the
 canvas and takes the keyboard, and the frame loop ran right on underneath every
 one of them. The pause is a flag gating `step()`; the screen is what you look
-at once the clock has stopped. And because this engine grades TIMING against
-`performance.now()` rather than geometry, a pause with a graded moment in the
-air would measure your next press against a clock nobody played through — which
-is the whole of why it is idle-only. The two deadlines that ARE live at idle,
-the caption's and the break card's, are handed back every millisecond they were
-held for, so a half-time card you paused on is still there with the time it had
-left when you come back.
+at once the clock has stopped.
+
+⚠️ **Pausing mid-flight is safe for the reason it looked dangerous.** This
+engine grades TIMING against `performance.now()` rather than geometry, and the
+first read of that rule was that a pause with a graded moment in the air would
+measure your next press against a clock nobody played through. It would — if
+`resume()` handed the held milliseconds back to *some* of the clocks. Hand them
+back to **all** of them and no interval moves at all: `arriveAt -
+swingStartedAt` is the difference it always was, so a swing you paused through
+grades exactly as it would have. The pause was idle-only for a year because of
+that one word.
+
+So `resume()` carries a list — every `performance.now()` reading in the file,
+the ball's launch and arrival, the swing's start and its check, the delivery,
+the throw, the flash, the caption, the break card, the computer's swing and the
+replay's own scaled clock. **A timestamp left off that list is a grading bug,
+not a cosmetic one.** It does not throw. It quietly expires while the screen is
+up, and the box score is written from the verdict it changed. Add a timestamp
+to the file, add it there.
+
+One thing that is a real change to how the game reads, stated out loud: a pause
+taken with the ball in the air is a frozen look at a pitch you are about to
+swing at. The grade does not move, but the look at it is new.
 
 **QUIT TO MENU just ends the game.** No result, no loss, nothing in the book. A
 franchise day you were halfway through is never written, so CONTINUE puts you
