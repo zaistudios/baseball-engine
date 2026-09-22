@@ -544,6 +544,15 @@ SPACE on the title screen threw a pitch nobody could see and G cycled the
 difficulty behind a dial that went on showing the old value. The screen in
 front owns the keyboard now, which is what being in front means.
 
+⚠️ **AND COVERED COUNTS AS BEING BEHIND.** That capture ran off "is `#start`
+still connected and displayed", and a screen opened out of `#pre` — the record
+book, the settings screen — sits **over** the title screen without removing it.
+So the title's cursor went on swallowing SPACE and ENTER for every screen opened
+off it, and the record book has advertised `BACK SPACE` from its title card
+since the day it shipped with that key doing nothing at all. `#pre` is the only
+thing that can be in front of anything; when it is up, the screen underneath
+stands down.
+
 ⚠️ **AND THE GAME NO LONGER EATS WHAT YOU TYPE.** That same handler
 `preventDefault`s every key it knows, which is most of the alphabet — so
 typing `{"abbr":"OKC"}` into the league box put `{"":"O"}` in it and squared
@@ -1092,6 +1101,82 @@ the covers run to their bags, the throw races the batter down the line and an
 umpire calls it. That is `src/web/overhead.ts`, the same module the roguelike
 screen uses — it moved out of that screen the day this one wanted it. Both pass
 their own canvas, camera and field colours; neither owns it.
+
+### <kbd>ESC</kbd> stops it, and an overlay never did
+
+**The pause works everywhere a live game does.** <kbd>ESC</kbd> puts up
+RESUME / SETTINGS / QUIT TO MENU and the game underneath actually stops — on
+the mound picking a pitch, mid-delivery, with the ball in the air, on a break
+card, and with the computer playing your half in watch mode. The two places it
+refuses are the title screen, which has a keyboard and no game behind it, and
+the final screen, which has its own buttons and nothing left to stop.
+
+⚠️ **The five screens before this one paused nothing.** `#pre` covers the
+canvas and takes the keyboard, and the frame loop ran right on underneath every
+one of them. The pause is a flag gating `step()`; the screen is what you look
+at once the clock has stopped.
+
+⚠️ **Pausing mid-flight is safe for the reason it looked dangerous.** This
+engine grades TIMING against `performance.now()` rather than geometry, and the
+first read of that rule was that a pause with a graded moment in the air would
+measure your next press against a clock nobody played through. It would — if
+`resume()` handed the held milliseconds back to *some* of the clocks. Hand them
+back to **all** of them and no interval moves at all: `arriveAt -
+swingStartedAt` is the difference it always was, so a swing you paused through
+grades exactly as it would have. The pause was idle-only for a year because of
+that one word.
+
+So `resume()` carries a list — every `performance.now()` reading in the file,
+the ball's launch and arrival, the swing's start and its check, the delivery,
+the throw, the flash, the caption, the break card, the computer's swing and the
+replay's own scaled clock. **A timestamp left off that list is a grading bug,
+not a cosmetic one.** It does not throw. It quietly expires while the screen is
+up, and the box score is written from the verdict it changed. Add a timestamp
+to the file, add it there.
+
+One thing that is a real change to how the game reads, stated out loud: a pause
+taken with the ball in the air is a frozen look at a pitch you are about to
+swing at. The grade does not move, but the look at it is new.
+
+**QUIT TO MENU just ends the game.** No result, no loss, nothing in the book. A
+franchise day you were halfway through is never written, so CONTINUE puts you
+back on it and you play it again from the first pitch. The screen says so
+before you press it.
+
+**One settings screen, two doors** — a card on the title menu beside CUSTOMIZE,
+and a button on the pause screen. Four rows: the difficulty (<kbd>G</kbd>) and
+the pitch speed (<kbd>P</kbd>), both kept between games, and watch mode
+(<kbd>T</kbd>) and the game speed (<kbd>F</kbd>) for the session. Every row
+presses its own hotkey rather than owning a second copy of it, and all four
+keys stay live in every phase exactly as they were — the screen writes them
+down, it does not replace them.
+
+### <kbd>F</kbd> is a watch-mode control, and only that
+
+**The game speed only runs the clock faster in AUTO.** 1× / 2× / 4× / 8× is how
+you leave a game running and come back to a result, and *leaving it running* is
+the whole of what it is for — so the moment you are the one playing, it is off.
+In MANUAL every part of the game runs at 1×: the dead time between pitches, the
+break cards, the replays, and **the pitch you throw from the mound**, which used
+to fly at whatever <kbd>F</kbd> said because scaling asked "is the hitter human"
+rather than "is anyone playing". No grade moved with it — a delivery is graded
+on release against `deliveryAt`, which is unscaled by design — but an 8× pitch
+off your own arm is not a speed setting a person asked for.
+
+<kbd>F</kbd> still cycles, and the strip and the settings row still show the
+number you picked; a button that snapped back to `1×` every time you left AUTO
+would read as a broken key. It goes dim instead and says **AUTO only**. Press
+<kbd>T</kbd> and it takes effect on the next thing the clock measures.
+
+One function decides it — `speed()` in `src/game/main.ts` returns 1 unless
+`auto`. Every consumer already read through it (`pauseFor`, `breakLen`,
+`sceneMs`, `flightScale`, the four replay lengths), which is why the rule has
+one place to live and no second one to fall out of step with.
+
+**The record book has a button that empties it.** Under the whole book rather
+than beside its title, behind one confirm. It takes the seasons and the longest
+barrel streak and nothing else: your clubs and a season in progress are not
+touched, and the confirm says that out loud.
 
 ### The check swing, and the swing that takes time to get there
 
