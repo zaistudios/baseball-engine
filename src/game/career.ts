@@ -80,6 +80,22 @@ export interface Year {
   /** Your best bat and your best arm that year, for the records page. */
   bat?: BatMark;
   arm?: ArmMark;
+  /**
+   * The whole league's season, not just your club's. Optional — a row filed
+   * before it was logged, or from a season with no book, has none.
+   *
+   * ⚠️ IT IS A BEFORE-AND-AFTER, NOT A TARGET. Each simulation step changes
+   * how balls in play turn out, and this is where the drift shows. Nothing
+   * grades it; Zane reads it.
+   */
+  league?: League;
+}
+
+/** League AVG, BABIP, and runs per team per game — the unit balance.ts prints. */
+export interface League {
+  avg: number;
+  babip: number;
+  rpg: number;
 }
 
 export interface Career {
@@ -89,6 +105,27 @@ export interface Career {
 export const newCareer = (): Career => ({ years: [] });
 
 // -------------------------------------------------------------- writing it
+
+/**
+ * One fold over every line in the book. The book holds the playoffs, and so
+ * does `results`, so the runs and the games agree on what a season is.
+ *
+ * ponytail: BABIP without sac flies in the denominator. BatLine does not
+ * count them, so the number reads a shade high against a real league's. Add
+ * them when BatLine does.
+ */
+function league(book: StatBook, games: number): League {
+  let ab = 0, h = 0, hr = 0, k = 0, r = 0;
+  for (const l of Object.values(book.bat)) {
+    ab += l.ab;
+    h += l.h;
+    hr += l.hr;
+    k += l.k;
+  }
+  for (const l of Object.values(book.arm)) r += l.r;
+  const per = (n: number, d: number): number => (d > 0 ? n / d : 0);
+  return { avg: per(h, ab), babip: per(h - hr, ab - k - hr), rpg: per(r, 2 * games) };
+}
 
 /**
  * Your best hitter and your best arm of the season just finished.
@@ -171,6 +208,7 @@ export function file(c: Career, s: Season): Career {
           regularDays(s),
         )
       : {}),
+    ...(s.stats ? { league: league(s.stats, s.results.length) } : {}),
   };
 
   return { years: [...c.years, year] };

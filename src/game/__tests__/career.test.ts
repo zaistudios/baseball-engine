@@ -4,10 +4,11 @@
  * rather than a stored total that can drift away from them.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   bestYear,
   file,
+  loadCareer,
   newCareer,
   records,
   totals,
@@ -230,5 +231,49 @@ describe('the record book qualifies a rate on the length of the year', () => {
     // 0.6 of 162 is 97: a 110-game season is a real season and stays eligible.
     const c: Career = { years: [year(162, 0.306, 2.55, 'full'), year(110, 0.34, 2.1, 'medium')] };
     expect(labelled(records(c), 'BATTING AVERAGE')).toBe('medium bat');
+  });
+});
+
+describe('the league line on each year', () => {
+  const bat = (ab: number, h: number, hr: number, k: number) =>
+    ({ pa: ab, ab, h, d: 0, t: 0, hr, bb: 0, k, rbi: 0, tm: 'X' });
+  const arm = (r: number) =>
+    ({ outs: 27, h: 0, bb: 0, k: 0, r, er: r, w: 0, l: 0, tm: 'X' });
+
+  it('folds the whole book into AVG, BABIP and runs per team per game', () => {
+    const s = finished('ALB', 5);
+    const games = s.results.length;
+    // 100 AB, 25 H, 5 HR, 20 K  →  .250 AVG, (25-5)/(100-20-5) = 20/75 BABIP.
+    const stats = {
+      bat: { a: bat(60, 15, 3, 12), b: bat(40, 10, 2, 8) },
+      arm: { p: arm(games * 3), q: arm(games * 5) },
+    };
+    const y = file(newCareer(), { ...s, stats }).years[0]!;
+    expect(y.league!.avg).toBe(0.25);
+    expect(y.league!.babip).toBe(20 / 75);
+    // 8 runs a game between the two clubs is 4 a team.
+    expect(y.league!.rpg).toBe(4);
+  });
+
+  it('gives an empty book zeroes, not NaN', () => {
+    const y = file(newCareer(), { ...finished('ALB', 5), stats: { bat: {}, arm: {} } }).years[0]!;
+    expect(y.league).toEqual({ avg: 0, babip: 0, rpg: 0 });
+  });
+
+  it('leaves the league off a season with no book', () => {
+    const y = file(newCareer(), { ...finished('ALB', 5), stats: undefined }).years[0]!;
+    expect(y.league).toBeUndefined();
+  });
+
+  it('still loads a row saved before the league was logged', () => {
+    const map = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+    });
+    const old = { club: 'ALB', w: 9, l: 5, finish: 1, champion: 'ALB', seed: 7 };
+    map.set('asb-career', JSON.stringify({ years: [old] }));
+    expect(loadCareer().years).toEqual([old]);
+    vi.unstubAllGlobals();
   });
 });
