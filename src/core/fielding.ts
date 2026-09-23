@@ -1,11 +1,15 @@
 /**
  * The defence gets a say. Two rolls, both on balls already ruled outs.
  *
- * THE SCOPE LINE, same shape as baserunning.ts: this is not a fielding
- * simulation. There are no positions, no fielders, no range ratings, no
- * assists and no scorer deciding hit-or-error. There are two questions a
- * batter-only game can feel from the box — "did that turn two" and "did they
- * boot it" — and nothing else.
+ * THE SCOPE LINE. This file is still not a fielding simulation, but the game
+ * around it now partly is. There ARE positions and real men in them
+ * (game/defense.ts), and since ZAIS-17 a ground ball is fielded by whichever
+ * infielder beats it to his spot on its line (game/placement.ts, cutOff()) —
+ * that is where the fielder's range lives, from gloveOf(), with no new rating.
+ * What is still rolled HERE, as dice on a ball already ruled an out, is the
+ * two questions a batter can feel from the box: "did that turn two" and "did
+ * they boot it". Throws and force plays, and errors charged to a named
+ * fielder, are the next steps of the Unscripted Plays spec and will move them.
  *
  * Rolled here, applied by inning.ts. Same split as baserunning: the core
  * decides whether it happened, the inning layer decides what it cost.

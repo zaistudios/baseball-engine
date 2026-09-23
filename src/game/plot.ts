@@ -1,12 +1,22 @@
 /**
  * Where a batted ball goes, on an overhead field.
  *
- * THE SCOPE LINE, and it is the important one: nothing here decides anything.
- * `hitTables.ts` has already returned `single` or `ground_out` by the time any
- * of this runs, and `fielding.ts` has already rolled the double play. This
- * module answers "so what should that LOOK like" and nothing else. If a future
- * change ever has a landing point deciding an out, the engine is back in the
- * outcome seam and rule 1 is broken.
+ * THE SCOPE LINE, and it moved. This file used to say nothing here decides
+ * anything, and that stopped being true twice. placement.ts has decided hit or
+ * out from where the ball finished since 2026-09-03 — the contest, for balls
+ * in the air. And since ZAIS-17 a GROUND BALL is played out, not presented: the
+ * infielder who beats it to his spot on its line fields it, and one that beats
+ * all of them is a hit into the outfield. That race is run on this file's
+ * numbers — plotBatted()'s distance and hang, groundBallMs(), REACTION_MS and
+ * the FIELDERS table — so they are the engine's inputs now, not decoration.
+ *
+ * What is STILL only a picture: the fly ball and the liner (decided by
+ * contest()'s fixed distances, next in line), the throw and the race to first
+ * (rolled in fielding.ts and drawn to agree — raceTiming()), errors, and extra
+ * bases. Each is its own step in the Unscripted Plays spec.
+ *
+ * The rule that has not moved: the engine decides and the picture draws it. If
+ * the replay and the box score disagree, the box score is right.
  *
  * Which also means the plot is free to be unphysical where physics reads
  * wrong. It takes the hit engine's real exit velocity and launch angle so a
@@ -524,11 +534,15 @@ export function nearestFielder(
 /**
  * How far along his run to the ball the chaser is when the ball gets there.
  *
- * THIS IS THE ONE PLACE THE REPLAY IS RIGGED, and it is rigged on purpose. The
- * outcome is already in the book, so the picture has to agree with it: on an
- * out the chaser arrives with the ball, and on a hit he is still closing when
- * it lands. Deriving it the other way round — letting the geometry decide who
- * got there — would be a fielding simulation, and a different game.
+ * STILL RIGGED FOR A BALL IN THE AIR, and only there. The outcome of a fly or a
+ * liner comes from contest()'s distances, so the picture has to agree with it:
+ * on an out the chaser arrives with the ball, and on a hit he is still closing
+ * when it lands. That is the next step of the Unscripted Plays spec to replace.
+ *
+ * ⚠️ A GROUND BALL IS NOT RIGGED ANY MORE. placement.ts's cutOff() decides who
+ * got there, where and when, and the overhead draws that: a ground out is 1
+ * here because he really did get there first, and the infielder a ball got
+ * past is drawn at the engine's own `reach`, not at anything on this list.
  *
  * A home run is the one case with no chase in it at all.
  */
