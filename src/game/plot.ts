@@ -240,6 +240,25 @@ const groundHang = (distFt: number, foul: boolean): number => {
 };
 
 /**
+ * THE SHAPE OF A GROUNDER'S ROLL: share of the distance covered at share `k`
+ * of its hang. Quick out of the box, dying as it reaches somebody.
+ */
+export const groundEase = (k: number): number => 1 - (1 - k) ** 2;
+
+/**
+ * THE BALL'S CLOCK ON THE GROUND — replay-clock ms (from the cut, the clock the
+ * overhead flies the ball on) at which a ground ball has rolled `d` feet. The
+ * inverse of groundEase() over the plot's hang.
+ *
+ * ⚠️ ONE FUNCTION FOR THE ENGINE AND THE PICTURE. placement.ts asks it whether
+ * an infielder beats the ball to his spot on its line; overhead.ts draws the
+ * ball through groundEase(), which this inverts. If the two ever disagree the
+ * man is drawn diving at a ball the box score says he caught.
+ */
+export const groundBallMs = (plot: Plot, d: number): number =>
+  plot.hangMs * (1 - Math.sqrt(1 - Math.max(0, Math.min(1, d / plot.distFt))));
+
+/**
  * Plot one batted ball.
  *
  * `outcome` is taken for one job: keeping the picture on the same side of the

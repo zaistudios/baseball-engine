@@ -8,8 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, type Replay } from '../overhead.ts';
-import { overheadPoint, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, type Replay } from '../overhead.ts';
+import { overheadPoint, groundBallMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
 import { manned, assignPositions } from '../defense.ts';
 import { HOME } from '../teams.ts';
 
@@ -281,5 +281,26 @@ describe('the men in the replay', () => {
     // Eight of the nine: the pitcher is not in a DH league's order.
     expect(new Set(named).size).toBe(8);
     expect(named).toContain(assignPositions(HOME.lineup).SS!.name);
+  });
+});
+
+/**
+ * ONE CLOCK FOR THE GROUNDER. placement.ts decides who cut a ground ball off
+ * with groundBallMs(); the overhead draws the ball with ballShare(). If they
+ * drift, the replay puts the ball somewhere other than the glove that fielded it.
+ */
+describe("the grounder's clock", () => {
+  it('the ball is drawn at d feet at exactly the ms the engine says it gets there', () => {
+    for (const ev of [60, 85, 100, 118]) {
+      const r = newReplay({
+        now: 0, outcome: 'ground_out', exitVelocity: ev, launchAngle: 2,
+        direction: -12, speed: 1, safe: false,
+      });
+      for (const share of [0, 0.1, 0.35, 0.6, 0.9, 1]) {
+        const d = r.plot.distFt * share;
+        const drawn = ballShare(r, groundBallMs(r.plot, d)) * r.plot.distFt;
+        expect(drawn, `${ev}mph at ${d.toFixed(0)}ft`).toBeCloseTo(d, 6);
+      }
+    }
   });
 });

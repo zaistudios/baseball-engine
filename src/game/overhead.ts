@@ -34,6 +34,7 @@ import {
   FIELDERS,
   REACTION_MS,
   SHADE,
+  groundEase,
   type Plot,
   type Fielder,
   type Race,
@@ -996,26 +997,7 @@ export function drawOverhead(
     return;
   }
 
-  // The ball, and the ground it has covered.
-  //
-  // Two outcomes are allowed past their own landing point. A home run keeps
-  // going and leaves the frame, because a ball that stops dead on the warning
-  // track is not what the banner just said; and a booted one trickles on past
-  // the man who should have had it, which is the whole picture of an error.
-  let kBall = k;
-  const over = (t - r.plot.hangMs) / 900;
-  if (r.outcome === 'home_run') kBall = Math.max(0, t / r.plot.hangMs);
-  else if (r.error && over > 0) kBall = k + Math.min(0.22, over * 0.22);
-
-  // ⚠️ A GROUND BALL SLOWS DOWN AND A BALL IN THE AIR DOES NOT. Both used to
-  // cross the field at a constant rate, which is the detail that made a
-  // six-hopper through the infield read like a laser: the dot left the bat and
-  // arrived at the shortstop at the same speed the whole way. Friction is most
-  // of what a grounder looks like, so it gets an ease-out — quick out of the
-  // box, dying as it reaches somebody. The arrival time is unchanged, so the
-  // chaser still meets it exactly where and when he did.
-  if (r.plot.ground) kBall = 1 - (1 - kBall) ** 2;
-
+  const kBall = ballShare(r, t);
   const at = overheadPoint(r.plot.distFt * kBall, r.direction, cam.home, cam.pxPerFt);
 
   // ⚠️ A TRAIL, NOT A TETHER. This was a flat 30%-alpha line from home plate to
@@ -1064,6 +1046,36 @@ export function drawOverhead(
   if (!isFoul(r)) drawRace(ctx, cam, now, r, landing, opts);
 
   ctx.restore();
+}
+
+/**
+ * The ball, and the ground it has covered: share of `plot.distFt` at `t` ms
+ * after the cut.
+ *
+ * Two outcomes are allowed past their own landing point. A home run keeps
+ * going and leaves the frame, because a ball that stops dead on the warning
+ * track is not what the banner just said; and a booted one trickles on past
+ * the man who should have had it, which is the whole picture of an error.
+ */
+export function ballShare(r: Replay, t: number): number {
+  const k = Math.max(0, Math.min(1, t / r.plot.hangMs));
+  let kBall = k;
+  const over = (t - r.plot.hangMs) / 900;
+  if (r.outcome === 'home_run') kBall = Math.max(0, t / r.plot.hangMs);
+  else if (r.error && over > 0) kBall = k + Math.min(0.22, over * 0.22);
+
+  // ⚠️ A GROUND BALL SLOWS DOWN AND A BALL IN THE AIR DOES NOT. Both used to
+  // cross the field at a constant rate, which is the detail that made a
+  // six-hopper through the infield read like a laser: the dot left the bat and
+  // arrived at the shortstop at the same speed the whole way. Friction is most
+  // of what a grounder looks like, so it gets an ease-out — quick out of the
+  // box, dying as it reaches somebody. The arrival time is unchanged, so the
+  // chaser still meets it exactly where and when he did.
+  //
+  // ⚠️ groundEase() IS THE ENGINE'S CURVE TOO — plot.ts groundBallMs() is its
+  // inverse, and placement.ts decides who cut the ball off with it.
+  if (r.plot.ground) kBall = groundEase(kBall);
+  return kBall;
 }
 
 /**
