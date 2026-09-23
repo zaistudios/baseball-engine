@@ -1251,6 +1251,14 @@ than beside its title, behind one confirm. It takes the seasons and the longest
 barrel streak and nothing else: your clubs and a season in progress are not
 touched, and the confirm says that out loud.
 
+**Every season in the record book carries the league's AVG, BABIP and R/G.**
+The whole league, playoffs in, folded out of the season's stat book the moment
+it is filed (`league()` in `src/game/career.ts`). R/G is runs per team per
+game, the same unit `scripts/balance.ts` prints. BABIP leaves sac flies out of
+the denominator because the book does not count them. There is no target and
+no colour for "too high": it is a before-and-after for each fielding step, and
+it is read, not graded. A season filed before this shows `—` in all three.
+
 ### The check swing, and the swing that takes time to get there
 
 Taken from R.B.I., which let you stop the bat dead wherever it was on the

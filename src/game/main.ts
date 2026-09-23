@@ -6716,7 +6716,12 @@ function showCareer(back: () => void): void {
         `<td>${y.w}</td><td>${y.l}</td><td>${y.finish}</td>` +
         `<td>${y.champion}</td>` +
         `<td class="team">${y.bat ? `${y.bat.name} ${rate(y.bat.avg)}` : '—'}</td>` +
-        `<td class="team">${y.arm ? `${y.arm.name} ${y.arm.era.toFixed(2)}` : '—'}</td></tr>`
+        `<td class="team">${y.arm ? `${y.arm.name} ${y.arm.era.toFixed(2)}` : '—'}</td>` +
+        // The league, not your club: the before-and-after for every simulation step.
+        (y.league
+          ? `<td>${rate(y.league.avg)}</td><td>${rate(y.league.babip)}</td><td>${y.league.rpg.toFixed(2)}</td>`
+          : `<td>—</td><td>—</td><td>—</td>`) +
+        `</tr>`
       );
     })
     .join('');
@@ -6725,7 +6730,7 @@ function showCareer(back: () => void): void {
     ? `<div class="panel"><div class="dim penhead">EVERY SEASON</div>` +
       `<div style="overflow-x:auto"><table class="line"><thead><tr>` +
       `<th></th><th>G</th><th>W</th><th>L</th><th>FIN</th><th>CHAMP</th>` +
-      `<th>BEST BAT</th><th>BEST ARM</th>` +
+      `<th>BEST BAT</th><th>BEST ARM</th><th>AVG</th><th>BABIP</th><th>R/G</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div></div>`
     : `<div class="panel dim">Nothing in the book yet. Finish a franchise and it lands here.</div>`;
 
