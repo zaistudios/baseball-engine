@@ -1415,6 +1415,43 @@ exactly backwards for a lefty, who pulls to *right*. Six of the fifteen in
 `direction` for **results** until `defense.ts` started using it to decide who
 fields the ball. Fixed in `directionFor()`.
 
+### A ground ball is fielded by the man who cuts it off — 2026-09-23 (ZAIS-17)
+
+*"A CENTERFIELDER JUST THREW SOMEONE OUT AT FIRST."* The chaser on a grounder
+was the man nearest where the ball **stopped**, so a hard roller dead centre
+went to the centre fielder. It then became a ground out, and he threw the
+batter out.
+
+A ground ball (launch angle under `GROUND_ANGLE`, 10°) is now **played out**
+instead of looked up. It runs a straight line from home. For each infielder
+(P, 1B, 2B, 3B, SS) in the alignment the defence is actually in, shifts
+included, `cutOff()` in `placement.ts` finds his spot on that line. That is the
+foot of his perpendicular, or the ball itself if it stops short of there. He
+gets there at `REACTION_MS` plus his run at `INFIELD_RANGE × gloveOf()`. The
+ball gets there at `groundBallMs()`, which is the same clock the overhead draws
+it with. Men are asked in the order the ball reaches them, and the first to beat
+it has it.
+
+- **Fielded** is a ground out, whatever the table said.
+- **Through every infielder** is a hit. An out becomes a single, and a table
+  hit stays that hit. The nearest outfielder picks it up and has no play at
+  first.
+- **Died in the dirt before anybody got there** is an infield single.
+
+The replay draws that answer. The ball stops in the glove that fielded it, at
+the engine's time. On a ball that got through, the infielder who came closest
+is drawn running at its line and arriving late, by the engine's own number.
+`contest()`'s distance bars now only judge balls in the air.
+
+`INFIELD_RANGE` is **0.045**, with the sweep in its comment. At 400 games, runs
+went 4.12 → 4.18, hits 7.99 → 8.14, double plays 0.71 → 0.67, force outs
+1.72 → 1.64 and errors 0.69 → 0.65 per team. Grounders are fielded by 2B 26%,
+SS 22%, 3B 19%, 1B 19% and P 13%. The pitcher is high against a real 6–8%.
+
+**Still not simulated:** fly balls and liners (the next step), throws and force
+plays, errors charged to a named fielder, and extra bases. See the Unscripted
+Plays spec.
+
 ### ⚠️ The third trap: a search that overfits
 
 The two lineups were picked by a random partition search scored on a small
