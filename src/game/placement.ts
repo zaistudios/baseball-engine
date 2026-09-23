@@ -34,7 +34,16 @@
 import type { HitResult } from '../core/hit.ts';
 import { isHit, isOut, type Outcome } from '../core/hitTables.ts';
 import type { AtBatResult } from '../core/atBat.ts';
-import { plotBatted, nearestFielder, FIELDERS, type Fielder } from './plot.ts';
+import {
+  plotBatted,
+  nearestFielder,
+  groundBallMs,
+  FIELDERS,
+  GROUND_ANGLE,
+  REACTION_MS,
+  type Fielder,
+  type Plot,
+} from './plot.ts';
 import { fieldersFor, type Shift } from './shift.ts';
 import { wallAt, type Park } from './teams.ts';
 
@@ -72,6 +81,13 @@ export interface Placement {
    * parks — see the note on the upgrade itself.
    */
   wallFt: number;
+  /**
+   * WHO CUT THE GROUND BALL OFF — set on every fair ball on the ground, and on
+   * nothing else. See cutOff(). When it was fielded, `fielderNum` is that man;
+   * when it got through, `fielderNum` is the outfielder who picks it up and
+   * this names the infielder it got past.
+   */
+  cutOff?: CutOff;
 }
 
 /**
@@ -259,6 +275,8 @@ export function place(
    * the hitter found, and contest() turns the second one into an out.
    */
   fielders: readonly Fielder[] = FIELDERS,
+  /** The glove at each number, for the cut-off. See withPlacement(). */
+  reachAt: (fielderNum: number) => number = () => 1,
 ): Placement {
   /**
    * ⚠️ THE PARK IS RESOLVED TO ONE NUMBER HERE, and this is the only place it
@@ -282,18 +300,142 @@ export function place(
     };
   }
 
-  const f = nearestFielder(plot.distFt, dirDeg, fielders);
-  const gapFt = gapTo(plot.distFt, dirDeg, f.num, fielders);
+  // ⚠️ A GROUND BALL IS PLAYED WHERE IT PASSES, NOT WHERE IT STOPS. Picking the
+  // man nearest the resting point is how a 240-foot roller dead centre went to
+  // the centre fielder — 78 feet from it against the middle infielders' 112 —
+  // who then threw the batter out at first. See cutOff().
+  const cut = hit.launchAngle < GROUND_ANGLE ? cutOff(plot, dirDeg, fielders, reachAt) : undefined;
+  const num =
+    cut && !cut.past
+      ? cut.num
+      : nearestFielder(plot.distFt, dirDeg, cut ? fielders.filter((f) => f.num >= 7) : fielders).num;
+  const gapFt = gapTo(plot.distFt, dirDeg, num, fielders);
 
   return {
     distFt: plot.distFt,
     dirDeg,
     zone: zoneFor(plot.distFt, dirDeg, wallFt),
     gapFt,
-    fielderNum: f.num,
+    fielderNum: num,
     inTheGap: gapFt >= GAP_FT,
     wallFt,
+    ...(cut ? { cutOff: cut } : {}),
   };
+}
+
+// --------------------------------------------------------------- the cut-off
+
+/**
+ * HOW FAST AN INFIELDER GETS TO HIS SPOT ON A GROUND BALL'S LINE — feet per
+ * replay millisecond for a glove of 1.0.
+ *
+ * It is a REPLAY-CLOCK speed, not a real one: the ball's clock is
+ * groundBallMs(), which is the pacing the overhead draws at, so this is
+ * whatever speed makes a man drawn at that pace arrive when the box score says
+ * he did. The one new constant step (a) was allowed.
+ *
+ * ⚠️ HIS RUN AND THE BALL'S ROLL BOTH START AT ZERO. The overhead holds the
+ * batter's view for REPLAY_CUT_MS before the ball leaves the plate, and giving
+ * the fielder those 300ms free made the pitcher field a third of the
+ * grounders that were fielded — he stands on the line of everything hit up
+ * the middle.
+ *
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-23. Before this
+ * change: 4.12 runs and 7.99 hits per team.
+ *
+ *   range   runs   hits   DP/tm  force/tm  errors
+ *   0.035   5.25  10.46   0.61    1.60     0.61
+ *   0.040   4.54   8.98   0.67    1.65     0.56
+ *   0.042   4.34   8.62   0.67    1.64     0.61
+ *   0.045   4.18   8.14   0.67    1.64     0.65
+ *   0.048   4.11   7.91   0.67    1.65     0.67
+ *   0.050   4.00   7.70   0.66    1.66     0.66
+ *   0.055   3.82   7.29   0.62    1.67     0.66
+ *
+ * ⚠️ THE CURVE IS STEEP HERE — 0.005 is most of a hit per team. At 0.045, over
+ * 200 games of real at-bats, 89% of grounders are fielded, 7% get through and
+ * 4% die in the dirt before anybody reaches them; the fielded ones go 2B 26%,
+ * SS 22%, 3B 19%, 1B 19%, P 13%. The pitcher is high against a real 6-8%,
+ * because nothing here slows his first step after the follow-through.
+ */
+export const INFIELD_RANGE = 0.045;
+
+/** The men who can cut a ground ball off. The catcher is behind it. */
+const INFIELDERS: readonly number[] = [1, 3, 4, 5, 6];
+
+/** Who got to a ground ball, or who came closest, and where and when. */
+export interface CutOff {
+  /** Scorer's number of the man who fielded it — or, when nobody did, who came closest. */
+  num: number;
+  /** Feet from home along the ball's line: where he fields it, or where it went by him. */
+  alongFt: number;
+  /** Contact-clock ms the ball gets there. groundBallMs(), the picture's clock. */
+  ms: number;
+  /** He got there first. */
+  fielded: boolean;
+  /** Share of his run he had made when the ball got there. 1 when he fielded it. */
+  reach: number;
+  /**
+   * It rolled by every infielder into the outfield. False with `fielded` false
+   * is a ball that died in the dirt before anybody reached it: an infield hit,
+   * picked up by `num`.
+   */
+  past: boolean;
+}
+
+/**
+ * STEP (a) FOR GROUND BALLS: does anybody cut it off?
+ *
+ * The ball runs a straight line from home at `dirDeg`. For each infielder, the
+ * spot he runs to is the foot of his perpendicular on that line — or, if the
+ * ball stops short of it, the ball itself. He gets there at `REACTION_MS` plus
+ * the run at INFIELD_RANGE scaled by his glove; the ball gets there at
+ * groundBallMs(). They are asked in the order the ball reaches them, and the
+ * first man who beats it has it.
+ *
+ * No new RNG and no new ratings. Nothing here rolls; it measures.
+ */
+export function cutOff(
+  plot: Plot,
+  dirDeg: number,
+  fielders: readonly Fielder[],
+  reachAt: (fielderNum: number) => number,
+): CutOff {
+  const rad = (dirDeg * Math.PI) / 180;
+  const ux = Math.sin(rad);
+  const uy = Math.cos(rad);
+  const tries = fielders
+    .filter((f) => INFIELDERS.includes(f.num))
+    .map((f) => {
+      const p = feetXY(f.distFt, f.dirDeg);
+      const foot = p.x * ux + p.y * uy;
+      const along = Math.max(0, Math.min(foot, plot.distFt));
+      const runFt = Math.hypot(p.x - ux * along, p.y - uy * along);
+      const ms = groundBallMs(plot, along);
+      const speed = INFIELD_RANGE * reachAt(f.num);
+      const runMs = REACTION_MS + runFt / speed;
+      const reach = runFt === 0 ? 1 : Math.max(0, Math.min(1, ((ms - REACTION_MS) * speed) / runFt));
+      return { num: f.num, alongFt: along, ms, runMs, reach, fielded: runMs <= ms, stopped: foot >= plot.distFt };
+    })
+    .sort((a, b) => a.alongFt - b.alongFt);
+
+  const pick = (t: (typeof tries)[number], past: boolean): CutOff => ({
+    num: t.num,
+    alongFt: t.alongFt,
+    ms: t.ms,
+    fielded: t.fielded,
+    reach: t.fielded ? 1 : t.reach,
+    past,
+  });
+
+  const got = tries.find((t) => t.fielded);
+  if (got) return pick(got, false);
+  // It died in the dirt short of somebody: whoever gets to it first has it.
+  const dead = tries.filter((t) => t.stopped).sort((a, b) => a.runMs - b.runMs)[0];
+  if (dead) return pick(dead, false);
+  // Past everybody. The man drawn diving for it is the one who came closest.
+  const near = [...tries].sort((a, b) => b.reach - a.reach)[0]!;
+  return pick(near, true);
 }
 
 /**
@@ -386,6 +528,13 @@ export function stretch(outcome: Outcome, p: Placement): Outcome {
  * 90ft from the nearest glove. ONE shared threshold would therefore convert
  * only fly balls and never a single ground ball, and "it found the hole" is the
  * most common version of this play in real baseball. Hence three bars.
+ *
+ * ⚠️ AND SINCE ZAIS-17 THE GROUND BALL IS NOT CONTESTED HERE AT ALL. Every fair
+ * ball under GROUND_ANGLE is played out by cutOff() — the infielder who beats
+ * it to his spot on its line has it — so ROBBED_FT and HOLE_FT now only ever
+ * see balls in the air, and the old `ground_out: 46` bar is gone. "It found
+ * the hole" is still the most common version of this play; it is decided by
+ * who could get there, not by how far it stopped from anybody.
  */
 
 /**
@@ -418,7 +567,6 @@ export const ROBBED_FT = 22;
  * and 8.5, and the population's own p97 is about 106.
  */
 export const HOLE_FT: Readonly<Record<string, number>> = {
-  ground_out: 46,
   line_out: 106,
   popup: 96,
 };
@@ -459,6 +607,21 @@ export function contest(
     return { outcome: 'single', verdict: 'dropped' };
   }
 
+  return { outcome: o, verdict: null };
+}
+
+/**
+ * THE GROUND BALL'S VERDICT, from the cut-off rather than from contest().
+ *
+ * Fielded by an infielder is a ground out, whatever the table said. Through
+ * every infielder, an out becomes a single and a table hit stays that hit —
+ * stretch() still gets its say. A ball that died in the dirt before anybody
+ * reached it is the same infield single, told as one rather than as a hole.
+ * ROBBED_FT and HOLE_FT do not apply on the ground any more.
+ */
+function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Verdict } {
+  if (cut.fielded) return { outcome: 'ground_out', verdict: isHit(o) ? 'robbed' : null };
+  if (isOut(o)) return { outcome: 'single', verdict: cut.past ? 'dropped' : null };
   return { outcome: o, verdict: null };
 }
 
@@ -507,13 +670,15 @@ export function withPlacement(
     return { result, placement: null, text, verdict: null };
   }
 
-  const p = place(result.hit, opts.park, fieldersFor(opts.shift ?? 'straight'));
+  const p = place(result.hit, opts.park, fieldersFor(opts.shift ?? 'straight'), opts.reachAt);
   // A foul is not a play and has nobody standing where it landed — place()
   // zeroes its gap by construction, which would read as "robbed" every time.
   const live = p.zone !== 'foul-ground';
-  const { outcome: contested, verdict } = live
-    ? contest(result.hit, p, opts.reachAt?.(p.fielderNum) ?? 1)
-    : { outcome: result.hit.outcome, verdict: null as Verdict };
+  const { outcome: contested, verdict } = !live
+    ? { outcome: result.hit.outcome, verdict: null as Verdict }
+    : p.cutOff
+      ? cutOffVerdict(result.hit.outcome, p.cutOff)
+      : contest(result.hit, p, opts.reachAt?.(p.fielderNum) ?? 1);
 
   const outcome = stretch(contested, p);
   const hit =
@@ -591,7 +756,10 @@ export function describePlay(
    */
   verdict: Verdict = null,
 ): string {
-  const who = POSITION_WORD[p.fielderNum] ?? 'somebody';
+  // A ground ball through the infield is picked up by an outfielder, but the
+  // man it went PAST is the infielder — "found a hole past center" is not a
+  // sentence about a grounder.
+  const who = POSITION_WORD[p.cutOff?.past ? p.cutOff.num : p.fielderNum] ?? 'somebody';
   const hard = hit.exitVelocity >= 95;
 
   if (verdict === 'robbed') {

@@ -140,7 +140,7 @@ const FPS_PER_MPH = 1.467;
 const G = 32.2;
 
 /** Below this launch angle it is a ball on the ground, not a ball in the air. */
-const GROUND_ANGLE = 10;
+export const GROUND_ANGLE = 10;
 
 /**
  * How far a grounder or a liner keeps going after the range formula is done

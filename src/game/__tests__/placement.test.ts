@@ -20,6 +20,7 @@ import { OUTCOME_TABLES, isHit, type Outcome } from '../../core/hitTables.ts';
 import { makeRng } from '../../core/rng.ts';
 import type { HitResult } from '../../core/hit.ts';
 import { FOUL_BOOST } from '../tuning.ts';
+import { GROUND_ANGLE } from '../plot.ts';
 
 const hit = (over: Partial<HitResult> = {}): HitResult => ({
   outcome: 'single',
@@ -250,6 +251,7 @@ describe('the contest lets geometry decide, without moving the run environment',
     let robbed = 0;
     let dropped = 0;
     let checked = 0;
+    let airborne = 0;
     const badFlag: string[] = [];
     const robbedExtraBase: string[] = [];
 
@@ -276,6 +278,13 @@ describe('the contest lets geometry decide, without moving the run environment',
       // `isHit` across unchanged and was RIGHT to while every flip was hit-to-hit.
       if (after.isHit !== isHit(after.outcome)) badFlag.push(`${h.outcome}->${after.outcome}`);
 
+      // ⚠️ A GROUND BALL IS NOT CONTESTED ANY MORE. cutOff() plays it out —
+      // whoever beats it to his spot has it, table triple or not — so the two
+      // assertions below are about the contest, and the contest is the air.
+      // The ground ball's balance is held by scripts/balance.ts (ZAIS-17).
+      if (h.launchAngle < GROUND_ANGLE) continue;
+      airborne++;
+
       if (out.verdict === 'robbed') {
         robbed++;
         // Only a single is robbable. A double or a triple got past everybody by
@@ -284,7 +293,7 @@ describe('the contest lets geometry decide, without moving the run environment',
       }
       if (out.verdict === 'dropped') dropped++;
     }
-    return { robbed, dropped, checked, badFlag, robbedExtraBase };
+    return { robbed, dropped, checked, airborne, badFlag, robbedExtraBase };
   };
 
   it('flips balls both ways, and never leaves isHit disagreeing with the outcome', () => {
@@ -308,8 +317,8 @@ describe('the contest lets geometry decide, without moving the run environment',
    * calibration. scripts/balance.ts is what actually holds the run environment.
    */
   it('takes away about as many hits as it gives', () => {
-    const { robbed, dropped, checked } = sample();
-    expect(Math.abs(robbed - dropped) / checked).toBeLessThan(0.015);
+    const { robbed, dropped, airborne } = sample();
+    expect(Math.abs(robbed - dropped) / airborne).toBeLessThan(0.015);
   });
 
   it('passes non-contact results straight through', () => {
@@ -483,5 +492,77 @@ describe('the scorer credits exactly the outs that were made', () => {
     expect(scorecard('ground_out', 4, { doublePlay: true, force: 2 })).toBe('4-6-3');
     // The catcher forces at the plate and throws to first. Two outs, no run.
     expect(scorecard('ground_out', 2, { doublePlay: true, force: 4 })).toBe('2-3');
+  });
+});
+
+/**
+ * STEP (a) FOR GROUND BALLS (ZAIS-17). A grounder is fielded by the infielder
+ * who beats it to his spot on its line, and one that beats all of them is a
+ * hit into the outfield. What Zane saw was a centre fielder picking up a
+ * grounder and throwing the man out at first: the chaser was picked where the
+ * ball STOPPED, not where it passed.
+ */
+describe('a ground ball is fielded by the man who cuts it off', () => {
+  const grounder = (over: Partial<HitResult> = {}): HitResult =>
+    hit({ outcome: 'ground_out', isOut: true, isHit: false, exitVelocity: 100, launchAngle: 2, ...over });
+
+  it('a 100mph grounder dead centre is never a ground out to the outfield', () => {
+    const out = withPlacement({ kind: 'in_play', hit: grounder({ direction: 0 }) });
+    const p = out.placement!;
+    if (out.result.kind !== 'in_play') throw new Error('kind changed');
+    // ⚠️ AT EXACTLY 0° THE PITCHER IS ON THE BALL'S LINE, so he is the first
+    // man it reaches and he has it. The middle infielders are the next two.
+    expect([1, 4, 6]).toContain(p.fielderNum);
+    expect(out.result.hit.outcome).toBe('ground_out');
+    expect(p.cutOff!.fielded).toBe(true);
+  });
+
+  it('a 100mph grounder straight at the shortstop or the second baseman is his', () => {
+    for (const [dir, num] of [[-19, 6], [19, 4]] as const) {
+      const p = withPlacement({ kind: 'in_play', hit: grounder({ direction: dir }) }).placement!;
+      expect(p.fielderNum, `${dir}°`).toBe(num);
+      expect(p.cutOff!.fielded).toBe(true);
+    }
+  });
+
+  it('no ground ball, anywhere, is a ground out credited to an outfielder', () => {
+    const rng = makeRng(17);
+    for (let i = 0; i < 4000; i++) {
+      const h = grounder({ exitVelocity: rng.range(55, 118), launchAngle: rng.range(-10, 9.9), direction: rng.range(-44, 44) });
+      const out = withPlacement({ kind: 'in_play', hit: h });
+      if (out.result.kind !== 'in_play') throw new Error('kind changed');
+      const p = out.placement!;
+      if (out.result.hit.outcome === 'ground_out') expect([1, 3, 4, 5, 6]).toContain(p.fielderNum);
+      // Through the infield, the outfielder picks it up and nobody is out.
+      if (p.cutOff!.past) {
+        expect(p.fielderNum).toBeGreaterThanOrEqual(7);
+        expect(out.result.hit.isHit).toBe(true);
+      }
+    }
+  });
+
+  it("raising one infielder's glove never turns a ball he fielded into a hit", () => {
+    const rng = makeRng(29);
+    let checked = 0;
+    for (let i = 0; i < 4000; i++) {
+      const h = grounder({ exitVelocity: rng.range(55, 118), launchAngle: rng.range(-10, 9.9), direction: rng.range(-44, 44) });
+      const base = withPlacement({ kind: 'in_play', hit: h });
+      const cut = base.placement!.cutOff!;
+      if (!cut.fielded) continue;
+      checked++;
+      const better = withPlacement(
+        { kind: 'in_play', hit: h },
+        { reachAt: (n) => (n === cut.num ? 1.4 : 1) },
+      );
+      if (better.result.kind !== 'in_play') throw new Error('kind changed');
+      expect(better.result.hit.outcome, `${h.exitVelocity}mph ${h.direction}°`).toBe('ground_out');
+      expect(better.placement!.cutOff!.fielded).toBe(true);
+    }
+    expect(checked).toBeGreaterThan(1000);
+  });
+
+  it('a ball in the air never gets a cut-off', () => {
+    const p = place(hit({ outcome: 'line_out', launchAngle: 20, exitVelocity: 95 }));
+    expect(p.cutOff).toBeUndefined();
   });
 });
