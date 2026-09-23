@@ -40,6 +40,7 @@ import {
   type Race,
 } from './plot.ts';
 import { SPRITE_SPECS } from './sprites.ts';
+import type { CutOff } from './placement.ts';
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -333,11 +334,22 @@ export interface Replay {
    */
   batterTo?: number;
   /**
-   * Who goes after it, when the geometry cannot say. Only fouls set this —
-   * see raceFor(). Undefined means "ask nearestFielder", which is right for
-   * every ball hit into fair territory.
+   * Who goes after it, when placement.ts has already said. Fouls set it —
+   * see raceFor() — and so does every fair ground ball, because the man who
+   * cut it off is not the man nearest where it would have stopped. Undefined
+   * means "ask nearestFielder", which is right for a ball in the air.
    */
   chaserNum?: number;
+  /**
+   * THE ENGINE'S ANSWER ON A GROUND BALL — who got to it, where on its line,
+   * and when. See cutOff() in placement.ts.
+   *
+   * ⚠️ THE PICTURE DRAWS IT, IT DOES NOT RE-DECIDE IT. Fielded, the ball stops
+   * in his glove at `alongFt` at `ms` and he is there. Through, the infielder
+   * who came closest is drawn `reach` of the way to its line when it passes
+   * him, and the outfielder picks it up.
+   */
+  cutOff?: CutOff;
   /**
    * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
    * earns. Absent is the ordinary hold, which is what a foul and a routine
@@ -397,6 +409,8 @@ export function newReplay(o: {
   batterTo?: number;
   steal?: { from: number; to: number; safe: boolean; speed: number };
   chaserNum?: number;
+  /** Who cut a ground ball off. See Replay.cutOff. */
+  cutOff?: CutOff;
   /**
    * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
    * out of the park. Omitted is the 400-foot bowl.
@@ -433,6 +447,7 @@ export function newReplay(o: {
     ...(o.batterTo === undefined ? {} : { batterTo: o.batterTo }),
     ...(o.steal === undefined ? {} : { steal: o.steal }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
+    ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
   };
@@ -550,7 +565,9 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
   const chaser =
     (r.chaserNum !== undefined ? r.fielders.find((f) => f.num === r.chaserNum) : undefined) ??
     nearestFielder(r.plot.distFt, r.direction);
-  const fieldedAt = REPLAY_CUT_MS + r.plot.hangMs;
+  // A grounder somebody cut off is fielded when the ball reaches HIM, not when
+  // it would have stopped — the engine's own time, on the engine's own clock.
+  const fieldedAt = REPLAY_CUT_MS + (r.cutOff?.fielded ? r.cutOff.ms : r.plot.hangMs);
   return {
     chaser,
     fieldedAt,
@@ -928,7 +945,17 @@ export function drawOverhead(
   // every frame wanders, and real ones break on the ball once.
   const race = raceFor(r);
   const { chaser } = race;
-  const landing = overheadPoint(r.plot.distFt, r.direction, cam.home, cam.pxPerFt);
+  // Where the ball is played: in the glove of the man who cut it off, or where
+  // it finished.
+  const landing = overheadPoint(
+    r.cutOff?.fielded ? r.cutOff.alongFt : r.plot.distFt,
+    r.direction,
+    cam.home,
+    cam.pxPerFt,
+  );
+  // The infielder a grounder got past, diving at its line and arriving late by
+  // the engine's number. See Replay.cutOff.
+  const beaten = r.cutOff && !r.cutOff.fielded ? r.cutOff : undefined;
   const relaying = needsRelay(r, chaser);
   // Fielder clocks run from CONTACT, not from the cut — `t` above is the
   // ball's flight time and they are 220ms apart.
@@ -948,7 +975,10 @@ export function drawOverhead(
     let to = post;
     let k2 = 0;
 
-    if (role === 'chase') {
+    if (beaten?.num === f.num && role !== 'chase' && role !== 'relay') {
+      to = overheadPoint(beaten.alongFt, r.direction, cam.home, cam.pxPerFt);
+      k2 = beaten.reach * leg(REPLAY_CUT_MS + beaten.ms);
+    } else if (role === 'chase') {
       to = landing;
       // A booted ball is one he GOT to — he just did not hold it. Reaching
       // short of it would read as him giving up, which is a different play.
@@ -970,7 +1000,7 @@ export function drawOverhead(
     }
 
     const p = { x: post.x + (to.x - post.x) * k2, y: post.y + (to.y - post.y) * k2 };
-    const busy = role !== 'shade';
+    const busy = role !== 'shade' || beaten?.num === f.num;
 
     // His own art (`assets/fielders/hu1.png`), his position's
     // (`assets/fielders/6.png`), or one `_default.png` for all nine. The man who
@@ -1075,6 +1105,9 @@ export function ballShare(r: Replay, t: number): number {
   // ⚠️ groundEase() IS THE ENGINE'S CURVE TOO — plot.ts groundBallMs() is its
   // inverse, and placement.ts decides who cut the ball off with it.
   if (r.plot.ground) kBall = groundEase(kBall);
+  // It stops in the glove that fielded it — unless he boots it, and then it
+  // rolls on past him the way it always did.
+  if (r.cutOff?.fielded && !r.error) kBall = Math.min(kBall, r.cutOff.alongFt / r.plot.distFt);
   return kBall;
 }
 

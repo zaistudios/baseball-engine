@@ -2292,11 +2292,13 @@ function completePlay(
           // so the relay's bag has to come straight off the roll.
           forceAt: forceBag(result, fielding) ?? fielding?.forceAt,
           error: !!fielding?.error,
-          // Only a foul out sets this, and only because nobody stands in foul
-          // ground for nearestFielder() to find. See raceFor().
-          ...(result.hit.outcome === 'foul_out' && placed.placement
+          // A foul out sets this because nobody stands in foul ground for
+          // nearestFielder() to find, and a ground ball because the man who cut
+          // it off is not the man nearest where it stopped. See raceFor().
+          ...((result.hit.outcome === 'foul_out' || placed.placement?.cutOff) && placed.placement
             ? { chaserNum: placed.placement.fielderNum }
             : {}),
+          ...(placed.placement?.cutOff ? { cutOff: placed.placement.cutOff } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           // The scorers go in the same list: a man who came all the way home
           // is a runner who covered more bags, not a different kind of thing.
@@ -3141,6 +3143,10 @@ if (import.meta.env.DEV) {
     direction = -18,
     extra: Partial<Parameters<typeof newReplay>[0]> = {},
   ) => {
+    // A ground ball is drawn the way the engine played it — who cut it off,
+    // where, when. The hook still draws the outcome it was HANDED, so ask for
+    // one the cut-off agrees with or the picture and the caption will not.
+    const cut = place({ outcome, exitVelocity, launchAngle, direction } as never, game.home.park);
     replay = newReplay({
       now: performance.now(),
       outcome,
@@ -3152,6 +3158,7 @@ if (import.meta.env.DEV) {
       // The debug hook draws the park the game is actually in, or the field
       // under the ball would not be the one it was plotted against.
       wallFt: wallAt(direction, game.home.park),
+      ...(cut.cutOff ? { chaserNum: cut.fielderNum, cutOff: cut.cutOff } : {}),
       ...extra,
     });
     // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.

@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, type Replay } from '../overhead.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
+import { withPlacement } from '../placement.ts';
 import { overheadPoint, groundBallMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
 import { manned, assignPositions } from '../defense.ts';
 import { HOME } from '../teams.ts';
@@ -302,5 +303,56 @@ describe("the grounder's clock", () => {
         expect(drawn, `${ev}mph at ${d.toFixed(0)}ft`).toBeCloseTo(d, 6);
       }
     }
+  });
+});
+
+/**
+ * THE PICTURE DRAWS THE ENGINE'S GROUND BALL (ZAIS-17). The man who cut it off
+ * is the chaser, the ball stops in his glove at his spot, and he fields it at
+ * the engine's time. A ball through the infield goes to an outfielder, who has
+ * no play at first.
+ */
+describe('a grounder is drawn where the engine played it', () => {
+  const grounder = (direction: number) => {
+    const hit = {
+      outcome: 'ground_out', isOut: true, isHit: false, exitVelocity: 100, launchAngle: 2,
+      direction, timing: 'good', pitchType: 'fastball', platoon: 1, stance: 'normal', clutchApplied: false,
+    } as const;
+    const placed = withPlacement({ kind: 'in_play', hit });
+    const p = placed.placement!;
+    const out = placed.result.kind === 'in_play' ? placed.result.hit.outcome : 'ground_out';
+    return {
+      p,
+      r: newReplay({
+        now: 0, outcome: out, exitVelocity: 100, launchAngle: 2, direction,
+        speed: 1, safe: out !== 'ground_out', chaserNum: p.fielderNum, cutOff: p.cutOff!,
+      }),
+    };
+  };
+
+  it('fielded: in his glove, at his spot, at the engine’s time', () => {
+    const { p, r } = grounder(-19);
+    const race = raceFor(r);
+    expect(race.chaser.num).toBe(6);
+    expect(race.fieldedAt).toBe(REPLAY_CUT_MS + p.cutOff!.ms);
+    // Long after, the ball is still where he caught it, not where it would
+    // have rolled to.
+    expect(ballShare(r, 5000) * r.plot.distFt).toBeCloseTo(p.cutOff!.alongFt, 6);
+    expect(race.throwMs).not.toBeNull();
+  });
+
+  it('through: an outfielder picks it up and nobody throws to first', () => {
+    // Find a 100mph ball that got through; the tuning decides which angle.
+    let found = false;
+    for (let d = -40; d <= 40 && !found; d += 1) {
+      const { p, r } = grounder(d);
+      if (!p.cutOff!.past) continue;
+      found = true;
+      const race = raceFor(r);
+      expect(race.chaser.num).toBeGreaterThanOrEqual(7);
+      expect(race.throwMs).toBeNull();
+      expect(p.cutOff!.reach).toBeLessThan(1);
+    }
+    expect(found).toBe(true);
   });
 });
