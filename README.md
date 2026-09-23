@@ -188,7 +188,10 @@ src/game/
   tuning.ts      the knobs somebody will actually want to turn
 
   ...and the four that came out of src/web/ when the run was revoked:
-  swing.ts       the bat as a physical object — the level arc, and its geometry
+  swing.ts       the bat as a physical object — the level arc, its geometry,
+                 and THE strike zone: main.ts derives its rect from here
+  flight.ts      the ball in the at-bat view, once it is no longer a pitch —
+                 three numbers off the verdict, projected. Decides nothing
   plot.ts        where a batted ball lands, for the overhead replay
   overhead.ts    the replay itself — the cut, the nine, the race to first
   sprites.ts     the BALL and the FIELD, out of assets/ at build time.
@@ -348,6 +351,63 @@ all, so there is nothing for a face to leak through.
 a `crest: 3` indexed against a list of two, clamped at the draw to something
 nobody picked.
 
+✅ **The ball comes off the bat — 2026-09-20.** `drawBall()` was gated on
+`phase === 'windup'`, and the phase flips the instant the ball reaches the plate.
+So the ball **vanished in mid-air on every single pitch**, three different ways:
+hit fair, it disappeared on contact; fouled, it disappeared on contact; taken or
+swung through, it winked out somewhere over the plate on its way to a catcher
+who has been drawn crouching with a mitt since 09-15 and had never caught
+anything. Then the camera cut to an overhead where a ball already existed over
+the outfield.
+
+⚠️ **THE WINDOW WAS ALREADY OPEN AND ALREADY PAID FOR.** The comment on
+`REPLAY_CUT_MS` had been describing this feature since before it existed — *"the
+crack of the bat and the ball starting to leave are worth seeing from behind the
+plate, and cutting on contact throws away the one frame the swing paid for"* —
+and nothing was drawn in it. This adds **no hold time**: `scripts/scenes.ts`
+still prints 5.91 s/game and `14748 measured == 14748 played`.
+
+**The picture is derived from the verdict, never the other way round.**
+`atBat.lastSwing` carries `outcome`, `exitVelocity`, `launchAngle` and
+`direction` the moment `swingAt()` returns, before a pixel is drawn. `flight.ts`
+turns those three numbers into a point and decides **nothing** — no roll, no hit
+detection, no reading of where the bat happens to have been drawn. A second
+model that decided an outcome from a picture is two systems that can disagree,
+and the box score is written from the other one.
+
+⚠️ **THE SIGN CONVENTION IS THE ONE THAT BREAKS SILENTLY.** The camera cuts
+300ms later and both pictures are of the same batted ball, so a ball that leaves
+to screen-left and lands in right field is worse than no ball at all — and every
+test in the project would still pass. `direction` is in field degrees and
+`hit.ts` has **already** signed it for the batter's hand, so `flight.ts` is
+deliberately blind to handedness; applying it a second time mirrors every
+left-hander. `flight.test.ts` holds `battedAt()` and `overheadPoint()` to the
+same sign, across the range and through real swings from both hands.
+
+⚠️ **ONE PERSPECTIVE, SHARED WITH THE PITCH.** Everything converges on the
+release point above the mound, and `drawBall()`'s `t` **is** `flight.ts`'s `k` —
+which is why the ball is the same size in the same place the frame after contact
+as the frame before. The speed scale is a stated tuning constant, not physics:
+this canvas holds about nine feet across the plate and a real 100mph ball clears
+it in twelve milliseconds, so real scale draws one frame and then an empty
+screen.
+
+**And it finishes somewhere.** A take, a check and a swing-and-miss all
+decelerate into the catcher's mitt and stay there until the next delivery. A
+called strike and a ball are the same drawing — the umpire's word is a caption,
+not a trajectory. A chopper reaches the dirt and skips out along it; there is no
+bounce model here, because `overhead.ts` owns hops, friction and hang time three
+hundred milliseconds from now.
+
+⚠️ **THE LEGACY YELLOW ARC IS GONE, AND IT WAS CARRYING SOMETHING.**
+`ctx.arc(210, PLATE_Y - 30, 62, …)` was the swing instrument from before there
+was a swing to look at, drawn *under* the real bat — two bats on one screen. It
+was also the only thing that drew the **check swing's retreat**, so the real bat
+completed a full swing on a pitch already scored as a take. Deleting the arc made
+that visible; it was true beforehand, hidden under a second bat. `drawHitter()`
+winds the pose clock backwards on a check now, which walks the table load-wards
+— a barrel being pulled in, on the bat a person is actually watching.
+
 ✅ **The swing swings — 2026-09-19.** `swing.ts` has had a real keyframe rig
 since the roguelike: five poses, `poseAt()` lerping between them, timing as
 acceleration in the keyframe spacing, 38 tests. `BatPose` carries six fields and
@@ -372,14 +432,27 @@ drawn barrel off the pose the engine grades. The preview derives its fit from
 `barrelOf(REST_POSE)` rather than a typed-in number, so re-authoring the swing
 re-fits the panel instead of quietly shaving the barrel.
 
-⚠️ **THE BARREL CROSSES THE BOTTOM OF THE ZONE, AND THAT IS THE VIEW'S DOING.**
-In the roguelike the zone's bottom edge *is* the plate line and the batter's feet
-are on it, so the contact barrel lands dead centre. Here the zone is drawn 24px
-above the plate and 108 tall while the batter's feet are 14px **below** it, so at
-1:1 the barrel crosses about three-quarters of the way down the zone. Moving the
-bat up to meet it puts his hands above his head. It is the zone and the batter
-that disagree, not the bat and the pose — recorded here rather than papered over
-with an offset.
+✅ **THERE WERE TWO STRIKE ZONES AND THEY DISAGREED BY THIRTY PIXELS — fixed
+2026-09-20.** The note here used to record this as the view's doing and leave it:
+*"the barrel crosses the bottom of the zone... moving the bat up to meet it puts
+his hands above his head."* Both halves of that were true and the conclusion was
+wrong. `swing.ts` has carried `ZONE_DY/ZONE_HALF_W/ZONE_HALF_H` since the pose
+table was written and `swing.test.ts` asserts the graded barrel lands inside
+**that** rectangle; `main.ts` drew a **different** one, hard-coded, thirty pixels
+higher. 1,239 tests were green throughout, because the only zone the suite could
+reach was the one nothing was ever drawn against.
+
+What a person saw: the zone floating 24px above the plate, in-zone pitches
+crossing y148-196, and the barrel coming through at y203 — **under every strike
+in the game**. The bat passed beneath the ball on a perfect swing and the banner
+said he had squared it up.
+
+`main.ts` derives its rect from `swing.ts` now. The zone lands at x155-265,
+y154-250: its bottom edge is the plate line, which is where the roguelike has
+always had it and the reason the roguelike never had this problem. The barrel
+sits 0.6px off dead centre. Everything hung off the zone came with for free —
+the pitching reticle, `spotXY()`, the call grid, the ball's whole flight path
+all read that rect already.
 
 ⚠️ **`__swingGhosts()`** in the dev console freezes every pose at once over the
 live batter. The swing is 340ms and only happens when you swing, which is not
