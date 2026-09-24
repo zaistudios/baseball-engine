@@ -674,6 +674,26 @@ export function runToFirstMs(speed: number): number {
 }
 
 /**
+ * A man on base is already moving when the ball is hit, so a bag costs him
+ * less than the ninety feet out of the box costs the hitter.
+ */
+export const RUNNING_START = 0.86;
+
+/**
+ * A RUNNER'S CLOCK — ms from contact for a man of `speed` to get from bag
+ * `from` to bag `to`, counted the way runnerPoint() counts: 0 is the box, 1
+ * first, 4 the plate. Anyone already on base gets his running start.
+ *
+ * ⚠️ IT LIVED IN overhead.ts, AS A PICTURE'S CLOCK. Moved here when the force
+ * play started being decided from it (ZAIS-21): the engine asks when the man
+ * from first reaches second, and the replay draws him arriving then. One
+ * function, so the two cannot disagree.
+ */
+export function runnerMs(speed: number, from: number, to: number): number {
+  return runToFirstMs(speed) * (from > 0 ? RUNNING_START : 1) * (to - from);
+}
+
+/**
  * How much the throw beats him by — or misses him by.
  *
  * THE DRAMA LIVES HERE. The same `ground_out` should be routine for a 0.60

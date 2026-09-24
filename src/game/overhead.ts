@@ -26,7 +26,7 @@ import {
   chaseReach,
   hasPlayAtFirst,
   raceTiming,
-  runToFirstMs,
+  runnerMs,
   playCues,
   roleFor,
   relayFor,
@@ -1233,7 +1233,7 @@ function drawSteal(
 
   // The runner. He is off at the pitch, so his clock starts at zero, and he
   // stops dim on the bag he did not get.
-  const runMs = runToFirstMs(steal.speed) * RUNNING_START;
+  const runMs = runnerMs(steal.speed, steal.from, steal.to);
   const k = Math.min(1, t / runMs);
   drawRunnerDot(ctx, opts, cam, steal.from, steal.to, k, !steal.safe && t > runMs);
 
@@ -1276,12 +1276,6 @@ function drawSteal(
 }
 
 /**
- * A man on base is already moving when the ball is hit, so a bag costs him
- * less than the ninety feet out of the box costs the hitter.
- */
-const RUNNING_START = 0.86;
-
-/**
  * The lead: off the bag and back on it, for a runner who is going nowhere.
  *
  * Twelve feet of ninety, out and back over the first second — a real primary
@@ -1290,6 +1284,16 @@ const RUNNING_START = 0.86;
  */
 const LEAD_LEG = 0.13;
 const leadOff = (t: number): number => Math.sin(Math.min(1, t / 900) * Math.PI) * LEAD_LEG;
+
+/**
+ * A RUNNER'S TRIP AS THE REPLAY DRAWS IT: runnerMs() — the engine's clock —
+ * capped to land him before the camera cuts back. The cap only bites on a man
+ * running three bags; on the one bag a force is decided over it never does.
+ */
+export function tripFor(r: Replay, speed: number, from: number, to: number): number {
+  const onScreen = replayLength(r) - REPLAY_FADE_MS;
+  return Math.min(runnerMs(speed, from, to), Math.max(onScreen, raceFor(r).runMs));
+}
 
 /**
  * The race to first, the relay on a double play, and everyone else moving up.
@@ -1342,8 +1346,7 @@ function drawRace(
    */
   // Named, not `window`: this file runs in a browser and that name is taken.
   const onScreen = replayLength(r) - REPLAY_FADE_MS;
-  const trip = (speed: number, legs: number): number =>
-    Math.min(runToFirstMs(speed) * RUNNING_START * legs, Math.max(onScreen, runMs));
+  const trip = (speed: number, from: number, to: number): number => tripFor(r, speed, from, to);
 
   /**
    * The man gunned down going for one too many, and where he set off from.
@@ -1363,7 +1366,7 @@ function drawRace(
       : {
           at: r.thrownOut.at,
           from: r.thrownOut.at - 1 - basesFor(r.outcome),
-          ms: trip(r.thrownOut.speed, 1 + basesFor(r.outcome)),
+          ms: trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
         };
 
   /**
@@ -1412,7 +1415,7 @@ function drawRace(
   for (const m of r.moves) {
     const from = m.from + 1;
     const to = m.to + 1;
-    drawRunnerDot(ctx, opts, cam, from, to, t / trip(m.speed, to - from));
+    drawRunnerDot(ctx, opts, cam, from, to, t / trip(m.speed, from, to));
   }
 
   // The man gunned down going for one too many. He runs it exactly like the

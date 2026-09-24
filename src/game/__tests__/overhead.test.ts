@@ -8,9 +8,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, tripFor, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
 import { withPlacement } from '../placement.ts';
-import { overheadPoint, groundBallMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
+import { overheadPoint, groundBallMs, runnerMs, runToFirstMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
 import { manned, assignPositions } from '../defense.ts';
 import { HOME } from '../teams.ts';
 
@@ -354,5 +354,26 @@ describe('a grounder is drawn where the engine played it', () => {
       expect(p.cutOff!.reach).toBeLessThan(1);
     }
     expect(found).toBe(true);
+  });
+});
+
+describe('a runner has one clock', () => {
+  // The engine decides forces from runnerMs(); the replay draws the man with
+  // tripFor(). If they drift, a runner is drawn beating a throw the book says
+  // beat him. ZAIS-21 step 1.
+  const r = newReplay({
+    now: 0, outcome: 'ground_out', exitVelocity: 90, launchAngle: 2, direction: -19,
+    speed: 1, safe: false,
+  });
+  for (const speed of [0.7, 1, 1.4]) {
+    it(`the overhead draws a man at ${speed} on the engine's clock`, () => {
+      for (const [from, to] of [[1, 2], [2, 3], [3, 4]] as const) {
+        expect(tripFor(r, speed, from, to)).toBe(runnerMs(speed, from, to));
+      }
+    });
+  }
+  it('a man on base has a running start; the batter does not', () => {
+    expect(runnerMs(1, 0, 1)).toBe(runToFirstMs(1));
+    expect(runnerMs(1, 1, 2)).toBeLessThan(runToFirstMs(1));
   });
 });
