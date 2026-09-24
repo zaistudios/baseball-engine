@@ -27,7 +27,10 @@ import {
   SEND_THRESHOLD,
 } from '../running.ts';
 import { HOME, AWAY } from '../teams.ts';
-import { newGame, recordPlay, type GameState } from '../game.ts';
+import { newGame, recordPlay, currentPitcher, fieldingSide, battingSide, fieldingStaff, type GameState } from '../game.ts';
+import { playAiAtBat, autoCaller } from '../sim.ts';
+import { newRead } from '../ai.ts';
+import { fatigue } from '../bullpen.ts';
 import { makeRng } from '../../core/rng.ts';
 import type { HitResult } from '../../core/hit.ts';
 import type { Player } from '../../core/roster.ts';
@@ -418,5 +421,38 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
     expect(raced.clock).toBeDefined();
     expect(raced.forceAt).toBe(2);
     expect(fieldBall(hit, a, opts, makeRng(3)).clock).toBeUndefined();
+  });
+});
+
+/**
+ * THE PLAYTEST, TWICE: a man scoring from second on a groundout. A retired
+ * batter on a ground ball can only ever bring in the man from third — nobody
+ * sends a runner home from second on an infield out. Run over a seeded
+ * season of real at-bats so the whole path is in it: placement, the race,
+ * the error roll, groundOut()'s sends and the book. ZAIS-21 step 6.
+ */
+describe('nobody scores from second on a groundout', () => {
+  it('holds over a seeded season', () => {
+    let groundOuts = 0;
+    let withTwo = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      const rng = makeRng(seed);
+      let g = newGame(seed % 2 ? HOME : AWAY, seed % 2 ? AWAY : HOME, 9);
+      const books = { home: newRead(), away: newRead() };
+      for (let n = 0; !g.over && n < 200; n++) {
+        const caller = autoCaller(currentPitcher(g), books[fieldingSide(g)], rng, fatigue(fieldingStaff(g)));
+        const out = playAiAtBat(g, caller, books[battingSide(g)], rng);
+        g = out.game;
+        const { log, atBat } = out;
+        const retired = !log.after.some((b) => b?.name === log.batter.name);
+        if (atBat.outcome !== 'ground_out' || atBat.error || !retired) continue;
+        groundOuts++;
+        if (log.before[1]) withTwo++;
+        expect(log.runs, `seed ${seed}`).toBeLessThanOrEqual(log.before[2] ? 1 : 0);
+      }
+    }
+    // It has to have seen the play it is about.
+    expect(groundOuts).toBeGreaterThan(1000);
+    expect(withTwo).toBeGreaterThan(100);
   });
 });
