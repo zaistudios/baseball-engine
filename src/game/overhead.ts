@@ -42,6 +42,7 @@ import {
 } from './plot.ts';
 import { SPRITE_SPECS } from './sprites.ts';
 import type { CutOff } from './placement.ts';
+import type { GroundClock } from './defense.ts';
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -352,6 +353,13 @@ export interface Replay {
    */
   cutOff?: CutOff;
   /**
+   * THE ARRIVAL TIMES A FIELDED GROUNDER WAS DECIDED ON — groundRace() in
+   * defense.ts. When it is here the race is drawn from it and raceTiming()
+   * is not asked: the ball lands at each bag when the engine said, the forced
+   * man runs at his own pace, and nobody is stretched to lose.
+   */
+  clock?: GroundClock;
+  /**
    * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
    * earns. Absent is the ordinary hold, which is what a foul and a routine
    * grounder get.
@@ -412,6 +420,8 @@ export function newReplay(o: {
   chaserNum?: number;
   /** Who cut a ground ball off. See Replay.cutOff. */
   cutOff?: CutOff;
+  /** The engine's arrival times on a fielded grounder. See Replay.clock. */
+  clock?: GroundClock;
   /**
    * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
    * out of the park. Omitted is the 400-foot bowl.
@@ -449,6 +459,7 @@ export function newReplay(o: {
     ...(o.steal === undefined ? {} : { steal: o.steal }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
+    ...(o.clock === undefined ? {} : { clock: o.clock }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
   };
@@ -565,6 +576,18 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
   // A grounder somebody cut off is fielded when the ball reaches HIM, not when
   // it would have stopped — the engine's own time, on the engine's own clock.
   const fieldedAt = REPLAY_CUT_MS + (r.cutOff?.fielded ? r.cutOff.ms : r.plot.hangMs);
+  // ⚠️ A RACED GROUNDER IS DRAWN FROM THE ENGINE'S NUMBERS, NOT RE-TIMED. The
+  // stretch in raceTiming() exists to make the picture agree with a die; here
+  // the clocks decided the play, so they already agree.
+  if (r.clock) {
+    return {
+      chaser,
+      fieldedAt: r.clock.fieldedMs,
+      runMs: r.clock.batterMs,
+      throwMs: r.clock.firstMs,
+      relayMs: r.clock.leadMs,
+    };
+  }
   return {
     chaser,
     fieldedAt,
@@ -968,7 +991,8 @@ export function drawOverhead(
 
   for (const f of r.fielders) {
     const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
-    const role = roleFor(f, chaser, r.doublePlay, relaying);
+    // A plain force at second has a man on the bag too, not only a double play.
+    const role = roleFor(f, chaser, r.doublePlay || r.forceAt === 2, relaying);
     let to = post;
     let k2 = 0;
 
@@ -1374,7 +1398,10 @@ function drawRace(
   // ⚠️ HOW FAR THE BATTER RUNS, HOISTED ABOVE THE THROWS. Both the ball and the
   // man have to be worked out from one pair of numbers, or a throw lands at a
   // bag the runner is still two hundred milliseconds from reaching.
-  const bases = r.batterTo ?? basesFor(r.outcome);
+  // ⚠️ HE RUNS OUT EVERY GROUNDER. The book puts a retired batter nowhere —
+  // batterTo is 0 on a groundout and a double play — and the picture read
+  // that as "he never left the box", which is what the playtest saw.
+  const bases = Math.max(r.batterTo ?? basesFor(r.outcome), r.plot.ground && !isFoul(r) ? 1 : 0);
   const stretchedOut = r.thrownOut?.batter === true;
   const tripMs = bases === 1 ? runMs : Math.min(runMs * bases, onScreen);
 
@@ -1426,7 +1453,11 @@ function drawRace(
   // the base state, so he is in neither list above — he has to be drawn from
   // the fact of the play itself. He stops dead at second when the throw beats
   // him, which IS the out.
-  if ((r.doublePlay || r.forceAt !== undefined) && relayMs !== null) {
+  if (r.clock?.runnerMs != null && relayMs !== null) {
+    // ⚠️ RACED: HE RUNS AT HIS OWN PACE AND THE BALL GETS THERE FIRST. He is
+    // short of the bag when it lands, and he stops there, out.
+    drawRunnerDot(ctx, opts, cam, forceAt - 1, forceAt, Math.min(t, relayMs) / r.clock.runnerMs, t > relayMs);
+  } else if ((r.doublePlay || r.forceAt !== undefined) && relayMs !== null) {
     // ⚠️ THE LEG HE WAS ACTUALLY RUNNING, not first-to-second every time. A man
     // forced at third came from second and a man forced at the plate came from
     // third; drawing all three of them breaking out of first put a runner on a
@@ -1503,7 +1534,9 @@ function drawRace(
   // ⚠️ HOW FAR HE ACTUALLY GOT, not how far the hit was worth. A stretched
   // single leaves him on second and a stretch he lost leaves him dead at it.
   const tripK = Math.min(caught ? 0.55 : 1, t / tripMs);
-  drawRunnerDot(ctx, opts, cam, 0, bases, tripK, stretchedOut && t > tripMs);
+  // Out at first: dimmed when the throw lands, which on a race is before he gets there.
+  const outAtFirst = !r.safe && r.plot.ground && throwMs !== null && t > throwMs;
+  drawRunnerDot(ctx, opts, cam, 0, bases, tripK, (stretchedOut && t > tripMs) || outAtFirst);
 
   // The calls. A double play gets two, each landing when its own throw does,
   // which is what makes 6-4-3 read as two outs rather than one long one.

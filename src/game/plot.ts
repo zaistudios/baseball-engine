@@ -802,7 +802,9 @@ export const MIN_THROW_MS = 140;
  *   0.75    4.17   8.40   0.85    1.97     0.61    0.0%
  *   0.80    4.12   8.33   0.86    1.96     0.60    0.0%
  *
- * 0.65 is the slowest arm that lands all five inside ZAIS-21's bands.
+ * 0.65 is the slowest arm that lands all five inside ZAIS-21's bands. Once the
+ * pivot at second became coverFor()'s man (the one the replay draws), it read
+ * 4.17 runs, 8.52 hits, 0.86 DP, 1.99 force outs, 0.61 errors.
  *
  * ⚠️ FORCE OUTS SIT AT THE TOP OF THEIR BAND AT EVERY SPEED. The pivot, not
  * the throw, decides them: the second baseman reaches the bag within a few ms
@@ -867,6 +869,12 @@ export interface Race {
  *
  * `fieldedAt` is when the chaser reaches the ball, measured from contact — the
  * caller owns that because it depends on the camera's cut timing.
+ *
+ * ⚠️ NOT FOR A GROUNDER SOMEBODY FIELDED, ANY MORE. Those are decided from the
+ * clocks in defense.ts's groundRace() and the replay draws its numbers
+ * (Replay.clock, ZAIS-21): nothing to stretch, because nothing was rolled.
+ * This is what is left — a booted ball, a bunt, a ball nobody got to, the
+ * debug hook, and every caller that has no clock.
  */
 export function raceTiming(opts: {
   speed: number;

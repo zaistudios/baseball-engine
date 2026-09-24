@@ -44,6 +44,7 @@ import type { Rng } from '../core/rng.ts';
 import {
   plotBatted,
   nearestFielder,
+  coverFor,
   feetXY,
   bagFeet,
   throwArrivalMs,
@@ -256,9 +257,13 @@ export interface GroundClock {
   firstMs: number | null;
 }
 
-/** Who takes the throw at a force bag and turns it: the pivot. */
+/**
+ * Who takes the throw at a force bag and turns it: the pivot. Second is
+ * coverFor()'s answer, the man the replay draws running there, so the one
+ * the engine times and the one on screen are the same man.
+ */
 const pivotAt = (bag: ForceBag, fielderNum: number): number =>
-  bag === 2 ? (fielderNum === 4 ? 6 : 4) : bag === 3 ? 5 : 2;
+  bag === 2 ? coverFor(1, { num: fielderNum, distFt: 0, dirDeg: 0 }) : bag === 3 ? 5 : 2;
 
 /**
  * THE PIVOT'S CLOCK — ms from contact, on the race's clock, until the man

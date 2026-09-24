@@ -2304,6 +2304,8 @@ function completePlay(
             ? { chaserNum: placed.placement.fielderNum }
             : {}),
           ...(placed.placement?.cutOff ? { cutOff: placed.placement.cutOff } : {}),
+          // The times the race was decided on, so the picture draws them.
+          ...(fielding?.clock ? { clock: fielding.clock } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           // The scorers go in the same list: a man who came all the way home
           // is a runner who covered more bags, not a different kind of thing.

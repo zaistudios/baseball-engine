@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, tripFor, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
 import { withPlacement } from '../placement.ts';
 import { overheadPoint, groundBallMs, runnerMs, runToFirstMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
-import { manned, assignPositions } from '../defense.ts';
+import { manned, assignPositions, groundRace } from '../defense.ts';
 import { HOME } from '../teams.ts';
 
 /** Both screens, plus a deliberately awkward one. */
@@ -282,6 +282,51 @@ describe('the men in the replay', () => {
     // Eight of the nine: the pitcher is not in a DH league's order.
     expect(new Set(named).size).toBe(8);
     expect(named).toContain(assignPositions(HOME.lineup).SS!.name);
+  });
+
+  /**
+   * THE PLAYTEST: "during double plays the batter does not run to first". The
+   * book leaves a retired batter nowhere (batterTo 0) and the replay drew him
+   * standing in the box. ZAIS-21 step 5.
+   */
+  describe('a clocked 6-4-3', () => {
+    const hit = { outcome: 'ground_out', isHit: false, isOut: true, exitVelocity: 85, launchAngle: 2, direction: -19 } as never;
+    const p = withPlacement({ kind: 'in_play', hit }).placement!;
+    const race = groundRace({
+      cut: p.cutOff!, dirDeg: p.dirDeg, arm: 1, armAt: () => 1, reachAt: () => 1,
+      batterSpeed: 0.7, bases: [{ name: 'R', speed: 1 }, null, null], outs: 0,
+    });
+    const r = newReplay({
+      now: 0, outcome: 'ground_out', exitVelocity: 85, launchAngle: 2, direction: -19,
+      speed: 0.7, safe: false, doublePlay: true, forceAt: 2, batterTo: 0,
+      chaserNum: p.fielderNum, cutOff: p.cutOff!, clock: race.clock,
+    });
+
+    it('is a double play on the clocks', () => {
+      expect(race.doublePlay).toBe(true);
+    });
+
+    it('draws the engine’s times, nobody stretched', () => {
+      const drawn = raceFor(r);
+      expect(drawn.runMs).toBe(race.clock.batterMs);
+      expect(drawn.relayMs).toBe(race.clock.leadMs);
+      expect(drawn.throwMs).toBe(race.clock.firstMs);
+      // The ball beats both men to their bags.
+      expect(drawn.relayMs!).toBeLessThan(race.clock.runnerMs!);
+      expect(drawn.throwMs!).toBeLessThan(drawn.runMs);
+    });
+
+    it('has the batter AND the forced man running', () => {
+      const { ctx } = stub();
+      const running: number[] = [];
+      drawOverhead(ctx, makeCam(420, 340), r, race.clock.leadMs! - 50, {
+        ...PALETTE,
+        figure: (_c, o) => {
+          if (o.side === 'batting' && (o.phase ?? 0) !== 0) running.push(o.x);
+        },
+      });
+      expect(running).toHaveLength(2);
+    });
   });
 });
 
