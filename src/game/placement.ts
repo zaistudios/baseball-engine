@@ -408,6 +408,91 @@ export function cutOff(
   return pick(near, true);
 }
 
+// ------------------------------------------------------------ the fly ball
+
+/**
+ * HOW FAST A FIELDER GETS TO WHERE A BALL IN THE AIR COMES DOWN — feet per
+ * replay millisecond for a glove of 1.0. INFIELD_RANGE's twin, on the same
+ * kind of clock: the ball's is `plot.hangMs`, the pacing the overhead flies it
+ * at, so a man drawn at this speed arrives when the box score says he did.
+ *
+ * TUNING TABLE GOES HERE — see step 3.
+ */
+export const AIR_RANGE = 0.05;
+
+/** Arrive with this much of the ball's hang to spare and he is waiting under it. */
+export const CAMP_MS = 350;
+
+/**
+ * A man who has made this share of his run when the ball comes down lays out
+ * for it and catches it. Below it, it drops in front of him.
+ */
+export const DIVE_REACH = 0.9;
+
+export type CatchHow = 'camped' | 'running' | 'diving';
+
+/** Who got to a ball in the air, or who came closest, and how. */
+export interface AirCatch {
+  /** Scorer's number of the man who caught it — or, when nobody did, who came closest. */
+  num: number;
+  /** Contact-clock ms he got to the spot, or the ball's hang when he did not. */
+  ms: number;
+  /** Share of his run made when the ball came down. 1 when he got there. */
+  reach: number;
+  caught: boolean;
+  /** How it was caught. Null when it dropped. */
+  how: CatchHow | null;
+}
+
+/**
+ * STEP (a) FOR BALLS IN THE AIR: does anybody get there?
+ *
+ * Every fielder runs straight at the landing spot and arrives at
+ * `REACTION_MS + runFt / (AIR_RANGE × glove)`. The ball arrives at
+ * `plot.hangMs`. First man there has it; with room to spare he camped, without
+ * it he took it running. Nobody there, and the man who came closest dives if he
+ * had made DIVE_REACH of his run.
+ *
+ * ⚠️ ONE CLOCK. hangMs is the picture's clock, not real hang time, and it is
+ * clamped 900-2600ms in plot.ts. ponytail: the clamp means a towering pop and a
+ * very high fly hang the same 2.6s here — give the engine real flight time only
+ * if the picture gets it too, or the two will disagree about who camped.
+ *
+ * No new RNG and no new ratings. Nothing here rolls; it measures.
+ */
+export function catchFly(
+  plot: Plot,
+  dirDeg: number,
+  fielders: readonly Fielder[],
+  reachAt: (fielderNum: number) => number,
+): AirCatch {
+  const ball = feetXY(plot.distFt, dirDeg);
+  const hang = plot.hangMs;
+  const best = fielders
+    .map((f) => {
+      const p = feetXY(f.distFt, f.dirDeg);
+      const runFt = Math.hypot(p.x - ball.x, p.y - ball.y);
+      const speed = AIR_RANGE * reachAt(f.num);
+      const runMs = REACTION_MS + runFt / speed;
+      const reach = runFt === 0 ? 1 : Math.max(0, Math.min(1, ((hang - REACTION_MS) * speed) / runFt));
+      return { num: f.num, runMs, reach };
+    })
+    // Earliest arrival is also the highest reach, so one sort answers both.
+    .sort((a, b) => a.runMs - b.runMs)[0]!;
+
+  if (best.runMs <= hang) {
+    return {
+      num: best.num,
+      ms: best.runMs,
+      reach: 1,
+      caught: true,
+      how: hang - best.runMs >= CAMP_MS ? 'camped' : 'running',
+    };
+  }
+  const diving = best.reach >= DIVE_REACH;
+  return { num: best.num, ms: hang, reach: best.reach, caught: diving, how: diving ? 'diving' : null };
+}
+
 /**
  * Extra bases, decided by where it landed.
  *

@@ -14,13 +14,16 @@ import {
   GAP_FT,
   AT_HIM_FT,
   TRIPLE_GAP_FT,
+  catchFly,
+  AIR_RANGE,
+  DIVE_REACH,
 } from '../placement.ts';
 import { directionFor, applyFoul, resolveSwing, type SwingInput } from '../../core/hit.ts';
 import { OUTCOME_TABLES, isHit, type Outcome } from '../../core/hitTables.ts';
 import { makeRng } from '../../core/rng.ts';
 import type { HitResult } from '../../core/hit.ts';
 import { FOUL_BOOST } from '../tuning.ts';
-import { GROUND_ANGLE } from '../plot.ts';
+import { GROUND_ANGLE, REACTION_MS } from '../plot.ts';
 
 const hit = (over: Partial<HitResult> = {}): HitResult => ({
   outcome: 'single',
@@ -564,5 +567,43 @@ describe('a ground ball is fielded by the man who cuts it off', () => {
   it('a ball in the air never gets a cut-off', () => {
     const p = place(hit({ outcome: 'line_out', launchAngle: 20, exitVelocity: 95 }));
     expect(p.cutOff).toBeUndefined();
+  });
+});
+
+describe('catchFly — a ball in the air is caught by whoever gets there', () => {
+  const H = 2000;
+  const plot = (distFt: number) => ({ distFt, hangMs: H, ground: false });
+  const cf = [{ num: 8, distFt: 318, dirDeg: 0 }];
+  // The run a 1.0 glove makes in exactly the ball's hang.
+  const even = AIR_RANGE * (H - REACTION_MS);
+  const at = (d: number, glove: number) => catchFly(plot(318 + d), 0, cf, () => glove);
+
+  it('a 1.2 glove reaches a ball a 0.8 glove does not', () => {
+    expect(at(even * 1.1, 1.2).caught).toBe(true);
+    const slow = at(even * 1.1, 0.8);
+    expect(slow.caught).toBe(false);
+    expect(slow.how).toBeNull();
+  });
+
+  it('at the same distance, more glove goes diving -> running -> camped', () => {
+    expect(at(even, (DIVE_REACH + 1) / 2).how).toBe('diving');
+    expect(at(even, (DIVE_REACH + 1) / 2).caught).toBe(true);
+    expect(at(even, 1).how).toBe('running');
+    expect(at(even, 1.5).how).toBe('camped');
+  });
+
+  it('a ball that comes down on his spot is camped', () => {
+    const c = at(0, 1);
+    expect(c).toMatchObject({ num: 8, caught: true, how: 'camped', reach: 1 });
+    expect(c.ms).toBe(REACTION_MS);
+  });
+
+  it('the first man there has it, not the nearest', () => {
+    const two = [
+      { num: 7, distFt: 318, dirDeg: -10 },
+      { num: 8, distFt: 318, dirDeg: 10 },
+    ];
+    const c = catchFly(plot(330), -2, two, (n) => (n === 8 ? 1.6 : 0.8));
+    expect(c.num).toBe(8);
   });
 });
