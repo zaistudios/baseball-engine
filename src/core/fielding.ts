@@ -470,6 +470,13 @@ export interface FieldingResult {
    * batter could stretch — and they all keep exactly their old behaviour,
    * because he simply stops where the hit put him.
    */
+  /**
+   * THE BATTER BEAT THE THROW TO FIRST — the ball was fielded and nobody was
+   * retired. Only a clocked grounder sets it (see `race` on rollFielding()),
+   * and the caller rescores the ball as an infield single before applying it:
+   * the outcome is not this file's to change.
+   */
+  beatOut?: boolean;
   stretch?: {
     /** Chance he goes. */
     odds: number;
@@ -585,6 +592,14 @@ export function rollFielding(
      * launch angle to hand this off — behave exactly as they always did.
      */
     lineDrive?: boolean;
+    /**
+     * THE PLAY, DECIDED FROM THE CLOCKS, for a ground ball an infielder
+     * fielded — game/defense.ts's groundRace(). When it is here it replaces the
+     * double-play and force dice below; the error roll still comes first,
+     * unchanged, and so does everything rolled after. Absent is the dice, which
+     * is every fly ball, the CLI and the roguelike.
+     */
+    race?: (rng: Rng) => FieldingResult;
   },
   rng: Rng,
 ): FieldingResult {
@@ -615,6 +630,7 @@ function rollOuts(
     infieldIn?: boolean;
     throwEffect?: ThrowEffect;
     lineDrive?: boolean;
+    race?: (rng: Rng) => FieldingResult;
   },
   rng: Rng,
 ): FieldingResult {
@@ -649,6 +665,9 @@ function rollOuts(
   // that ends the inning. Measured: 0.52 force outs per team per game with the
   // shared gate, which from one seat across nine innings reads as none at all.
   // Zane played it and said exactly that: "Theres no force outs."
+  // A fielded grounder is played out on the clocks, not rolled. See `race`.
+  if (opts.race) return opts.race(rng);
+
   const forceable = outcome === 'ground_out' && opts.forceAtFirst;
   if (!forceable) return CLEAN;
 

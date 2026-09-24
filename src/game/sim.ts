@@ -53,7 +53,7 @@ import type { ForceBag } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
 import { BASES_GAINED, forcedRunners, isSacrificeFly } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
-import { withPlacement } from './placement.ts';
+import { withPlacement, beatenOut } from './placement.ts';
 import { pickShift } from './shift.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { newGame } from './game.ts';
@@ -255,14 +255,13 @@ export function playAiAtBat(
     runnerOnThird: g.bases[2] !== null,
     late: g.inning >= 7,
   });
-  const placed = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift });
-  const result = placed.result;
+  const contact = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift });
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =
-    result.kind === 'in_play'
+    contact.result.kind === 'in_play'
       ? fieldBall(
-          result.hit,
+          contact.result.hit,
           align,
           {
             batterSpeed: batter.speed,
@@ -270,11 +269,15 @@ export function playAiAtBat(
             outs: g.outs,
             forcedRunners: forcedRunners(g.bases),
             infieldIn: shift === 'in',
-            placement: placed.placement,
+            placement: contact.placement,
+            bases: g.bases,
           },
           rng,
         )
       : undefined;
+  // He beat the throw: the grounder is an infield single. See groundRace().
+  const placed = fielding?.beatOut ? beatenOut(contact) : contact;
+  const result = placed.result;
 
   // Charge the pitches to the arm BEFORE the at-bat is folded in, so the man
   // who threw them wears them even if the third out changes who is pitching.

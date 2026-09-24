@@ -35,6 +35,7 @@ import {
   REACTION_MS,
   SHADE,
   groundEase,
+  REPLAY_CUT_MS,
   type Plot,
   type Fielder,
   type Race,
@@ -519,12 +520,8 @@ export type FigureFn = (
   },
 ) => void;
 
-/**
- * The beat stays in the batter's view before cutting — the crack of the bat
- * and the ball starting to leave are worth seeing from behind the plate, and
- * cutting on contact throws away the one frame the swing paid for.
- */
-export const REPLAY_CUT_MS = 300;
+// Lives in plot.ts now: the force play is decided on the clock it starts.
+export { REPLAY_CUT_MS };
 /** The cut itself. Short: a broadcast cuts, it does not dissolve. */
 export const REPLAY_FADE_MS = 200;
 /** How long the ball sits where it finished before cutting back. */

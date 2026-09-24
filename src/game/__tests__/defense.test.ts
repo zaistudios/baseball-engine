@@ -12,9 +12,12 @@ import {
   fielderFor,
   fieldBall,
   gloveOf,
+  groundRace,
   POSITION_DIFFICULTY,
   type Position,
 } from '../defense.ts';
+import { withPlacement, type Placement } from '../placement.ts';
+import type { Bases } from '../../core/inning.ts';
 import {
   aiShouldSend,
   chanceFor,
@@ -309,5 +312,97 @@ describe('the computer deciding to run', () => {
 
   it('never sends with nobody on', () => {
     expect(aiShouldSend(newGame(HOME, AWAY, 9), alignment)).toBe(false);
+  });
+});
+
+describe('a fielded grounder is a race (ZAIS-21)', () => {
+  const runner = (speed: number) => ({ name: 'R', speed });
+  /** A routine two-hopper to short, fielded by him. */
+  const toShort = () => {
+    const hit = {
+      outcome: 'ground_out', isHit: false, isOut: true,
+      exitVelocity: 85, launchAngle: 2, direction: -19,
+    } as HitResult;
+    const p = withPlacement({ kind: 'in_play', hit }).placement!;
+    expect(p.cutOff?.fielded).toBe(true);
+    expect(p.cutOff?.num).toBe(6);
+    return p;
+  };
+  const race = (o: { batter: number; arm?: number; bases: Bases; outs?: number; p?: Placement }) => {
+    const p = o.p ?? toShort();
+    return groundRace({
+      cut: p.cutOff!, dirDeg: p.dirDeg, arm: o.arm ?? 1, armAt: () => o.arm ?? 1,
+      batterSpeed: o.batter, bases: o.bases, outs: o.outs ?? 0,
+    });
+  };
+
+  it('man on first, nobody out: the slow batter is doubled up, the fast one beats the relay', () => {
+    const bases: Bases = [runner(1), null, null];
+    const slow = race({ batter: 0.7, bases });
+    expect(slow.doublePlay).toBe(true);
+    expect(slow.forceAt).toBe(2);
+    const fast = race({ batter: 1.4, bases });
+    expect(fast.doublePlay).toBe(false);
+    expect(fast.forceAt).toBe(2); // the lead man is still out: a fielder's choice
+    expect(fast.clock.firstMs!).toBeGreaterThanOrEqual(fast.clock.batterMs);
+  });
+
+  it('every call is the clocks: an out means the ball got there first', () => {
+    const r = race({ batter: 1, bases: [runner(1), null, null] });
+    expect(r.clock.leadMs!).toBeLessThan(r.clock.runnerMs!);
+    if (r.doublePlay) expect(r.clock.firstMs!).toBeLessThan(r.clock.batterMs);
+  });
+
+  it('with two out the force ends it and nothing is thrown on to first', () => {
+    const r = race({ batter: 0.7, bases: [runner(1), null, null], outs: 2 });
+    expect(r.forceAt).toBe(2);
+    expect(r.doublePlay).toBe(false);
+    expect(r.clock.firstMs).toBeNull();
+  });
+
+  it('raising the glove never turns an out into a safe', () => {
+    const outsOf = (r: ReturnType<typeof groundRace>) => (r.doublePlay ? 2 : r.beatOut ? 0 : 1);
+    const states: Bases[] = [
+      [null, null, null],
+      [runner(1), null, null],
+      [runner(1.3), runner(0.8), null],
+      [runner(1), runner(1), runner(1)],
+      [null, runner(1), null],
+    ];
+    let checked = 0;
+    for (let dir = -40; dir <= 40; dir += 4) {
+      for (const ev of [60, 75, 90, 105]) {
+        const hit = { outcome: 'ground_out', isHit: false, isOut: true, exitVelocity: ev, launchAngle: 2, direction: dir } as HitResult;
+        const p = withPlacement({ kind: 'in_play', hit }).placement!;
+        if (!p.cutOff?.fielded) continue;
+        for (const bases of states) {
+          for (const batter of [0.7, 1, 1.4]) {
+            for (const outs of [0, 1, 2]) {
+              let prev = -1;
+              for (let arm = 0.5; arm <= 1.6; arm += 0.1) {
+                const now = outsOf(race({ batter, arm, bases, outs, p }));
+                expect(now).toBeGreaterThanOrEqual(prev);
+                prev = now;
+                checked++;
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+  });
+
+  it('fieldBall hands the clock over, and without bases it keeps the dice', () => {
+    const p = toShort();
+    const hit = { outcome: 'ground_out', isHit: false, isOut: true, exitVelocity: 85, launchAngle: 2, direction: -19 } as HitResult;
+    const a = assignPositions(HOME.lineup);
+    // A seed whose error die does not fire, so the race is what decides.
+    const opts = { batterSpeed: 0.7, forceAtFirst: true, outs: 0, forcedRunners: 1, placement: p };
+    const raced = fieldBall(hit, a, { ...opts, bases: [runner(1), null, null] }, makeRng(3));
+    expect(raced.error).toBe(false);
+    expect(raced.clock).toBeDefined();
+    expect(raced.forceAt).toBe(2);
+    expect(fieldBall(hit, a, opts, makeRng(3)).clock).toBeUndefined();
   });
 });

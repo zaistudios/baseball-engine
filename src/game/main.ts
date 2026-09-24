@@ -202,7 +202,7 @@ import {
 } from './editor.ts';
 import { fieldBall, reachOf, manned } from './defense.ts';
 import { SHIFTS, SHIFT_WORDS, SHIFT_BLURB, SHIFT_ON, fieldersFor, pickShift, pullScore, type Shift } from './shift.ts';
-import { withPlacement, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
+import { withPlacement, beatenOut, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { IDENTITIES, knob, type IdentityKey } from './identity.ts';
 import {
@@ -2160,15 +2160,15 @@ function completePlay(
   play: NonNullable<typeof pendingPlay>,
   thrown: ThrowEffect,
 ): void {
-  const { align, shift, placed, batter } = play;
-  const result = placed.result;
+  const { align, shift, batter } = play;
+  const contact = play.placed;
   pendingPlay = null;
 
   // Positional defence: WHO the ball was hit at decides whether it is booted.
   const fielding =
-    result.kind === 'in_play'
+    contact.result.kind === 'in_play'
       ? fieldBall(
-          result.hit,
+          contact.result.hit,
           align,
           {
             batterSpeed: batter.speed,
@@ -2180,11 +2180,16 @@ function completePlay(
             throwEffect: thrown,
             // One answer to "who is under it" and one gap for the stretch —
             // see the note on the option in defense.ts.
-            placement: placed.placement,
+            placement: contact.placement,
+            // Who is running, so a fielded grounder is raced. See groundRace().
+            bases: game.bases,
           },
           rng,
         )
       : undefined;
+  // He beat the throw: the grounder is an infield single. See groundRace().
+  const placed = fielding?.beatOut ? beatenOut(contact) : contact;
+  const result = placed.result;
 
   const half = inningLabel(game);
   const wasBatting = battingSide(game);

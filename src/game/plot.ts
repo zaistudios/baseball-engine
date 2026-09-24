@@ -724,6 +724,19 @@ export function throwMarginMs(speed: number): number {
   return runToFirstMs(speed) * marginFraction(speed);
 }
 
+/**
+ * The beat stays in the batter's view before cutting — the crack of the bat
+ * and the ball starting to leave are worth seeing from behind the plate, and
+ * cutting on contact throws away the one frame the swing paid for.
+ *
+ * ⚠️ IT IS PART OF THE PLAY NOW, NOT ONLY OF THE PICTURE. The ball leaves the
+ * plate on the overhead at this mark while the batter has been running since
+ * contact, and the race at first is decided on exactly that clock (ZAIS-21) —
+ * so it is the batter's head start. Changing it changes how many grounders are
+ * beaten out; re-run scripts/balance.ts.
+ */
+export const REPLAY_CUT_MS = 300;
+
 /** A fielder cannot catch and release instantly, and the ball has to travel. */
 export const MIN_THROW_MS = 140;
 

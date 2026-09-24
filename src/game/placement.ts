@@ -694,6 +694,23 @@ export function withPlacement(
   };
 }
 
+/**
+ * THE BATTER BEAT THE THROW: a grounder somebody fielded, scored as the infield
+ * single it turned into. groundRace() in defense.ts decides it from the clocks;
+ * this is only the rescoring, so both callers rescore the same way.
+ */
+export function beatenOut(placed: ReturnType<typeof withPlacement>): ReturnType<typeof withPlacement> {
+  if (placed.result.kind !== 'in_play' || !placed.placement) return placed;
+  const hit = { ...placed.result.hit, outcome: 'single' as const, isHit: true, isOut: false };
+  const who = POSITION_WORD[placed.placement.fielderNum] ?? 'somebody';
+  return {
+    ...placed,
+    result: { kind: 'in_play', hit },
+    text: `infield single, beat the throw from ${who}`,
+    verdict: null,
+  };
+}
+
 // ------------------------------------------------------------- the words
 
 const ZONE_WORDS: Record<Zone, string> = {

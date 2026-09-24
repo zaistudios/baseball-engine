@@ -31,14 +31,27 @@ import {
   rollFielding,
   stretchChance,
   STRETCH_THROW,
+  TRIPLE_PLAY,
+  CLEAN_THROW,
   type FieldingResult,
+  type ForceBag,
   type ThrowEffect,
 } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
-import { SAC_FLY_MIN_ANGLE } from '../core/inning.ts';
-import type { Placement } from './placement.ts';
+import { SAC_FLY_MIN_ANGLE, forcedRunners, type Bases } from '../core/inning.ts';
+import type { CutOff, Placement } from './placement.ts';
 import type { Rng } from '../core/rng.ts';
-import { plotBatted, nearestFielder, type Fielder } from './plot.ts';
+import {
+  plotBatted,
+  nearestFielder,
+  feetXY,
+  bagFeet,
+  throwArrivalMs,
+  runToFirstMs,
+  runnerMs,
+  REPLAY_CUT_MS,
+  type Fielder,
+} from './plot.ts';
 
 export type Position = 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF' | 'DH';
 
@@ -218,6 +231,96 @@ export interface DefensivePlay extends FieldingResult {
   by: Position;
   /** The glove that had to make it, for a UI that wants to explain an error. */
   fielder: Player | null;
+  /** The arrival times a clocked grounder was decided on. See groundRace(). */
+  clock?: GroundClock;
+}
+
+/**
+ * EVERY ARRIVAL ON A FIELDED GROUNDER, in ms from contact on the replay's clock
+ * — the numbers the play was decided on, handed to the picture so it draws
+ * them rather than working them out again. See groundRace().
+ */
+export interface GroundClock {
+  /** The ball is in his glove. */
+  fieldedMs: number;
+  /** The batter reaches first. */
+  batterMs: number;
+  /** The ball reaches the bag a force was taken at. Null when none was. */
+  leadMs: number | null;
+  /** The forced man reaches that bag. Null when no force. */
+  runnerMs: number | null;
+  /** The ball reaches first. Null when it never went there — a force with two out. */
+  firstMs: number | null;
+}
+
+/** Who takes the throw at a force bag and turns it: the pivot. */
+const pivotAt = (bag: ForceBag, fielderNum: number): number =>
+  bag === 2 ? (fielderNum === 4 ? 6 : 4) : bag === 3 ? 5 : 2;
+
+/**
+ * STEP (b) FOR GROUND BALLS: the throws, raced against the runners.
+ *
+ * The ball is in his glove at `REPLAY_CUT_MS + cut.ms` — the overhead's own
+ * clock, on which the batter has been running since contact. Every play he
+ * could make is timed: a throw to each force bag against the man running to
+ * it, the relay on to first against the batter, and the plain throw to first.
+ * He makes the one that gets the most outs, and between equals the one furthest
+ * forward. That is "go for two" and "take the lead man", and it is why a better
+ * arm can only ever add an out: every option gets quicker and none goes away.
+ *
+ * Nothing here rolls. The triple play is the one die, and only on a double play
+ * the clocks already turned — see fieldBall().
+ *
+ * ponytail: the pivot's arm is his glove, same as the fielder's, and his feet
+ * at the bag are the transfer and nothing more. No bobbled exchange, no runner
+ * taking him out. Add them when a double play looks too clean.
+ */
+export function groundRace(o: {
+  cut: CutOff;
+  dirDeg: number;
+  /** The fielder's arm. */
+  arm: number;
+  /** The arm at each scorer's number, for the pivot. */
+  armAt: (fielderNum: number) => number;
+  batterSpeed: number;
+  bases: Bases;
+  outs: number;
+}): { forceAt?: ForceBag; doublePlay: boolean; beatOut: boolean; clock: GroundClock } {
+  // Ball and runners all leave at the cut. See the note on REPLAY_CUT_MS.
+  const fieldedMs = REPLAY_CUT_MS + o.cut.ms;
+  const from = feetXY(o.cut.alongFt, o.dirDeg);
+  const batterMs = REPLAY_CUT_MS + runToFirstMs(o.batterSpeed);
+
+  type Play = { forceAt?: ForceBag; outs: number; clock: GroundClock };
+  const plays: Play[] = [];
+  for (let bag = forcedRunners(o.bases) + 1; bag >= 2; bag--) {
+    const at = bag as ForceBag;
+    const leadMs = fieldedMs + throwArrivalMs(from, at, o.arm);
+    const runner = REPLAY_CUT_MS + runnerMs(o.bases[at - 2]!.speed, at - 1, at);
+    if (leadMs >= runner) continue; // a tie goes to the runner
+    // With two out the force is the third, and nobody throws on to first.
+    const firstMs =
+      o.outs < 2 ? leadMs + throwArrivalMs(bagFeet(at), 1, o.armAt(pivotAt(at, o.cut.num))) : null;
+    plays.push({
+      forceAt: at,
+      outs: firstMs !== null && firstMs < batterMs ? 2 : 1,
+      clock: { fieldedMs, batterMs, leadMs, runnerMs: runner, firstMs },
+    });
+  }
+  const firstMs = fieldedMs + throwArrivalMs(from, 1, o.arm);
+  plays.push({
+    outs: firstMs < batterMs ? 1 : 0,
+    clock: { fieldedMs, batterMs, leadMs: null, runnerMs: null, firstMs },
+  });
+
+  // Most outs; among equals the first in the list, which is the lead bag.
+  const best = plays.reduce((a, b) => (b.outs > a.outs ? b : a));
+  return {
+    ...(best.forceAt ? { forceAt: best.forceAt } : {}),
+    doublePlay: best.outs === 2,
+    beatOut: best.outs === 0,
+    clock: best.clock,
+  };
 }
 
 /**
@@ -255,6 +358,12 @@ export function fieldBall(
      * the fix and the thing stretchChance() needs.
      */
     placement?: Placement | null;
+    /**
+     * WHO IS ON BASE, for the race. With a placement whose grounder was
+     * fielded, this is what turns the play from dice into clocks — see
+     * groundRace(). Omitted keeps the dice, which is every caller before it.
+     */
+    bases?: Bases;
   },
   rng: Rng,
 ): DefensivePlay {
@@ -266,6 +375,45 @@ export function fieldBall(
     : fielderFor(hit);
   const fielder = alignment[by];
   const glove = fielder ? gloveOf(fielder) : 1;
+
+  // ⚠️ A FIELDED GROUNDER IS RACED, NOT ROLLED. The bunt keeps the dice: it is
+  // a sacrifice in inning.ts whatever the defence does, and a race that turned
+  // two on it would draw a play the book never scores.
+  const cut = opts.placement?.cutOff;
+  const bases = opts.bases;
+  let clock: GroundClock | undefined;
+  const race =
+    cut?.fielded && bases && opts.placement && hit.outcome === 'ground_out' && !hit.bunted
+      ? (r: Rng): FieldingResult => {
+          // The player's throw press is worth what it always was: a better
+          // throw is a quicker one. `good` is exactly 1.
+          const quick = (opts.throwEffect ?? CLEAN_THROW).dp;
+          const play = groundRace({
+            cut,
+            dirDeg: opts.placement!.dirDeg,
+            arm: glove * quick,
+            armAt: (num) => reachOf(alignment)(num) * quick,
+            batterSpeed: opts.batterSpeed,
+            bases,
+            outs: opts.outs,
+          });
+          clock = play.clock;
+          if (
+            play.doublePlay &&
+            opts.outs === 0 &&
+            forcedRunners(bases) >= 2 &&
+            r.next() < TRIPLE_PLAY
+          ) {
+            return { error: false, doublePlay: false, triplePlay: true, forceAt: 2 };
+          }
+          return {
+            error: false,
+            doublePlay: play.doublePlay,
+            ...(play.forceAt ? { forceAt: play.forceAt } : {}),
+            ...(play.beatOut ? { beatOut: true } : {}),
+          };
+        }
+      : undefined;
 
   const result = rollFielding(
     hit.outcome,
@@ -299,6 +447,7 @@ export function fieldBall(
       // from being both. See DOUBLE_OFF in core/fielding.ts, including why this
       // does not also ask whether an infielder caught it.
       lineDrive: hit.launchAngle < SAC_FLY_MIN_ANGLE,
+      ...(race ? { race } : {}),
     },
     rng,
   );
@@ -327,7 +476,7 @@ export function fieldBall(
         { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove }
       : undefined;
 
-  return { ...result, ...(stretch ? { stretch } : {}), by, fielder };
+  return { ...result, ...(stretch ? { stretch } : {}), ...(clock ? { clock } : {}), by, fielder };
 }
 
 /**
