@@ -17,7 +17,8 @@ const PAIRS = LEAGUE.flatMap((h) => LEAGUE.filter((a) => a !== h).map((a) => [h,
 const N = Number(process.argv[2] ?? 500);
 let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfinished = 0;
 let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
-let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0;
+let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0, hrs = 0, inPlay = 0;
+const caught: { how: string | null; glove: number }[] = [];
 const scores: number[] = [];
 
 for (let i = 0; i < N; i++) {
@@ -28,7 +29,7 @@ for (let i = 0; i < N; i++) {
   const {
     game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut,
+    stretchSafe, stretchOut, homeRuns, airBalls,
   } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
@@ -55,6 +56,9 @@ for (let i = 0; i < N; i++) {
   dOff += doubledOff;
   sf += sacFlies;
   sfOut += sacFlyOuts;
+  hrs += homeRuns;
+  inPlay += outcomes.in_play;
+  caught.push(...airBalls.filter((b) => b.how));
   pas += outcomes.walk + outcomes.hit_by_pitch + outcomes.strikeout + outcomes.in_play;
   if (game.inning > 9) extras++;
   if (game.ending === 'walk_off') walkoffs++;
@@ -83,6 +87,15 @@ console.log(`triple plays     1 per ${tps ? Math.round(played / tps) : 'never'} 
 console.log(`sac flies/team   ${(sf / played / 2).toFixed(2)}   (MLB ~0.25; SAC_FLY_MIN_EV)`);
 console.log(`  ...cut down     ${(sfOut / played / 2).toFixed(2)}   (${((sfOut / Math.max(1, sf + sfOut)) * 100).toFixed(0)}% of the sends; TAG_THROW)`);
 console.log(`stretches/team   ${((strSafe + strOut) / played / 2).toFixed(2)}   (${((strSafe / Math.max(1, strSafe + strOut)) * 100).toFixed(0)}% made it; STRETCH_RATE/STRETCH_THROW)`);
+// ⚠️ BALLS IN PLAY INCLUDES FOUL OUTS AND BUNTS, so this runs a little under
+// a scorer's BABIP. It is for before-and-after, not for the back of a card.
+console.log(`BABIP            ${((hits - hrs) / Math.max(1, inPlay - hrs)).toFixed(3)}   (MLB ~.290)`);
+const byGlove = [...caught].sort((a, b) => a.glove - b.glove);
+const q = Math.floor(byGlove.length / 4);
+const diving = (xs: typeof caught) => ((xs.filter((c) => c.how === 'diving').length / Math.max(1, xs.length)) * 100).toFixed(1);
+const share = (how: string) => ((caught.filter((c) => c.how === how).length / Math.max(1, caught.length)) * 100).toFixed(0);
+console.log(`air catches/team ${(caught.length / played / 2).toFixed(2)}   camped ${share('camped')}% running ${share('running')}% diving ${share('diving')}%`);
+console.log(`  ...diving       ${diving(byGlove.slice(0, q))}% bottom glove quartile, ${diving(byGlove.slice(-q))}% top (DIVE_REACH)`);
 console.log(`shutouts         ${((scores.filter((s) => s === 0).length / scores.length) * 100).toFixed(1)}%`);
 console.log('');
 console.log(boxLine(simulateGame(13).game));

@@ -519,7 +519,7 @@ export function fieldBall(
 }
 
 /**
- * The glove standing at a scorer's number, for placement.ts's contest().
+ * The glove standing at a scorer's number, for placement.ts's races — cutOff() and catchFly().
  *
  * ⚠️ IT IS A CLOSURE RATHER THAN AN IMPORT, and that is a layering decision.
  * placement.ts is geometry and knows nothing about rosters; teaching it about

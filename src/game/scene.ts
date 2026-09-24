@@ -304,7 +304,7 @@ export function sceneFor(f: SceneFacts): Scene {
   if (f.verdict === 'robbed') {
     // ⚠️ A ROBBERY IS A SCENE FOR THE DEFENCE, and it is the one caption on this
     // list the hitter does not want to see. It gets a big beat anyway: the
-    // whole reason contest() exists is that a flip the player is not told about
+    // whole reason the play is allowed to overrule the table is that a flip the player is not told about
     // is indistinguishable from the dice being unkind.
     return made('ROBBED', p ? `TAKEN AWAY IN ${spot}` : 'TAKEN AWAY', 'big', big);
   }

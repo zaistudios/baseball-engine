@@ -2,23 +2,22 @@
  * Where a batted ball goes, on an overhead field.
  *
  * THE SCOPE LINE, and it moved. This file used to say nothing here decides
- * anything, and that stopped being true twice. placement.ts has decided hit or
- * out from where the ball finished since 2026-09-03 — the contest, for balls
- * in the air. And since ZAIS-17 a GROUND BALL is played out, not presented: the
- * infielder who beats it to his spot on its line fields it, and one that beats
- * all of them is a hit into the outfield. That race is run on this file's
- * numbers — plotBatted()'s distance and hang, groundBallMs(), REACTION_MS and
- * the FIELDERS table — so they are the engine's inputs now, not decoration.
+ * anything, and that is not true any more. Since ZAIS-17 a GROUND BALL is
+ * played out, not presented: the infielder who beats it to his spot on its
+ * line fields it, and one that beats all of them is a hit into the outfield.
+ * Since ZAIS-20 a BALL IN THE AIR is too: whoever gets to where it comes down
+ * inside its hang catches it. Both races are run on this file's numbers —
+ * plotBatted()'s distance and hang, groundBallMs(), REACTION_MS and the
+ * FIELDERS table — so they are the engine's inputs now, not decoration.
  *
  * And since ZAIS-21 the throws on a FIELDED grounder are raced too: the
  * batter's runToFirstMs(), a runner's runnerMs(), the throw's throwArrivalMs()
  * at THROW_SPEED and the pivot's run to his bag, compared in defense.ts's
  * groundRace(). The replay draws those same numbers (Replay.clock).
  *
- * What is STILL only a picture: the fly ball and the liner (decided by
- * contest()'s fixed distances, next in line), the race on everything that has
- * no clock (rolled in fielding.ts and drawn to agree — raceTiming()), errors,
- * and extra bases. Each is its own step in the Unscripted Plays spec.
+ * What is STILL only a picture: the race on everything that has no clock
+ * (rolled in fielding.ts and drawn to agree — raceTiming()), errors, and extra
+ * bases. Each is its own step in the Unscripted Plays spec.
  *
  * The rule that has not moved: the engine decides and the picture draws it. If
  * the replay and the box score disagree, the box score is right.

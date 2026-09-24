@@ -442,9 +442,9 @@ const LAUNCH_ANGLE: Record<Outcome, readonly [number, number]> = {
    * means re-normalising forty-five hand-tuned rows, which is the balance
    * change this deliberately is not.
    *
-   * ⚠️ IT MOVES WHERE THESE BALLS LAND, so HOLE_FT.line_out in placement.ts is
-   * measured against a population that just changed. Re-measure with
-   * scripts/place.ts — that constant's own header says to.
+   * ⚠️ IT MOVES WHERE THESE BALLS LAND AND HOW LONG THEY HANG, so AIR_RANGE in
+   * placement.ts is tuned against a population that just changed. Re-sweep it
+   * with scripts/balance.ts — that constant's own header has the table.
    */
   line_out: [10, 38],
   popup: [45, 80],

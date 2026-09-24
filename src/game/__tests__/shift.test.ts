@@ -86,7 +86,7 @@ describe('where the nine stand', () => {
 
 describe('what the shift actually costs the hitter', () => {
   const rad = (d: number) => (d * Math.PI) / 180;
-  /** Feet from a ball to the nearest man — contest()'s only input. */
+  /** Feet from a ball to the nearest man — what the old contest() read, and still what the shift moves. */
   const gapTo = (
     fs: readonly { num: number; distFt: number; dirDeg: number }[],
     distFt: number,
@@ -101,8 +101,8 @@ describe('what the shift actually costs the hitter', () => {
   };
 
   // The whole feature in one assertion: a ball pulled into the shift has to
-  // find somebody CLOSER than it would have. Gap distance is what contest()
-  // turns into an out, so this is the mechanism and not a proxy for it.
+  // find somebody CLOSER than it would have. Since ZAIS-20 an out is whoever gets
+  // there, and a shorter run is how a shifted man gets there first.
   it('closes the ground the hitter pulls it into', () => {
     // A grounder to the right side, which is where a lefty pulls it.
     expect(gapTo(fieldersFor('right'), 120, 25)).toBeLessThan(

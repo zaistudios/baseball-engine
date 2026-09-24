@@ -13,8 +13,8 @@
  * of moving it:
  *
  *   nearestFielder()  who chases it — a shifted man is nearest to more balls
- *   gapTo()           how much room the hitter found, which is contest()'s
- *                     whole input for robbed-or-through
+ *   gapTo()           how much room the hitter found — the stretch reads it;
+ *                     who gets there first is cutOff() and catchFly()
  *   overhead.ts       the nine dots, which is how the player SEES it happen
  *
  * So a shift is a different table, threaded as far as the three callers and no
@@ -45,7 +45,8 @@
  *
  * WHY IT KEPT COMING OUT BACKWARDS, because the next person to widen these
  * numbers needs to know: moving a man CLOSES a hole worth one gap and OPENS
- * one worth another, and contest() reads gap distance more or less linearly.
+ * one worth another, and the old contest() read gap distance more or less
+ * linearly. These rows were measured under it, before ZAIS-20.
  * v1 moved all three outfielders, where a few degrees is a lot of feet and
  * gaps turn into extra bases. v2 still swung the second baseman across the bag
  * — a 25° move that vacated the entire right side, and pull hitters in this

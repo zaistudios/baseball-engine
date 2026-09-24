@@ -243,11 +243,11 @@ describe('the stretch', () => {
 /**
  * ⚠️ THIS BLOCK USED TO ASSERT THE OPPOSITE — "a hit stays a hit and an out
  * stays an out" — and that assertion was the design being tested, not a safety
- * net around it. contest() deliberately breaks it. What has to hold now is the
+ * net around it. The fielders' race deliberately breaks it. What has to hold now is the
  * weaker and more useful thing: the flip happens in BOTH directions, the two
  * directions cancel, and nothing downstream is left holding a stale flag.
  */
-describe('the contest lets geometry decide, without moving the run environment', () => {
+describe('the race lets the fielders decide, without moving the run environment', () => {
   /** One shared sample, so the three assertions below describe the same runs. */
   const sample = () => {
     const rng = makeRng(21);
@@ -277,22 +277,22 @@ describe('the contest lets geometry decide, without moving the run environment',
 
       // The flag and the outcome must never disagree. Getting this wrong puts
       // a man on first on a ball the scorer just called a line out — it was the
-      // live bug in the first draft of contest(), because the old body carried
+      // live bug in the first draft of the old contest(), because the old body carried
       // `isHit` across unchanged and was RIGHT to while every flip was hit-to-hit.
       if (after.isHit !== isHit(after.outcome)) badFlag.push(`${h.outcome}->${after.outcome}`);
 
       // ⚠️ A GROUND BALL IS NOT CONTESTED ANY MORE. cutOff() plays it out —
       // whoever beats it to his spot has it, table triple or not — so the two
-      // assertions below are about the contest, and the contest is the air.
+      // assertions below are about the air, which catchFly() plays out.
       // The ground ball's balance is held by scripts/balance.ts (ZAIS-17).
       if (h.launchAngle < GROUND_ANGLE) continue;
       airborne++;
 
       if (out.verdict === 'robbed') {
         robbed++;
-        // Only a single is robbable. A double or a triple got past everybody by
-        // definition and a home run is not on the field to be caught.
-        if (h.outcome !== 'single') robbedExtraBase.push(h.outcome);
+        // Since ZAIS-20 any ball somebody got to is robbable — a table double
+        // run down in the gap is an out. A home run is not on the field.
+        if (h.outcome === 'home_run') robbedExtraBase.push(h.outcome);
       }
       if (out.verdict === 'dropped') dropped++;
     }
@@ -306,14 +306,14 @@ describe('the contest lets geometry decide, without moving the run environment',
     expect(s.dropped).toBeGreaterThan(0);
   });
 
-  it('only ever takes a SINGLE away — never a double, triple or home run', () => {
+  it('never takes a home run away', () => {
     expect(sample().robbedExtraBase).toEqual([]);
   });
 
   /**
    * The whole safety argument for allowing the flip at all. The two flows are
-   * matched by construction (see ROBBED_FT and HOLE_FT, both measured against
-   * their own populations), so the hit column comes out where it went in.
+   * matched by tuning (see AIR_RANGE and INFIELD_RANGE, both swept against
+   * scripts/balance.ts), so the hit column comes out near where it went in.
    *
    * The tolerance is deliberately loose — this is a guard against one side
    * being switched off or retuned into the weeds, not a re-derivation of the
@@ -588,8 +588,16 @@ describe('catchFly — a ball in the air is caught by whoever gets there', () =>
   it('at the same distance, more glove goes diving -> running -> camped', () => {
     expect(at(even, (DIVE_REACH + 1) / 2).how).toBe('diving');
     expect(at(even, (DIVE_REACH + 1) / 2).caught).toBe(true);
-    expect(at(even, 1).how).toBe('running');
+    expect(at(even, 1.05).how).toBe('running');
     expect(at(even, 1.5).how).toBe('camped');
+  });
+
+  it('a better glove lays out for a ball a worse one watches drop', () => {
+    // Both have made the same share of their run when it comes down.
+    const reach = 1 - (1 - DIVE_REACH) * 0.95;
+    const short = (g: number) => at((even * g) / reach, g);
+    expect(short(1.1).how).toBe('diving');
+    expect(short(0.8).caught).toBe(false);
   });
 
   it('a ball that comes down on his spot is camped', () => {

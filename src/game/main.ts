@@ -2111,7 +2111,7 @@ function releaseThrow(): void {
 /** The count says the at-bat is done. Fold it into the game. */
 function finishAtBat(): void {
   // Where it landed decides whether it is a hit at all, what it is worth, AND
-  // what the scorer says. The contest needs the glove of whoever it was hit at.
+  // what the scorer says. The race needs every fielder's glove.
   const align = fieldingAlignment(game);
   const shift = shiftNow();
   const placed = withPlacement(atBat.result!, {

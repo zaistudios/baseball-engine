@@ -53,7 +53,7 @@ import type { ForceBag } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
 import { BASES_GAINED, forcedRunners, isSacrificeFly } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
-import { withPlacement, beatenOut } from './placement.ts';
+import { withPlacement, beatenOut, type CatchHow } from './placement.ts';
 import { pickShift } from './shift.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
 import { newGame } from './game.ts';
@@ -120,6 +120,20 @@ export interface AtBatLog {
   /** A caught fly that moved a man home — and whether the throw beat him. */
   sacFly?: boolean;
   sacFlyOut?: boolean;
+  /**
+   * A BALL IN THE AIR: how it was caught (null, it dropped), and the glove on
+   * the man who caught it or came closest. Counted because DIVE_REACH and
+   * CAMP_MS are knobs, and "diving catches are a rare, big play that the rangy
+   * men make more of" is only true if a balance run can see it. See catchFly()
+   * in placement.ts.
+   */
+  air?: AirBall;
+}
+
+export interface AirBall {
+  how: CatchHow | null;
+  glove: number;
+  num: number;
 }
 
 /**
@@ -239,7 +253,7 @@ export function playAiAtBat(
   }
 
   // Where it landed decides whether it is a hit at all, and what it is worth.
-  // See placement.ts — the contest needs the glove of whoever it was hit at.
+  // See placement.ts — the race needs every fielder's glove.
   const align = fieldingAlignment(g);
   // WHAT THE DEFENCE CALLED. ⚠️ THE COMPUTER IS ON BOTH SIDES OF THIS ONE.
   // playAiAtBat is the HEADLESS path — main.ts resolves both of its own halves
@@ -327,6 +341,16 @@ export function playAiAtBat(
       // test counted six times as many "sacrifice flies cut down" as there were
       // sacrifice flies, and reported 86% of the sends being thrown out.
       sacFlyOut: sacFly && played.log.thrownOut?.at === 4,
+      ...(placed.placement?.airCatch
+        ? {
+            air: {
+              // A booted catch is not a catch, whatever the race said.
+              how: fielding?.error ? null : placed.placement.airCatch.how,
+              glove: reachOf(align)(placed.placement.airCatch.num),
+              num: placed.placement.airCatch.num,
+            },
+          }
+        : {}),
       stretched: played.log.thrownOut?.batter
         ? 'out'
         : result.kind === 'in_play' &&
@@ -470,6 +494,10 @@ export interface SimResult {
   stretchSafe: number;
   /** ...and the ones the arm got. See STRETCH_THROW. */
   stretchOut: number;
+  /** Home runs, so balance.ts can take them out of BABIP. */
+  homeRuns: number;
+  /** Every fair ball in the air but a home run. See AtBatLog.air. */
+  airBalls: AirBall[];
   /**
    * How the plate appearances ended, both sides.
    *
@@ -530,6 +558,8 @@ export function simulateGame(
   let sacFlyOuts = 0;
   let stretchSafe = 0;
   let stretchOut = 0;
+  let homeRuns = 0;
+  const airBalls: AirBall[] = [];
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -572,6 +602,8 @@ export function simulateGame(
     if (out.atBat.doubledOff) doubledOff++;
     if (out.atBat.sacFly) sacFlies++;
     if (out.atBat.sacFlyOut) sacFlyOuts++;
+    if (out.atBat.outcome === 'home_run') homeRuns++;
+    if (out.atBat.air) airBalls.push(out.atBat.air);
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -585,7 +617,7 @@ export function simulateGame(
   return {
     game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut,
+    stretchSafe, stretchOut, homeRuns, airBalls,
   };
 }
 

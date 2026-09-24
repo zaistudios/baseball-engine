@@ -26,9 +26,8 @@
  * same event, so the skill the whole file exists to teach could never actually
  * be practised.
  *
- * See contest() for how it is done safely: the two flows are MATCHED rather
- * than one of them being forbidden, and the balance is measured rather than
- * argued. Runs per team held at 4.25 across 400 games.
+ * It is decided by who can get there — cutOff() on the ground, catchFly() in
+ * the air — and the balance is measured with scripts/balance.ts, not argued.
  */
 
 import type { HitResult } from '../core/hit.ts';
@@ -93,6 +92,12 @@ export interface Placement {
    * this names the infielder it got past.
    */
   cutOff?: CutOff;
+  /**
+   * WHO GOT TO THE BALL IN THE AIR — set on every fair ball in the air that is
+   * not a home run, and on nothing else. See catchFly(). `fielderNum` is that
+   * man, whether he caught it or it dropped in front of him.
+   */
+  airCatch?: AirCatch;
 }
 
 /**
@@ -277,7 +282,7 @@ export function place(
    * WHERE THE DEFENCE IS STANDING. Omitted is standard depth, which is what
    * every caller wanted before shifts existed. game/shift.ts builds the moved
    * tables; a shifted man changes both who chases the ball and how much room
-   * the hitter found, and contest() turns the second one into an out.
+   * the hitter found, and the race decides whether he gets there.
    */
   fielders: readonly Fielder[] = FIELDERS,
   /** The glove at each number, for the cut-off. See withPlacement(). */
@@ -310,8 +315,12 @@ export function place(
   // the centre fielder — 78 feet from it against the middle infielders' 112 —
   // who then threw the batter out at first. See cutOff().
   const cut = hit.launchAngle < GROUND_ANGLE ? cutOff(plot, dirDeg, fielders, reachAt) : undefined;
-  const num =
-    cut && !cut.past
+  // A ball in the air is played by whoever gets there. A home run is not on
+  // the field to be caught.
+  const air = !cut && hit.outcome !== 'home_run' ? catchFly(plot, dirDeg, fielders, reachAt) : undefined;
+  const num = air
+    ? air.num
+    : cut && !cut.past
       ? cut.num
       : nearestFielder(plot.distFt, dirDeg, cut ? fielders.filter((f) => f.num >= 7) : fielders).num;
   const gapFt = gapTo(plot.distFt, dirDeg, num, fielders);
@@ -325,6 +334,7 @@ export function place(
     inTheGap: gapFt >= GAP_FT,
     wallFt,
     ...(cut ? { cutOff: cut } : {}),
+    ...(air ? { airCatch: air } : {}),
   };
 }
 
@@ -416,18 +426,55 @@ export function cutOff(
  * kind of clock: the ball's is `plot.hangMs`, the pacing the overhead flies it
  * at, so a man drawn at this speed arrives when the box score says he did.
  *
- * TUNING TABLE GOES HERE — see step 3.
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-24, DIVE_REACH
+ * 0.97 and CAMP_MS 350. Before this change: 4.18 runs and 8.14 hits per team.
+ *
+ *   range   runs   hits   BABIP  air catches/tm  diving
+ *   0.036   4.80   9.69   .340       5.89          4%
+ *   0.040   4.26   8.86   .309       6.73          4%
+ *   0.042   4.08   8.42   .295       6.85          3%
+ *   0.043   3.99   8.16   .286       6.95          4%
+ *   0.044   3.94   8.03   .279       7.17          4%
+ *   0.046   3.64   7.48   .261       7.42          3%
+ *   0.050   3.34   6.81   .237       7.85          3%
+ *
+ * ⚠️ RUNS AND HITS CANNOT BOTH BE HIT WITH THIS ONE KNOB. A caught table-double
+ * is an out now, not a single held to one bag, so runs fall a little faster
+ * than hits: 0.043 matches hits to the hundredth and is 0.19 runs light. 0.042
+ * splits the miss. Over 1,200 games it reads 4.01 runs, 8.39 hits, BABIP .294.
  */
-export const AIR_RANGE = 0.05;
+export const AIR_RANGE = 0.042;
 
-/** Arrive with this much of the ball's hang to spare and he is waiting under it. */
+/**
+ * Arrive with this much of the ball's hang to spare and he is waiting under it.
+ * Only the picture and the words read it — it moves nothing in the box score.
+ * 250 camps 78% of catches, 350 camps 71%, 500 camps 60%.
+ */
 export const CAMP_MS = 350;
 
 /**
- * A man who has made this share of his run when the ball comes down lays out
- * for it and catches it. Below it, it drops in front of him.
+ * A 1.0 glove who has made this share of his run when the ball comes down lays
+ * out for it and catches it. Below it, it drops in front of him.
+ *
+ * ⚠️ THE DIVE IS A SHARE OF HIS RUN THAT GROWS WITH THE GLOVE — the bar is
+ * `1 - (1 - DIVE_REACH) × glove`. A flat bar looked right and made the rating
+ * say nothing about HOW: a fixed share of anybody's run is the same share of
+ * the balls he gets to, so the fast man and the slow man dived exactly as often
+ * per catch — and the rangier man dived slightly LESS, because the edge of a
+ * big range is where fewer balls come down (1,200 games: 3.7% bottom glove
+ * quartile, 3.4% top). Zane asked for the better glove to make more of the big
+ * plays, diving ones included.
+ *
+ * So the band is scaled by glove to the fourth, DIVE_GLOVE_POW. The glove
+ * spread is narrow — 0.86 to 1.17 — and a linear scale left it inside the noise.
+ * At 4, over 1,200 games: 3.1% of catches diving in the bottom quartile, 4.0%
+ * in the top. Swept at 400 games, 0.042 range: 0.95 dives 6% of catches, 0.97
+ * dives 3-4%, 0.98 dives 3%.
  */
-export const DIVE_REACH = 0.9;
+export const DIVE_REACH = 0.97;
+
+/** How hard the glove bends the dive band. See DIVE_REACH. */
+const DIVE_GLOVE_POW = 4;
 
 export type CatchHow = 'camped' | 'running' | 'diving';
 
@@ -451,7 +498,7 @@ export interface AirCatch {
  * `REACTION_MS + runFt / (AIR_RANGE × glove)`. The ball arrives at
  * `plot.hangMs`. First man there has it; with room to spare he camped, without
  * it he took it running. Nobody there, and the man who came closest dives if he
- * had made DIVE_REACH of his run.
+ * had made enough of his run — see DIVE_REACH.
  *
  * ⚠️ ONE CLOCK. hangMs is the picture's clock, not real hang time, and it is
  * clamped 900-2600ms in plot.ts. ponytail: the clamp means a towering pop and a
@@ -475,7 +522,7 @@ export function catchFly(
       const speed = AIR_RANGE * reachAt(f.num);
       const runMs = REACTION_MS + runFt / speed;
       const reach = runFt === 0 ? 1 : Math.max(0, Math.min(1, ((hang - REACTION_MS) * speed) / runFt));
-      return { num: f.num, runMs, reach };
+      return { num: f.num, runMs, reach, glove: reachAt(f.num) };
     })
     // Earliest arrival is also the highest reach, so one sort answers both.
     .sort((a, b) => a.runMs - b.runMs)[0]!;
@@ -489,7 +536,7 @@ export function catchFly(
       how: hang - best.runMs >= CAMP_MS ? 'camped' : 'running',
     };
   }
-  const diving = best.reach >= DIVE_REACH;
+  const diving = best.reach >= 1 - (1 - DIVE_REACH) * best.glove ** DIVE_GLOVE_POW;
   return { num: best.num, ms: hang, reach: best.reach, caught: diving, how: diving ? 'diving' : null };
 }
 
@@ -545,86 +592,19 @@ export function stretch(outcome: Outcome, p: Placement): Outcome {
   return outcome;
 }
 
-// ----------------------------------------------------------- the contest
+// ------------------------------------------------------------- the verdict
 
 /**
- * THE CONTEST — where the ball landed gets a vote on HIT OR OUT, not just on
- * how many bases.
+ * WHERE THE BALL WENT GETS A VOTE ON HIT OR OUT, not just on how many bases.
  *
- * ⚠️ THIS IS THE RULE THE FILE HEADER USED TO FORBID, and it is worth being
- * precise about what changed. The old note said geometry must not convert outs
- * into hits, because "the run environment is the thing that took three rounds
- * of tuning". That reasoning was right about the RISK and wrong about the
- * conclusion: with the flip banned, a line drive hit straight at the shortstop
- * and one hit into the same hole he was not standing in were the same event,
- * and the player could never learn the actual skill — hit it where they
- * aren't. The extra-base rule alone cannot teach that, because the table only
- * hands out an extra base on a ball it had already called a hit.
- *
- * So the flip is allowed now, and the run environment is protected by MATCHING
- * THE TWO FLOWS instead of by forbidding one of them. A hit dropped on top of
- * somebody becomes an out; an out that landed a long way from anybody becomes a
- * hit; and the two thresholds are set so the counts cancel. Verified against
- * scripts/balance.ts, not asserted: runs per team, hits per team and BABIP all
- * sit where they sat before.
- *
- * ⚠️ EACH BAR IS SET AGAINST ITS OWN POPULATION, which is the lesson
- * TRIPLE_GAP_FT already learned the hard way. Measured over 98,778 balls in
- * play, gap distance by outcome:
- *
- *              p2   p5  p10  p50  p90  p95  p98
- *   ground_out   5    8   12   27   44   47   50
- *   line_out    12   19   28   63   89   98  111
- *   popup       11   16   23   59   91  101  113
- *   single       8   12   18   51   83   89   95
- *
- * A grounder never lands more than about 50ft from anybody, because it dies in
- * an infield where four men stand close together; a fly ball routinely lands
- * 90ft from the nearest glove. ONE shared threshold would therefore convert
- * only fly balls and never a single ground ball, and "it found the hole" is the
- * most common version of this play in real baseball. Hence three bars.
- *
- * ⚠️ AND SINCE ZAIS-17 THE GROUND BALL IS NOT CONTESTED HERE AT ALL. Every fair
- * ball under GROUND_ANGLE is played out by cutOff() — the infielder who beats
- * it to his spot on its line has it — so ROBBED_FT and HOLE_FT now only ever
- * see balls in the air, and the old `ground_out: 46` bar is gone. "It found
- * the hole" is still the most common version of this play; it is decided by
- * who could get there, not by how far it stopped from anybody.
+ * The table still rolls a call, and the play overrules it both ways: a table
+ * hit somebody got to is an out (`robbed`), and a table out nobody got to is a
+ * single (`dropped`). Since ZAIS-17 the ground ball is decided by cutOff(), and
+ * since ZAIS-20 the ball in the air by catchFly() — who could get there, not
+ * how far it landed from anybody. The fixed-distance bars that used to decide
+ * the air are gone; scripts/balance.ts holds the run environment where they
+ * had it.
  */
-
-/**
- * A hit dropped this close to a fielder is a hit he takes away. Around p13 of
- * the single population, which is a ball hit more or less at somebody.
- */
-export const ROBBED_FT = 22;
-
-/**
- * How far from the nearest man an out has to land before it drops in, per kind
- * of batted ball. Each is roughly p93 of its own distribution — see the table
- * above, and re-measure with scripts/place.ts if the flight model moves.
- */
-/**
- * ⚠️ `line_out` WENT 94 → 106 WHEN IT BECAME A FLY BALL — 2026-09-12, and the
- * reason is baseball rather than arithmetic.
- *
- * The rule above says each bar sits at roughly p93 of its own population, and
- * 94 was p93 of `line_out` back when LAUNCH_ANGLE gave it [10, 20]° — a LINE
- * DRIVE. It is [10, 38]° now, a ball hit in the air to the outfield, and those
- * are not the same population or the same play. Real BABIP by batted-ball type
- * is roughly **line drives .690, ground balls .240, fly balls .120**: a line
- * drive is the most likely thing in baseball to fall in and a fly ball is the
- * least. So the bar a fly has to clear before it drops SHOULD be much further
- * out than the one a liner has to clear — holding to p93 out of tidiness would
- * have made every fly ball in the game as likely to find grass as a screamer.
- *
- * Measured across the sweep, at 300 games each: 94 → 4.60 runs and 8.75 hits;
- * 100 → 4.46 and 8.58; 106 → 4.31 and 8.41; 112 → 4.26 and 8.36. Real is 4.4
- * and 8.5, and the population's own p97 is about 106.
- */
-export const HOLE_FT: Readonly<Record<string, number>> = {
-  line_out: 106,
-  popup: 96,
-};
 
 /** What a robbed hit is scored as. The ball's own shape decides, not the bar. */
 const outKindFor = (launchAngle: number): Outcome =>
@@ -634,45 +614,12 @@ const outKindFor = (launchAngle: number): Outcome =>
 export type Verdict = 'robbed' | 'dropped' | null;
 
 /**
- * Run the contest.
- *
- * `reach` is the glove standing there, around 1.0 — see gloveOf() in
- * defense.ts. It scales BOTH bars in the same direction, because both are
- * statements about how much ground one man covers: a rangy fielder robs from
- * further away AND lets fewer balls fall in behind him. Defaulting it to 1
- * keeps every caller that has no fielders — most tests, the CLI — on exactly
- * the league-average behaviour.
- */
-export function contest(
-  hit: HitResult,
-  p: Placement,
-  reach = 1,
-): { outcome: Outcome; verdict: Verdict } {
-  const o = hit.outcome;
-
-  // ⚠️ ONLY THE SINGLE IS ROBBABLE. A double or a triple got past everybody by
-  // definition, and a home run is not on the field to be caught — letting
-  // geometry retire one of those would be geometry overruling the wall.
-  if (o === 'single' && p.gapFt <= ROBBED_FT * reach) {
-    return { outcome: outKindFor(hit.launchAngle), verdict: 'robbed' };
-  }
-
-  const bar = HOLE_FT[o];
-  if (bar !== undefined && p.gapFt >= bar * reach) {
-    return { outcome: 'single', verdict: 'dropped' };
-  }
-
-  return { outcome: o, verdict: null };
-}
-
-/**
- * THE GROUND BALL'S VERDICT, from the cut-off rather than from contest().
+ * THE GROUND BALL'S VERDICT, from the cut-off.
  *
  * Fielded by an infielder is a ground out, whatever the table said. Through
  * every infielder, an out becomes a single and a table hit stays that hit —
  * stretch() still gets its say. A ball that died in the dirt before anybody
  * reached it is the same infield single, told as one rather than as a hole.
- * ROBBED_FT and HOLE_FT do not apply on the ground any more.
  */
 function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Verdict } {
   if (cut.fielded) return { outcome: 'ground_out', verdict: isHit(o) ? 'robbed' : null };
@@ -681,7 +628,20 @@ function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Ve
 }
 
 /**
- * Plot a finished at-bat, contest it, apply the stretch, and hand back all of
+ * THE FLY BALL'S VERDICT, from catchFly(). The mirror of cutOffVerdict().
+ *
+ * Caught is an out, typed by the ball's shape; a table hit caught is `robbed`.
+ * Not caught, an out becomes a single that `dropped` and a table hit stays that
+ * hit — stretch() still gets its say.
+ */
+function airVerdict(o: Outcome, c: AirCatch, launchAngle: number): { outcome: Outcome; verdict: Verdict } {
+  if (c.caught) return { outcome: outKindFor(launchAngle), verdict: isHit(o) ? 'robbed' : null };
+  if (isOut(o)) return { outcome: 'single', verdict: 'dropped' };
+  return { outcome: o, verdict: null };
+}
+
+/**
+ * Plot a finished at-bat, race for it, apply the stretch, and hand back all of
  * it.
  *
  * Both callers — the sim and the live screen — go through this one function so
@@ -690,7 +650,7 @@ function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Ve
  * ⚠️ `isHit` AND `isOut` ARE RECOMPUTED NOW, and forgetting to was the bug
  * waiting inside this change. The old body did `{ ...result.hit, outcome }` and
  * said in its own comment that the two flags were safe to carry over, which was
- * true while every stretch moved a hit to another kind of hit. The contest
+ * true while every stretch moved a hit to another kind of hit. The race
  * moves a hit to an OUT, so a stale `isHit: true` would have put a man on first
  * on a ball the scorer had just called a line out.
  */
@@ -699,7 +659,7 @@ export function withPlacement(
   opts: {
     /**
      * The glove on the man the ball was hit at, by scorer's number. Omitted
-     * means league average everywhere — see contest().
+     * means league average everywhere.
      */
     reachAt?: (fielderNum: number) => number;
     /**
@@ -733,7 +693,9 @@ export function withPlacement(
     ? { outcome: result.hit.outcome, verdict: null as Verdict }
     : p.cutOff
       ? cutOffVerdict(result.hit.outcome, p.cutOff)
-      : contest(result.hit, p, opts.reachAt?.(p.fielderNum) ?? 1);
+      : p.airCatch
+        ? airVerdict(result.hit.outcome, p.airCatch, result.hit.launchAngle)
+        : { outcome: result.hit.outcome, verdict: null as Verdict };
 
   const outcome = stretch(contested, p);
   const hit =
@@ -819,7 +781,7 @@ export function describePlay(
   hit: HitResult,
   p: Placement,
   /**
-   * Whether the geometry overruled the table — see contest().
+   * Whether the play overruled the table — see withPlacement().
    *
    * ⚠️ THE SENTENCE IS THE WHOLE POINT OF THE CONTEST. A flip the player is not
    * told about is indistinguishable from the RNG being unkind, and a mechanic
