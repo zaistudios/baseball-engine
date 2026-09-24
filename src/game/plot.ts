@@ -443,7 +443,7 @@ export function overheadPoint(
 }
 
 /** The same polar pair in feet, for measuring one spot against another. */
-function feetXY(distFt: number, dirDeg: number): { x: number; y: number } {
+export function feetXY(distFt: number, dirDeg: number): { x: number; y: number } {
   const rad = (dirDeg * Math.PI) / 180;
   return { x: Math.sin(rad) * distFt, y: Math.cos(rad) * distFt };
 }
@@ -725,7 +725,38 @@ export function throwMarginMs(speed: number): number {
 }
 
 /** A fielder cannot catch and release instantly, and the ball has to travel. */
-const MIN_THROW_MS = 140;
+export const MIN_THROW_MS = 140;
+
+/**
+ * HOW FAST A THROW TRAVELS — feet per replay millisecond, for an arm of 1.0.
+ *
+ * The one new constant the force play was allowed (ZAIS-21). Every other clock
+ * a grounder needs already existed: the ball's (groundBallMs()), the fielder's
+ * (cutOff()), the batter's (runToFirstMs()) and a runner's (runnerMs()). With
+ * this, "out or safe at the bag" is two numbers compared. Like INFIELD_RANGE it
+ * is a REPLAY-clock speed — whatever makes a ball drawn at this pace land when
+ * the book says it did — and the arm is gloveOf(), the same number range is.
+ */
+export const THROW_SPEED = 0.4;
+
+/**
+ * Where each bag is, in feet from home in feetXY()'s frame. Counted the way
+ * runnerPoint() and ForceBag count: 1 first, 2 second, 3 third, 4 the plate.
+ */
+export function bagFeet(bag: number): { x: number; y: number } {
+  if (bag === 2) return feetXY(BASE_FT * Math.SQRT2, 0);
+  if (bag === 1 || bag === 3) return feetXY(BASE_FT, bag === 1 ? 45 : -45);
+  return { x: 0, y: 0 };
+}
+
+/**
+ * THE THROW'S CLOCK — ms from the moment he has the ball until it is in the
+ * glove at `toBag`: the transfer, then the flight at THROW_SPEED × arm.
+ */
+export function throwArrivalMs(from: { x: number; y: number }, toBag: number, arm: number): number {
+  const to = bagFeet(toBag);
+  return MIN_THROW_MS + Math.hypot(to.x - from.x, to.y - from.y) / (THROW_SPEED * Math.max(0.1, arm));
+}
 /** The closest "he beat him" is allowed to look before it reads as a tie. */
 const MIN_GAP_MS = 60;
 

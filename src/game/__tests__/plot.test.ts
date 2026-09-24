@@ -5,6 +5,11 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  throwArrivalMs,
+  bagFeet,
+  MIN_THROW_MS,
+  THROW_SPEED,
+  BASE_FT,
   plotBatted,
   overheadPoint,
   nearestFielder,
@@ -512,5 +517,17 @@ describe('the wall', () => {
     // floor: the floor is a minimum, not a placement.
     const hard = plotBatted('triple', 110, 18);
     expect(hard.distFt).toBeGreaterThan(plotBatted('triple', 80, 13).distFt);
+  });
+});
+
+describe('the throw has a clock', () => {
+  it('a bag-to-bag throw is the transfer plus ninety feet at the arm', () => {
+    const t = throwArrivalMs(bagFeet(2), 3, 1);
+    expect(t).toBeCloseTo(MIN_THROW_MS + BASE_FT / THROW_SPEED, 6);
+  });
+  it('a better arm gets it there sooner, and nothing beats the transfer', () => {
+    const from = { x: -40, y: 130 };
+    expect(throwArrivalMs(from, 1, 1.3)).toBeLessThan(throwArrivalMs(from, 1, 1));
+    expect(throwArrivalMs(bagFeet(1), 1, 1)).toBe(MIN_THROW_MS);
   });
 });
