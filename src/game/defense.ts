@@ -20,9 +20,9 @@
  * touch every caller for no behavioural gain. If core/ ever needs them too,
  * move them then.
  *
- * STILL NOT A FIELDING SIMULATION. No shifts, no cutoff men, no assists, no
- * runner-specific throws, no scorer deciding hit-or-error. One alignment, one
- * chaser, one roll.
+ * A PARTIAL FIELDING SIMULATION NOW: a fielded grounder is raced on the clocks
+ * (groundRace(), ZAIS-21). Everything else is still one alignment, one chaser
+ * and one roll: no cutoff men, no assists, no scorer deciding hit-or-error.
  */
 
 import type { Player } from '../core/roster.ts';

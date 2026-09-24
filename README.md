@@ -1452,6 +1452,47 @@ SS 22%, 3B 19%, 1B 19% and P 13%. The pitcher is high against a real 6–8%.
 plays, errors charged to a named fielder, and extra bases. See the Unscripted
 Plays spec.
 
+### A fielded grounder is a race — 2026-09-24 (ZAIS-21)
+
+*"Runners need to run to base, even in groundouts." "During double plays when
+there's a force out, the batter does not run to first." "Fielders should be
+going for double plays."* The double play and the force were dice
+(`DOUBLE_PLAY_RATE`, `FORCE_AT_SECOND`, `LEAD_FORCE`), and the replay stretched
+the runner until the picture agreed with them.
+
+When an infielder **fields** a grounder, `groundRace()` in `defense.ts` now
+times every play he could make, in ms from contact on the replay's clock:
+
+- the ball: `fieldedMs`, then `throwArrivalMs()` (the `MIN_THROW_MS` transfer
+  plus the flight at `THROW_SPEED × gloveOf()`),
+- the man covering the bag: `pivotReadyMs()`, his run from his spot at
+  `INFIELD_RANGE × gloveOf()`. The ball is at the bag when both are there,
+- each forced runner: `runnerMs()` with his running start,
+- the batter: `runToFirstMs()`.
+
+He takes the play with the most outs, and the lead bag between equals. A force
+with 0 or 1 out is relayed on to first, and it's a double play if the relay
+beats the batter and a fielder's choice if not. No force he can win means a
+throw to first, and a batter who beats that is an **infield single**. The
+error roll still comes first, the triple play keeps its roll on a clocked
+double play, and unforced runners still roll `GROUND_SEND_*`. `rollOuts()`'s
+dice stay for everything without a clock: fly balls, the CLI and `src/web`.
+
+The replay draws the same numbers (`Replay.clock`). The forced man runs at his
+own pace and is short of the bag when the ball lands. The batter runs out
+**every** fair grounder, double plays included, and dims when the throw beats
+him. The book leaves a retired batter at `batterTo` 0, and the picture had
+been reading that as "never left the box". The man covering second is
+`coverFor()`'s, in the engine and on screen alike.
+
+`THROW_SPEED` is **0.65**, with both sweeps in its comment. At 400 games: runs
+4.18 → 4.17, hits 8.14 → 8.52, double plays 0.67 → 0.86, force outs
+1.64 → 1.99, errors 0.65 → 0.61 per team. **Nobody beats out a clean play at
+this speed.** An infield hit is still a ball nobody got to, never a race lost
+at first. Force outs sit at the top of their band at every throw speed,
+because the second baseman reaches the bag within a few ms of an average
+runner from first.
+
 ### ⚠️ The third trap: a search that overfits
 
 The two lineups were picked by a random partition search scored on a small

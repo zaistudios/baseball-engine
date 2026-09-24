@@ -10,10 +10,15 @@
  * numbers — plotBatted()'s distance and hang, groundBallMs(), REACTION_MS and
  * the FIELDERS table — so they are the engine's inputs now, not decoration.
  *
+ * And since ZAIS-21 the throws on a FIELDED grounder are raced too: the
+ * batter's runToFirstMs(), a runner's runnerMs(), the throw's throwArrivalMs()
+ * at THROW_SPEED and the pivot's run to his bag, compared in defense.ts's
+ * groundRace(). The replay draws those same numbers (Replay.clock).
+ *
  * What is STILL only a picture: the fly ball and the liner (decided by
- * contest()'s fixed distances, next in line), the throw and the race to first
- * (rolled in fielding.ts and drawn to agree — raceTiming()), errors, and extra
- * bases. Each is its own step in the Unscripted Plays spec.
+ * contest()'s fixed distances, next in line), the race on everything that has
+ * no clock (rolled in fielding.ts and drawn to agree — raceTiming()), errors,
+ * and extra bases. Each is its own step in the Unscripted Plays spec.
  *
  * The rule that has not moved: the engine decides and the picture draws it. If
  * the replay and the box score disagree, the box score is right.

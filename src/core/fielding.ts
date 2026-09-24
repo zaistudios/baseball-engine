@@ -6,10 +6,14 @@
  * (game/defense.ts), and since ZAIS-17 a ground ball is fielded by whichever
  * infielder beats it to his spot on its line (game/placement.ts, cutOff()) —
  * that is where the fielder's range lives, from gloveOf(), with no new rating.
- * What is still rolled HERE, as dice on a ball already ruled an out, is the
- * two questions a batter can feel from the box: "did that turn two" and "did
- * they boot it". Throws and force plays, and errors charged to a named
- * fielder, are the next steps of the Unscripted Plays spec and will move them.
+ * And since ZAIS-21 a grounder he FIELDED is played out on the clocks too —
+ * the throw to each force bag, the pivot, the relay and the batter's run are
+ * raced in game/defense.ts's groundRace() and handed in as `race`, which
+ * replaces the double-play and force dice below. What is still rolled HERE is
+ * the error on every ball, and the double play and force on every out that
+ * has no clock: fly balls, the CLI and the roguelike. Errors charged to a
+ * named fielder, extra bases and relays are the next steps of the Unscripted
+ * Plays spec.
  *
  * Rolled here, applied by inning.ts. Same split as baserunning: the core
  * decides whether it happened, the inning layer decides what it cost.
