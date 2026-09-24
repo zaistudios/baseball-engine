@@ -364,6 +364,16 @@ describe('the scorer says where it went', () => {
     const p = { gapFt: 90, inTheGap: false, distFt: 415, dirDeg: 5, zone: 'wall' as const, fielderNum: 8, wallFt: 400 };
     expect(describePlay('home_run', hit(), p)).toMatch(/41\d feet/);
   });
+
+  it('names a diving catch, and only a diving catch', () => {
+    const p = { gapFt: 30, inTheGap: false, distFt: 300, dirDeg: -30, zone: 'left' as const, fielderNum: 7, wallFt: 400 };
+    const air = { num: 7, ms: 1800, reach: 0.98, caught: true };
+    const dove = { ...p, airCatch: { ...air, how: 'diving' as const } };
+    expect(describePlay('line_out', hit(), dove)).toBe('lined out to left, diving catch');
+    expect(describePlay('popup', hit(), dove)).toBe('popped up to left, diving catch');
+    expect(describePlay('line_out', hit(), dove, 'robbed')).toBe('robbed by left, diving catch');
+    expect(describePlay('line_out', hit(), { ...p, airCatch: { ...air, how: 'camped' as const } })).toBe('lined out to left');
+  });
 });
 
 describe('the home run rate is the design doc\'s number', () => {

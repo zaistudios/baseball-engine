@@ -1493,6 +1493,34 @@ at first. Force outs sit at the top of their band at every throw speed,
 because the second baseman reaches the bag within a few ms of an average
 runner from first.
 
+### A ball in the air is caught by whoever gets there — 2026-09-24 (ZAIS-20)
+
+Every fair ball in the air that is not a home run is now **raced for** too.
+`catchFly()` in `placement.ts` runs every fielder straight at the landing spot
+at `REACTION_MS` plus his run at `AIR_RANGE × gloveOf()`. The ball's clock is
+`plot.hangMs`, the same one the overhead flies it on. The first man there has
+it. Nobody there, and the man who came closest dives for it if he made
+`DIVE_REACH` of his run.
+
+- **Caught** is an out, a liner or a popup by its launch angle, and *robbed* if
+  the table called it a hit.
+- **Not caught** turns an out into a single that *dropped in*. A table hit stays
+  that hit.
+- A catch is **camped** (there with `CAMP_MS` to spare), **running**, or
+  **diving**. The replay draws which: waiting under it, taking it on the move,
+  or laying out sideways with the ball ending in his glove. The play text says
+  *"lined out to center, diving catch"*.
+
+`contest()`, `ROBBED_FT` and `HOLE_FT` are gone. `AIR_RANGE` is **0.042**, with
+the sweep in its comment (tuned before the grounder race landed). On top of
+it, at 400 games: 4.10 runs, 8.55 hits, BABIP .303, DP 0.93 per team, against
+4.17 / 8.52 / 0.86 with the grounder race alone. Diving catches are 3% of air
+catches: 2.3% for the bottom glove quartile, 3.8% for the top.
+
+**Still not simulated:** throws on a ball in the air, drops and errors charged
+to a named fielder, and extra bases. The 900–2600 ms clamp on `airHang()` is the
+known ceiling on how long a ball can hang.
+
 ### ⚠️ The third trap: a search that overfits
 
 The two lineups were picked by a random partition search scored on a small

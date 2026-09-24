@@ -795,8 +795,12 @@ export function describePlay(
   // sentence about a grounder.
   const who = POSITION_WORD[p.cutOff?.past ? p.cutOff.num : p.fielderNum] ?? 'somebody';
   const hard = hit.exitVelocity >= 95;
+  // The one catch worth a word of its own. Camped and running read as they
+  // always have; see catchFly().
+  const dove = p.airCatch?.caught && p.airCatch.how === 'diving' ? ', diving catch' : '';
 
   if (verdict === 'robbed') {
+    if (dove) return `robbed by ${who}${dove}`;
     return hit.launchAngle < 10
       ? `robbed by ${who}, a step to his left`
       : `robbed by ${who} on the run`;
@@ -829,9 +833,9 @@ export function describePlay(
       if (p.zone === 'infield') return `infield single past ${who}`;
       return hard ? `single, lined ${whereWords(p, 'into')}` : `single ${whereWords(p, 'to')}`;
     case 'line_out':
-      return hard ? `lined out hard to ${who}` : `lined out to ${who}`;
+      return (hard ? `lined out hard to ${who}` : `lined out to ${who}`) + dove;
     case 'popup':
-      return `popped up to ${who}`;
+      return `popped up to ${who}${dove}`;
     case 'ground_out':
       return `grounded out to ${who}`;
     case 'foul':
