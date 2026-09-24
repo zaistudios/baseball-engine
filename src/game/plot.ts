@@ -749,8 +749,31 @@ export const MIN_THROW_MS = 140;
  * this, "out or safe at the bag" is two numbers compared. Like INFIELD_RANGE it
  * is a REPLAY-clock speed — whatever makes a ball drawn at this pace land when
  * the book says it did — and the arm is gloveOf(), the same number range is.
+ *
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-23. Before the
+ * race (dice): 4.18 runs, 8.14 hits, 0.67 DP, 1.64 force outs, 0.65 errors.
+ * "beat" is the share of fielded grounders a 1.0 batter beats out, bases empty.
+ *
+ *   speed   runs   hits   DP/tm  force/tm  errors  beat
+ *   0.30    4.53   9.32   0.92    2.34     0.64    7.4%
+ *   0.35    4.32   8.94   1.00    2.24     0.64    4.3%
+ *   0.40    4.21   8.70   1.03    2.15     0.63    1.6%
+ *   0.42    4.13   8.65   1.04    2.15     0.61    0.9%
+ *   0.45    4.00   8.51   1.08    2.14     0.60    0.2%
+ *   0.50    3.83   8.24   1.10    2.11     0.58    0.0%
+ *   0.60    3.79   8.18   1.20    2.13     0.59    0.0%
+ *
+ * ⚠️ DOUBLE PLAYS AND FORCE OUTS ARE HIGH AT EVERY SPEED, and this constant
+ * cannot fix it: a slower throw buys fewer double plays only by giving back
+ * hits. With a man on first nearly every fielded grounder now gets the lead
+ * man, because nothing makes the pivot get to the bag or take longer than the
+ * fielder's own transfer. That is the lever, not this one.
+ *
+ * ⚠️ BEFORE THE RUNNERS LEFT WITH THE BALL (see REPLAY_CUT_MS) the batter's
+ * free 300ms put hits at 11.90 at 0.40 and still 9.83 at 1.30 — no speed
+ * could land it.
  */
-export const THROW_SPEED = 0.4;
+export const THROW_SPEED = 0.45;
 
 /**
  * Where each bag is, in feet from home in feetXY()'s frame. Counted the way
