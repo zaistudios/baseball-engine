@@ -2791,6 +2791,17 @@ running him to second or third. There is no play there and no call, so it
 reads as the replay ending rather than as a contradiction — but it is the
 obvious next thing if the replay gets another pass.
 
+**The scoreboard waits for the replay — 2026-09-24 (ZAIS-22).** The engine
+settles the play before the camera cuts, and the at-bat view is fully on screen
+for the first `REPLAY_CUT_MS` of the replay — so the bags filled, the out dot lit
+and the run went up before the ball had left the infield. Now the base map, the
+outs, the line score and the situation strip keep showing the game as it stood
+**before** the play (`shown` in `main.ts`) until the replay is over, on balls in
+play, fouls and steals. Freeze, not hide. Anything that starts a replay through
+`playReplay()` gets this for free; `prePlay.test.ts` fails if a replay is started
+any other way. The engine is untouched, and so are the play-by-play log and the
+captions.
+
 ### The replay says what just happened
 
 ⚠️ **IT WAS SILENT, AND IT WAS THE SAME LENGTH EVERY TIME.** `finishAtBat()` set
