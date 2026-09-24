@@ -422,3 +422,57 @@ describe('a runner has one clock', () => {
     expect(runnerMs(1, 1, 2)).toBeLessThan(runToFirstMs(1));
   });
 });
+
+describe('a ball in the air is drawn the way the engine caught it', () => {
+  const stub = () => {
+    const calls: string[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k: string) => {
+        if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+        if (k === 'createLinearGradient') return () => ({ addColorStop: () => undefined });
+        return (...a: unknown[]) => void calls.push(`${k}(${a.join(',')})`);
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, calls };
+  };
+  const fly = (how: 'camped' | 'diving', ms: number, reach: number) =>
+    newReplay({
+      now: 0, outcome: 'line_out', exitVelocity: 95, launchAngle: 30, direction: 12,
+      speed: 1, safe: false, chaserNum: 8,
+      airCatch: { num: 8, ms, reach, caught: true, how },
+    });
+  /** Where the centre fielder is drawn at contact-clock `now`, and whether anything was tipped over. */
+  const cf = (r: Replay, now: number) => {
+    const { ctx, calls } = stub();
+    let at = { x: 0, y: 0 };
+    drawOverhead(ctx, makeCam(420, 340), r, now, {
+      field: '#2d3b2c', dirt: '#5c4030',
+      figure: (_c, o) => { if (o.seed === 'F8') at = { x: o.x, y: o.y }; },
+    });
+    return { at, rotated: calls.some((c) => c.startsWith('rotate(')) };
+  };
+
+  it('diving: upright on the way, laid out at the end, and finished on the spot', () => {
+    const r = fly('diving', 0, 0.9);
+    const land = REPLAY_CUT_MS + r.plot.hangMs;
+    const r2 = { ...r, airCatch: { ...r.airCatch!, ms: r.plot.hangMs } };
+    expect(cf(r2, land - 400).rotated).toBe(false);
+    const end = cf(r2, land);
+    expect(end.rotated).toBe(true);
+    // He finishes on the landing spot: nothing is left of his run.
+    const later = cf(r2, land + 300);
+    expect(later.at.x).toBeCloseTo(end.at.x, 6);
+    expect(later.at.y).toBeCloseTo(end.at.y, 6);
+  });
+
+  it('camped: he is standing still under it before it comes down', () => {
+    const r = fly('camped', 900, 1);
+    const land = REPLAY_CUT_MS + r.plot.hangMs;
+    const waiting = cf(r, REPLAY_CUT_MS + 900 + 20);
+    const caught = cf(r, land);
+    expect(waiting.at.x).toBeCloseTo(caught.at.x, 6);
+    expect(waiting.at.y).toBeCloseTo(caught.at.y, 6);
+    expect(caught.rotated).toBe(false);
+  });
+});

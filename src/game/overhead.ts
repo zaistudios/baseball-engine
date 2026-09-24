@@ -41,8 +41,8 @@ import {
   type Race,
 } from './plot.ts';
 import { SPRITE_SPECS } from './sprites.ts';
-import type { CutOff } from './placement.ts';
 import type { GroundClock } from './defense.ts';
+import type { AirCatch, CutOff } from './placement.ts';
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -124,6 +124,11 @@ function drawMan(
      * stance with his feet apart rather than as a snap back to attention.
      */
     moved?: number;
+    /**
+     * A DIVE — radians the figure is tipped over, about his feet. Only the
+     * diving catch sets it; see Replay.airCatch.
+     */
+    lean?: number;
   },
 ): void {
   // ⚠️ 0.7 AND NOT THE OLD DOT'S 0.55. A dot is a solid disc and survives being
@@ -190,6 +195,11 @@ function drawMan(
    */
   ctx.save();
   ctx.globalAlpha = alpha;
+  if (o.lean) {
+    ctx.translate(x, feet);
+    ctx.rotate(o.lean);
+    ctx.translate(-x, -feet);
+  }
   opts.figure(ctx, {
     x,
     y: feet,
@@ -360,6 +370,13 @@ export interface Replay {
    */
   clock?: GroundClock;
   /**
+   * THE ENGINE'S ANSWER ON A BALL IN THE AIR — who got there, when, and how.
+   * See catchFly() in placement.ts. Camped, he is standing under it at `ms`;
+   * running, he takes it on the move; diving, he makes `reach` of his run and
+   * lays out for the rest. Not caught, he is drawn `reach` of the way there.
+   */
+  airCatch?: AirCatch;
+  /**
    * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
    * earns. Absent is the ordinary hold, which is what a foul and a routine
    * grounder get.
@@ -422,6 +439,8 @@ export function newReplay(o: {
   cutOff?: CutOff;
   /** The engine's arrival times on a fielded grounder. See Replay.clock. */
   clock?: GroundClock;
+  /** Who got to a ball in the air. See Replay.airCatch. */
+  airCatch?: AirCatch;
   /**
    * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
    * out of the park. Omitted is the 400-foot bowl.
@@ -460,6 +479,7 @@ export function newReplay(o: {
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
+    ...(o.airCatch === undefined ? {} : { airCatch: o.airCatch }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
   };
@@ -555,6 +575,11 @@ export const REPLAY_CALL_MS = 700;
  * beat as any other out. See replayLength().
  */
 export const FOUL_HOLD_MS = 220;
+
+/** How far a diving man's glove reaches past his feet, in canvas pixels. */
+const DIVE_BODY = MAN_H * 0.9;
+/** How long the lay-out takes, from feet planted to hands on the ball. */
+const DIVE_MS = 260;
 
 /**
  * Everything about the play at first, resolved once.
@@ -995,10 +1020,37 @@ export function drawOverhead(
     const role = roleFor(f, chaser, r.doublePlay || r.forceAt === 2, relaying);
     let to = post;
     let k2 = 0;
+    /** How far through a dive he is, 0-1, and the tilt it puts on him. */
+    let lay = 0;
+    let lean = 0;
 
     if (beaten?.num === f.num && role !== 'chase' && role !== 'relay') {
       to = overheadPoint(beaten.alongFt, r.direction, cam.home, cam.pxPerFt);
       k2 = beaten.reach * leg(REPLAY_CUT_MS + beaten.ms);
+    } else if (role === 'chase' && r.airCatch && !r.error) {
+      // THE ENGINE'S RUN, NOT A RIGGED ONE. He gets `reach` of the way by the
+      // time he got there — early if he camped — and a diving man lays out for
+      // the rest.
+      const air = r.airCatch;
+      to = landing;
+      k2 = air.reach * leg(REPLAY_CUT_MS + air.ms);
+      // Running, he takes it on the move — flat out, no ease into it.
+      if (air.how === 'running') k2 = Math.max(0, Math.min(1, (tc - REACTION_MS) / Math.max(1, REPLAY_CUT_MS + air.ms - REACTION_MS)));
+      if (air.how === 'diving') {
+        // ⚠️ THE DIVE IS A BODY LENGTH ON SCREEN, NOT THE FEW FEET THE ENGINE
+        // SAYS. A man here is drawn twenty-five feet tall (see GAIT_CYCLE_PX),
+        // so a lay-out the engine's size is two pixels of nothing. He runs flat
+        // out — no ease, a diving man does not pull up — to a body length
+        // beside the ball, then tips over sideways for the last DIVE_MS until
+        // his glove is on it when it comes down. Always sideways: tipped along
+        // his run, a man coming in toward the camera lands on his head.
+        const side = landing.x >= post.x ? 1 : -1;
+        to = { x: landing.x - side * DIVE_BODY, y: landing.y };
+        const layAt = race.fieldedAt - DIVE_MS;
+        k2 = Math.max(0, Math.min(1, (tc - REACTION_MS) / Math.max(1, layAt - REACTION_MS)));
+        lay = Math.max(0, Math.min(1, (tc - layAt) / DIVE_MS));
+        lean = lay * side * (Math.PI / 2);
+      }
     } else if (role === 'chase') {
       to = landing;
       // A booted ball is one he GOT to — he just did not hold it. Reaching
@@ -1036,6 +1088,8 @@ export function drawOverhead(
       // How far off his post he has come. A man shading a step and a man
       // running the ball down are the same call with different distances.
       moved: Math.hypot(p.x - post.x, p.y - post.y),
+      // Laid out flat, head and glove toward the ball.
+      ...(lay > 0 ? { lean } : {}),
     });
   }
 

@@ -190,6 +190,11 @@ export interface Plot {
  * run and a routine fly ball took nearly the same time to land, so nothing
  * felt big. If it needs to breathe more, this and REPLAY_HOLD_MS in
  * overhead.ts are the two numbers.
+ *
+ * ponytail: catchFly() races fielders against this clamped hang too, so a
+ * towering popup and a merely high one give a fielder the same 2.6s. A second,
+ * unclamped clock for the engine is the upgrade, and it is the thing the
+ * Unscripted Plays spec forbids: the picture would stop agreeing with the book.
  */
 const HANG_MIN_MS = 900;
 const HANG_MAX_MS = 2600;
@@ -538,17 +543,12 @@ export function nearestFielder(
 /**
  * How far along his run to the ball the chaser is when the ball gets there.
  *
- * STILL RIGGED FOR A BALL IN THE AIR, and only there. The outcome of a fly or a
- * liner comes from contest()'s distances, so the picture has to agree with it:
- * on an out the chaser arrives with the ball, and on a hit he is still closing
- * when it lands. That is the next step of the Unscripted Plays spec to replace.
- *
- * ⚠️ A GROUND BALL IS NOT RIGGED ANY MORE. placement.ts's cutOff() decides who
- * got there, where and when, and the overhead draws that: a ground out is 1
- * here because he really did get there first, and the infielder a ball got
- * past is drawn at the engine's own `reach`, not at anything on this list.
- *
- * A home run is the one case with no chase in it at all.
+ * ⚠️ WHAT IS LEFT OF THE RIG. A ball in the air is not drawn from here any more
+ * — catchFly() in placement.ts decides who got there, when and how, and the
+ * overhead draws its `reach` (ZAIS-20). A ground out is 1 because he really did
+ * get there first, and the infielder a ball got past is drawn at cutOff()'s
+ * own `reach`. What still reads this list: the outfielder picking up a grounder
+ * that got through, a home run, and a foul nobody caught.
  */
 export function chaseReach(outcome: Outcome): number {
   if (outcome === 'home_run') return 0.62; // drifts back, watches it go

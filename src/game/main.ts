@@ -2300,12 +2300,16 @@ function completePlay(
           // A foul out sets this because nobody stands in foul ground for
           // nearestFielder() to find, and a ground ball because the man who cut
           // it off is not the man nearest where it stopped. See raceFor().
-          ...((result.hit.outcome === 'foul_out' || placed.placement?.cutOff) && placed.placement
+          // A ball in the air sets it because the man who got there first is
+          // not always the man nearest where it came down.
+          ...((result.hit.outcome === 'foul_out' || placed.placement?.cutOff || placed.placement?.airCatch) &&
+          placed.placement
             ? { chaserNum: placed.placement.fielderNum }
             : {}),
           ...(placed.placement?.cutOff ? { cutOff: placed.placement.cutOff } : {}),
           // The times the race was decided on, so the picture draws them.
           ...(fielding?.clock ? { clock: fielding.clock } : {}),
+          ...(placed.placement?.airCatch ? { airCatch: placed.placement.airCatch } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           // The scorers go in the same list: a man who came all the way home
           // is a runner who covered more bags, not a different kind of thing.
@@ -3166,6 +3170,7 @@ if (import.meta.env.DEV) {
       // under the ball would not be the one it was plotted against.
       wallFt: wallAt(direction, game.home.park),
       ...(cut.cutOff ? { chaserNum: cut.fielderNum, cutOff: cut.cutOff } : {}),
+      ...(cut.airCatch ? { chaserNum: cut.fielderNum, airCatch: cut.airCatch } : {}),
       ...extra,
     });
     // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.
