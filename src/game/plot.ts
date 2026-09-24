@@ -572,6 +572,41 @@ export function chaseReach(outcome: Outcome): number {
 export const REACTION_MS = 110;
 
 /**
+ * HOW FAST AN INFIELDER GETS TO HIS SPOT ON A GROUND BALL'S LINE — feet per
+ * replay millisecond for a glove of 1.0.
+ *
+ * It is a REPLAY-CLOCK speed, not a real one: the ball's clock is
+ * groundBallMs(), which is the pacing the overhead draws at, so this is
+ * whatever speed makes a man drawn at that pace arrive when the box score says
+ * he did. The one new constant step (a) was allowed.
+ *
+ * ⚠️ HIS RUN AND THE BALL'S ROLL BOTH START AT ZERO. The overhead holds the
+ * batter's view for REPLAY_CUT_MS before the ball leaves the plate, and giving
+ * the fielder those 300ms free made the pitcher field a third of the
+ * grounders that were fielded — he stands on the line of everything hit up
+ * the middle.
+ *
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-23. Before this
+ * change: 4.12 runs and 7.99 hits per team.
+ *
+ *   range   runs   hits   DP/tm  force/tm  errors
+ *   0.035   5.25  10.46   0.61    1.60     0.61
+ *   0.040   4.54   8.98   0.67    1.65     0.56
+ *   0.042   4.34   8.62   0.67    1.64     0.61
+ *   0.045   4.18   8.14   0.67    1.64     0.65
+ *   0.048   4.11   7.91   0.67    1.65     0.67
+ *   0.050   4.00   7.70   0.66    1.66     0.66
+ *   0.055   3.82   7.29   0.62    1.67     0.66
+ *
+ * ⚠️ THE CURVE IS STEEP HERE — 0.005 is most of a hit per team. At 0.045, over
+ * 200 games of real at-bats, 89% of grounders are fielded, 7% get through and
+ * 4% die in the dirt before anybody reaches them; the fielded ones go 2B 26%,
+ * SS 22%, 3B 19%, 1B 19%, P 13%. The pitcher is high against a real 6-8%,
+ * because nothing here slows his first step after the follow-through.
+ */
+export const INFIELD_RANGE = 0.045;
+
+/**
  * What each fielder does on this play.
  *
  * The first version moved the chaser and left the other eight standing, which
@@ -754,26 +789,36 @@ export const MIN_THROW_MS = 140;
  * race (dice): 4.18 runs, 8.14 hits, 0.67 DP, 1.64 force outs, 0.65 errors.
  * "beat" is the share of fielded grounders a 1.0 batter beats out, bases empty.
  *
- *   speed   runs   hits   DP/tm  force/tm  errors  beat
- *   0.30    4.53   9.32   0.92    2.34     0.64    7.4%
- *   0.35    4.32   8.94   1.00    2.24     0.64    4.3%
- *   0.40    4.21   8.70   1.03    2.15     0.63    1.6%
- *   0.42    4.13   8.65   1.04    2.15     0.61    0.9%
- *   0.45    4.00   8.51   1.08    2.14     0.60    0.2%
- *   0.50    3.83   8.24   1.10    2.11     0.58    0.0%
- *   0.60    3.79   8.18   1.20    2.13     0.59    0.0%
+ * With the pivot on his own clock (pivotReadyMs() in defense.ts):
  *
- * ⚠️ DOUBLE PLAYS AND FORCE OUTS ARE HIGH AT EVERY SPEED, and this constant
- * cannot fix it: a slower throw buys fewer double plays only by giving back
- * hits. With a man on first nearly every fielded grounder now gets the lead
- * man, because nothing makes the pivot get to the bag or take longer than the
- * fielder's own transfer. That is the lever, not this one.
+ *   speed   runs   hits   DP/tm  force/tm  errors  beat
+ *   0.40    4.59   9.09   0.65    2.10     0.65    1.6%
+ *   0.45    4.41   8.92   0.70    2.07     0.62    0.2%
+ *   0.50    4.27   8.69   0.73    2.01     0.60    0.0%
+ *   0.55    4.20   8.63   0.79    2.04     0.60    0.0%
+ *   0.60    4.23   8.63   0.82    2.02     0.60    0.0%
+ *   0.65    4.23   8.53   0.82    1.98     0.61    0.0%
+ *   0.70    4.18   8.45   0.85    1.99     0.62    0.0%
+ *   0.75    4.17   8.40   0.85    1.97     0.61    0.0%
+ *   0.80    4.12   8.33   0.86    1.96     0.60    0.0%
+ *
+ * 0.65 is the slowest arm that lands all five inside ZAIS-21's bands.
+ *
+ * ⚠️ FORCE OUTS SIT AT THE TOP OF THEIR BAND AT EVERY SPEED. The pivot, not
+ * the throw, decides them: the second baseman reaches the bag within a few ms
+ * of an average runner from first, so the force comes down to the runner's
+ * legs. And NOBODY BEATS OUT A CLEAN PLAY at this speed — an infield hit is a
+ * ball nobody got to (cutOff()), never a race lost at first.
+ *
+ * Without the pivot's clock (the first sweep): 0.45 gave 4.00 runs, 8.51
+ * hits, 1.08 DP and 2.14 force outs, and no speed from 0.30 to 0.60 brought
+ * DP under 0.92 — the lead force cost the fielder's transfer and nothing else.
  *
  * ⚠️ BEFORE THE RUNNERS LEFT WITH THE BALL (see REPLAY_CUT_MS) the batter's
  * free 300ms put hits at 11.90 at 0.40 and still 9.83 at 1.30 — no speed
  * could land it.
  */
-export const THROW_SPEED = 0.45;
+export const THROW_SPEED = 0.65;
 
 /**
  * Where each bag is, in feet from home in feetXY()'s frame. Counted the way

@@ -50,6 +50,9 @@ import {
   runToFirstMs,
   runnerMs,
   REPLAY_CUT_MS,
+  REACTION_MS,
+  INFIELD_RANGE,
+  FIELDERS,
   type Fielder,
 } from './plot.ts';
 
@@ -258,6 +261,27 @@ const pivotAt = (bag: ForceBag, fielderNum: number): number =>
   bag === 2 ? (fielderNum === 4 ? 6 : 4) : bag === 3 ? 5 : 2;
 
 /**
+ * THE PIVOT'S CLOCK — ms from contact, on the race's clock, until the man
+ * covering `bag` is standing on it. He breaks at contact from where he stands
+ * and runs at INFIELD_RANGE × his glove, the same clock cutOff() runs a fielder
+ * on, pointed at a bag instead of the ball's line. No new constant.
+ *
+ * Before it the lead force cost the fielder's transfer and nothing else, and
+ * with a man on first nearly every fielded grounder got him: 1.08 DP and 2.14
+ * force outs a team, against 0.67 and 1.64 on the dice (ZAIS-21).
+ *
+ * ponytail: standard depth, not the shifted table — fieldBall() is not handed
+ * the shift. Pass the alignment through when a shift should slow a pivot.
+ */
+export function pivotReadyMs(bag: ForceBag, pivotNum: number, glove: number): number {
+  const spot = FIELDERS.find((f) => f.num === pivotNum)!;
+  return REPLAY_CUT_MS + REACTION_MS + feetBetween(feetXY(spot.distFt, spot.dirDeg), bagFeet(bag)) / (INFIELD_RANGE * Math.max(0.1, glove));
+}
+
+const feetBetween = (a: { x: number; y: number }, b: { x: number; y: number }): number =>
+  Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
  * STEP (b) FOR GROUND BALLS: the throws, raced against the runners.
  *
  * The ball is in his glove at `REPLAY_CUT_MS + cut.ms` — the overhead's own
@@ -271,9 +295,10 @@ const pivotAt = (bag: ForceBag, fielderNum: number): number =>
  * Nothing here rolls. The triple play is the one die, and only on a double play
  * the clocks already turned — see fieldBall().
  *
- * ponytail: the pivot's arm is his glove, same as the fielder's, and his feet
- * at the bag are the transfer and nothing more. No bobbled exchange, no runner
- * taking him out. Add them when a double play looks too clean.
+ * ponytail: the pivot's arm is his glove, same as the fielder's. He has to get
+ * to the bag (pivotReadyMs()), and once there it is the transfer and nothing
+ * more. No bobbled exchange, no runner taking him out. Add them when a double
+ * play looks too clean.
  */
 export function groundRace(o: {
   cut: CutOff;
@@ -282,6 +307,8 @@ export function groundRace(o: {
   arm: number;
   /** The arm at each scorer's number, for the pivot. */
   armAt: (fielderNum: number) => number;
+  /** The feet at each scorer's number — his glove, no throw press. See pivotReadyMs(). */
+  reachAt: (fielderNum: number) => number;
   batterSpeed: number;
   bases: Bases;
   outs: number;
@@ -295,12 +322,18 @@ export function groundRace(o: {
   const plays: Play[] = [];
   for (let bag = forcedRunners(o.bases) + 1; bag >= 2; bag--) {
     const at = bag as ForceBag;
-    const leadMs = fieldedMs + throwArrivalMs(from, at, o.arm);
+    const pivot = pivotAt(at, o.cut.num);
+    // The ball is at the bag once it has got there AND somebody is on the bag
+    // to take it. A man who covers it himself runs it there instead.
+    const leadMs =
+      pivot === o.cut.num
+        ? fieldedMs + feetBetween(from, bagFeet(at)) / (INFIELD_RANGE * Math.max(0.1, o.reachAt(pivot)))
+        : Math.max(fieldedMs + throwArrivalMs(from, at, o.arm), pivotReadyMs(at, pivot, o.reachAt(pivot)));
     const runner = REPLAY_CUT_MS + runnerMs(o.bases[at - 2]!.speed, at - 1, at);
     if (leadMs >= runner) continue; // a tie goes to the runner
     // With two out the force is the third, and nobody throws on to first.
     const firstMs =
-      o.outs < 2 ? leadMs + throwArrivalMs(bagFeet(at), 1, o.armAt(pivotAt(at, o.cut.num))) : null;
+      o.outs < 2 ? leadMs + throwArrivalMs(bagFeet(at), 1, o.armAt(pivot)) : null;
     plays.push({
       forceAt: at,
       outs: firstMs !== null && firstMs < batterMs ? 2 : 1,
@@ -393,6 +426,7 @@ export function fieldBall(
             dirDeg: opts.placement!.dirDeg,
             arm: glove * quick,
             armAt: (num) => reachOf(alignment)(num) * quick,
+            reachAt: reachOf(alignment),
             batterSpeed: opts.batterSpeed,
             bases,
             outs: opts.outs,

@@ -292,7 +292,10 @@ describe('building one in the editor', () => {
 describe('what a park does to a ball game', () => {
   const HOME = bare(LEAGUE_AS_WRITTEN[6]!);
   const AWAY = bare(LEAGUE_AS_WRITTEN[7]!);
-  const SEEDS = Array.from({ length: 150 }, (_, i) => i + 1);
+  // 450, not 150: the bandbox's edge is ~0.8 runs, and 150-game windows of it
+  // ran 0.45 to 1.14 — the grounder race (ZAIS-21) reshuffled the dice and
+  // landed this one under the 0.5 bar without the parks doing anything less.
+  const SEEDS = Array.from({ length: 450 }, (_, i) => i + 1);
 
   const play = (home: Team, away: Team) => {
     let runs = 0;

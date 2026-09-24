@@ -13,6 +13,7 @@ import {
   fieldBall,
   gloveOf,
   groundRace,
+  pivotReadyMs,
   POSITION_DIFFICULTY,
   type Position,
 } from '../defense.ts';
@@ -331,7 +332,7 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
   const race = (o: { batter: number; arm?: number; bases: Bases; outs?: number; p?: Placement }) => {
     const p = o.p ?? toShort();
     return groundRace({
-      cut: p.cutOff!, dirDeg: p.dirDeg, arm: o.arm ?? 1, armAt: () => o.arm ?? 1,
+      cut: p.cutOff!, dirDeg: p.dirDeg, arm: o.arm ?? 1, armAt: () => o.arm ?? 1, reachAt: () => o.arm ?? 1,
       batterSpeed: o.batter, bases: o.bases, outs: o.outs ?? 0,
     });
   };
@@ -351,6 +352,19 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
     const r = race({ batter: 1, bases: [runner(1), null, null] });
     expect(r.clock.leadMs!).toBeLessThan(r.clock.runnerMs!);
     if (r.doublePlay) expect(r.clock.firstMs!).toBeLessThan(r.clock.batterMs);
+  });
+
+  it('the ball is not at second until the man covering it is', () => {
+    // To short, so the second baseman covers. However quick the throw, the
+    // force waits on his feet — the lever that brought double plays down.
+    const p = toShort();
+    const r = groundRace({
+      cut: p.cutOff!, dirDeg: p.dirDeg, arm: 5, armAt: () => 5, reachAt: () => 0.8,
+      batterSpeed: 1, bases: [runner(0.5), null, null], outs: 0,
+    });
+    expect(r.forceAt).toBe(2);
+    expect(r.clock.leadMs!).toBe(pivotReadyMs(2, 4, 0.8));
+    expect(pivotReadyMs(2, 4, 0.8)).toBeGreaterThan(pivotReadyMs(2, 4, 1.2));
   });
 
   it('with two out the force ends it and nothing is thrown on to first', () => {

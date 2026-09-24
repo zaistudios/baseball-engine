@@ -41,9 +41,14 @@ import {
   FIELDERS,
   GROUND_ANGLE,
   REACTION_MS,
+  INFIELD_RANGE,
   type Fielder,
   type Plot,
 } from './plot.ts';
+
+// It lives in plot.ts so defense.ts can run a pivot on it without importing
+// this file's teams. Re-exported for everything that asks here.
+export { INFIELD_RANGE };
 import { fieldersFor, type Shift } from './shift.ts';
 import { wallAt, type Park } from './teams.ts';
 
@@ -324,41 +329,6 @@ export function place(
 }
 
 // --------------------------------------------------------------- the cut-off
-
-/**
- * HOW FAST AN INFIELDER GETS TO HIS SPOT ON A GROUND BALL'S LINE — feet per
- * replay millisecond for a glove of 1.0.
- *
- * It is a REPLAY-CLOCK speed, not a real one: the ball's clock is
- * groundBallMs(), which is the pacing the overhead draws at, so this is
- * whatever speed makes a man drawn at that pace arrive when the box score says
- * he did. The one new constant step (a) was allowed.
- *
- * ⚠️ HIS RUN AND THE BALL'S ROLL BOTH START AT ZERO. The overhead holds the
- * batter's view for REPLAY_CUT_MS before the ball leaves the plate, and giving
- * the fielder those 300ms free made the pitcher field a third of the
- * grounders that were fielded — he stands on the line of everything hit up
- * the middle.
- *
- * Measured with scripts/balance.ts, 400 games each, 2026-09-23. Before this
- * change: 4.12 runs and 7.99 hits per team.
- *
- *   range   runs   hits   DP/tm  force/tm  errors
- *   0.035   5.25  10.46   0.61    1.60     0.61
- *   0.040   4.54   8.98   0.67    1.65     0.56
- *   0.042   4.34   8.62   0.67    1.64     0.61
- *   0.045   4.18   8.14   0.67    1.64     0.65
- *   0.048   4.11   7.91   0.67    1.65     0.67
- *   0.050   4.00   7.70   0.66    1.66     0.66
- *   0.055   3.82   7.29   0.62    1.67     0.66
- *
- * ⚠️ THE CURVE IS STEEP HERE — 0.005 is most of a hit per team. At 0.045, over
- * 200 games of real at-bats, 89% of grounders are fielded, 7% get through and
- * 4% die in the dirt before anybody reaches them; the fielded ones go 2B 26%,
- * SS 22%, 3B 19%, 1B 19%, P 13%. The pitcher is high against a real 6-8%,
- * because nothing here slows his first step after the follow-through.
- */
-export const INFIELD_RANGE = 0.045;
 
 /** The men who can cut a ground ball off. The catcher is behind it. */
 const INFIELDERS: readonly number[] = [1, 3, 4, 5, 6];
