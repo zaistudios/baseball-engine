@@ -602,6 +602,30 @@ function markContact(): void {
  */
 let replay: Replay | null = null;
 
+/**
+ * THE GAME AS IT STOOD BEFORE THE PLAY BEING REPLAYED — ZAIS-16, 2026-09-24.
+ *
+ * The engine has already moved `game` on by the time the replay starts, and the
+ * at-bat view is fully visible for the first REPLAY_CUT_MS of it. The bags, the
+ * outs, the line score and the situation strip read this instead of `game`
+ * until the replay is over, so you find out what happened by watching it.
+ * Freeze, not hide: the map keeps showing where everyone was.
+ *
+ * ⚠️ ONLY playReplay() SETS IT, and it is cleared everywhere `replay` is. A
+ * replay built any other way leaks the result — the test in
+ * __tests__/prePlay.test.ts reads this file for exactly that.
+ */
+let shown: GameState | null = null;
+
+/** Start a replay, and hold the picture where it was before the play. */
+function playReplay(r: Replay | null, before: GameState): void {
+  replay = r;
+  shown = r && before;
+}
+
+/** What the scoreboard and the base map draw from. See `shown`. */
+const onScreen = (): GameState => shown ?? game;
+
 /** What to draw in 'resolve'. */
 let flash = '';
 let flashUntil = 0;
@@ -1227,9 +1251,9 @@ function swing(): void {
  * The bag numbering is runnerPoint()'s: 1 first, 2 second, 3 third. sendRunner
  * counts its own to from zero, so it is one less.
  */
-function showSteal(to: number, safe: boolean, speed: number): void {
+function showSteal(to: number, safe: boolean, speed: number, before: GameState): void {
   showScene(null);
-  replay = newReplay({
+  playReplay(newReplay({
     now: performance.now(),
     // Nothing was hit. The outcome is only here because a Replay has one, and
     // drawOverhead() returns before it can read the plot — see drawSteal().
@@ -1240,7 +1264,7 @@ function showSteal(to: number, safe: boolean, speed: number): void {
     speed,
     safe,
     steal: { from: to, to: to + 1, safe, speed },
-  });
+  }), before);
 }
 
 function steal(): void {
@@ -1253,6 +1277,7 @@ function steal(): void {
   const out = sendRunner(game, defence, rng);
   if (!out) return;
 
+  const before = game;
   game = out.game;
   const bag = out.to === 1 ? 'second' : 'third';
   say(
@@ -1261,7 +1286,7 @@ function steal(): void {
       : `${out.runner.name} caught stealing ${bag}. (${odds}%)`,
     out.safe ? 'big' : 'out',
   );
-  showSteal(out.to, out.safe, out.runner.speed);
+  showSteal(out.to, out.safe, out.runner.speed, before);
   flash = '';
   flashUntil = performance.now() + replayLength(replay!) / speed();
 
@@ -1344,15 +1369,15 @@ function runnersGoOnThePitch(): void {
   // running game is the STEAL button and stays where it is — see steal().
   if (!game.over && !youBat()) {
     const op = stealOpportunity(game);
-    const basesBefore = game.bases;
+    const before = game;
     game = runTheBases(game, rng);
-    if (op && game.bases !== basesBefore) {
+    if (op && game.bases !== before.bases) {
       const caught = game.outs > outsBefore;
       say(
         caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
         caught ? 'out' : 'big',
       );
-      showSteal(op.to, !caught, op.runner.speed);
+      showSteal(op.to, !caught, op.runner.speed, before);
       flash = '';
       flashUntil = performance.now() + replayLength(replay!) / speed();
     }
@@ -2044,7 +2069,7 @@ function showFoul(runnerSpeed: number): boolean {
   // built. Without the clear, a foul one hitter later cuts to the overhead with
   // "STRIKE THREE" still written across the bottom of it.
   showScene(null);
-  replay = newReplay({
+  playReplay(newReplay({
     now: performance.now(),
     outcome: swing.outcome,
     exitVelocity: swing.exitVelocity,
@@ -2057,7 +2082,7 @@ function showFoul(runnerSpeed: number): boolean {
     // The fence this one went toward, so the drawn ball and the sentence
     // under it agree. See newReplay's own note.
     wallFt: wallAt(swing.direction, game.home.park),
-  });
+  }), game);
   return true;
 }
 
@@ -2197,6 +2222,7 @@ function completePlay(
   // before the play and nothing else, and leverage needs the inning, the outs
   // and both scores as they stood when this man walked up.
   const spotHeWalkedInto = situationOf(game, wasBatting);
+  const before = game;
   const { game: next, log } = recordPlay(game, result, fielding, shift);
   game = next;
 
@@ -2261,7 +2287,7 @@ function completePlay(
   //
   // Fouls never reach this — a foul does not end the at-bat, so it never gets
   // to finishAtBat at all, and there is nothing to watch anyway.
-  replay =
+  playReplay(
     result.kind === 'in_play'
       ? newReplay({
           now: performance.now(),
@@ -2330,7 +2356,9 @@ function completePlay(
               }
             : {}),
         })
-      : null;
+      : null,
+    before,
+  );
 
   say(
     `${half} ${batter.name}: ${describe(result, fielding, placed.text, placed.placement?.fielderNum)}`,
@@ -3127,7 +3155,7 @@ if (import.meta.env.DEV) {
    */
   /** A stolen base, drawn. `to` is 1 for second and 2 for third. */
   (window as unknown as Record<string, unknown>)['__steal'] = (to = 1, safe = false) => {
-    showSteal(to, safe, 1.1);
+    showSteal(to, safe, 1.1, game);
     return { lengthMs: replayLength(replay!) };
   };
 
@@ -3158,7 +3186,7 @@ if (import.meta.env.DEV) {
     // where, when. The hook still draws the outcome it was HANDED, so ask for
     // one the cut-off agrees with or the picture and the caption will not.
     const cut = place({ outcome, exitVelocity, launchAngle, direction } as never, game.home.park);
-    replay = newReplay({
+    playReplay(newReplay({
       now: performance.now(),
       outcome,
       exitVelocity,
@@ -3172,7 +3200,7 @@ if (import.meta.env.DEV) {
       ...(cut.cutOff ? { chaserNum: cut.fielderNum, cutOff: cut.cutOff } : {}),
       ...(cut.airCatch ? { chaserNum: cut.fielderNum, airCatch: cut.airCatch } : {}),
       ...extra,
-    });
+    }), game);
     // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.
     // Frame-level tuning of a scene is the whole reason to be able to freeze
     // one, and a replay with no words over it is what the feature looked like
@@ -4212,6 +4240,8 @@ function drawSwingBar(): void {
 }
 
 function drawBases(): void {
+  // Before the play until its replay is over — see `shown`.
+  const g = onScreen();
   const cx = 350;
   const cy = 300;
   const s = 13;
@@ -4226,7 +4256,7 @@ function drawBases(): void {
     ctx.save();
     ctx.translate(bx, by);
     ctx.rotate(Math.PI / 4);
-    if (game.bases[i]) {
+    if (g.bases[i]) {
       ctx.fillStyle = '#d8b44a';
       ctx.fillRect(-s / 2, -s / 2, s, s);
     } else {
@@ -4247,7 +4277,7 @@ function drawBases(): void {
   for (let i = 0; i < 3; i++) {
     ctx.beginPath();
     ctx.arc(cx - 20 + i * 20, cy + 46, 5, 0, Math.PI * 2);
-    if (i < game.outs) ctx.fill();
+    if (i < g.outs) ctx.fill();
     else { ctx.strokeStyle = '#3d4a38'; ctx.stroke(); }
   }
 }
@@ -4299,7 +4329,7 @@ function render(): void {
   // penPick shipped missing from it: the pen list highlighted the wrong arm
   // all game while the GO TO THE PEN button named the right one, because the
   // button rides on penArmed, which IS listed, and the rows rode on nothing.
-  const key = [phase, game, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead];
+  const key = [phase, game, shown, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead];
   if (key.length === lastKey.length && key.every((v, i) => v === lastKey[i])) return;
   lastKey = key;
 
@@ -4407,21 +4437,23 @@ function holdCalibration(): void {
 }
 
 function renderScore(): void {
+  // Before the play until its replay is over — see `shown`.
+  const g = onScreen();
   // The season outran this game — see lastGameIsStale. An empty strip is the
   // honest version; the FINAL line and the bracket under it are the news.
   if (lastGameIsStale) {
     elScore.innerHTML = '';
     return;
   }
-  const innings = Math.max(9, game.inning);
+  const innings = Math.max(9, g.inning);
   const head = ['', ...Array.from({ length: innings }, (_, i) => String(i + 1)), 'R', 'H'];
   const row = (side: 'home' | 'away') => {
-    const t = side === 'home' ? game.home : game.away;
-    const s = stateOf(game, side);
+    const t = side === 'home' ? g.home : g.away;
+    const s = stateOf(g, side);
     const cells = Array.from({ length: innings }, (_, i) =>
       i < s.byInning.length ? String(s.byInning[i]) : '·',
     );
-    const batting = !game.over && battingSide(game) === side ? ' class="batting"' : '';
+    const batting = !g.over && battingSide(g) === side ? ' class="batting"' : '';
     return `<tr${batting}><td class="team">${t.abbr}${side === YOU ? ' (you)' : ''}</td>${cells
       .map((c) => `<td>${c}</td>`)
       .join('')}<td class="tot">${s.runs}</td><td>${s.hits}</td></tr>`;
@@ -4432,7 +4464,10 @@ function renderScore(): void {
 }
 
 function renderSituation(): void {
-  if (showingFinal()) {
+  const g = onScreen();
+  // Before the play until its replay is over — see `shown`. That includes
+  // FINAL: a walk-off is watched before it is announced.
+  if (g.over || lastGameIsStale) {
     if (!season) {
       elSit.innerHTML = `<span><b>FINAL</b></span><span class="dim">press R for a new game</span>`;
       return;
@@ -4452,26 +4487,26 @@ function renderSituation(): void {
     ].join('');
     return;
   }
-  const b = currentBatter(game);
-  const role = youBat() ? 'YOU BAT' : 'YOU PITCH';
-  const staff = fieldingStaff(game);
+  const b = currentBatter(g);
+  const role = battingSide(g) === YOU ? 'YOU BAT' : 'YOU PITCH';
+  const staff = fieldingStaff(g);
   const cond = armCondition(staff);
   const condColor =
     cond === 'gassed' ? 'var(--bad)' : cond === 'tiring' ? 'var(--hot)' : 'var(--dim)';
 
   elSit.innerHTML = [
-    `<span><b>${inningLabel(game)}</b></span>`,
+    `<span><b>${inningLabel(g)}</b></span>`,
     `<span>${atBat.balls}–${atBat.strikes}</span>`,
-    `<span>${game.outs} out</span>`,
+    `<span>${g.outs} out</span>`,
     `<span class="dim">|</span>`,
     `<span><b>${role}</b></span>`,
     // The bat speed is shown because the check swing is what makes it matter:
     // a heavy bat arrives late AND gives you longer to change your mind, and a
     // trade you cannot see is not a trade.
     `<span>${b.name} <span class="dim">(${b.bats}, ${batSpeedLabel(statsOf(b).power)})</span></span>`,
-    `<span class="dim">on deck ${onDeck(game).name}</span>`,
+    `<span class="dim">on deck ${onDeck(g).name}</span>`,
     `<span class="dim">|</span>`,
-    `<span>${currentPitcher(game).name}` +
+    `<span>${currentPitcher(g).name}` +
       ` <span class="dim">${staff.current.pitches}p</span>` +
       ` <span style="color:${condColor}">${cond}</span></span>`,
   ].join('');
@@ -5206,6 +5241,7 @@ function step(): void {
 
   if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
     replay = null;
+    shown = null;
     scene = null;
   }
 
@@ -6872,6 +6908,7 @@ function kickOff(
   bunting = false;
   previous = [];
   replay = null;
+  shown = null;
   flash = '';
   lastGrade = '';
   swingRead = null;
