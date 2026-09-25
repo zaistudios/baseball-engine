@@ -1480,9 +1480,9 @@ function drawRace(
           };
 
   /**
-   * THE MAN THE THROW IS GOING AFTER, and when it gets there. It is either a
-   * runner gunned down going for one too many or the batter caught stretching
-   * his own hit, and both are drawn from the same two numbers.
+   * THE MAN THE THROW IS GOING AFTER, and when it gets there. A clean-hit
+   * send carries the target even when he is safe, so the replay can show the
+   * ball arriving behind him instead of inventing a second route.
    */
   // ⚠️ HOW FAR THE BATTER RUNS, HOISTED ABOVE THE THROWS. Both the ball and the
   // man have to be worked out from one pair of numbers, or a throw lands at a
@@ -1503,12 +1503,12 @@ function drawRace(
     ? { at: bases, ms: r.throwClock?.throwMs ?? tripMs }
     : gunned
       ? { at: gunned.at, ms: gunned.throwMs }
-      : r.throwClock && r.throwClock.from === -1
+      : r.throwClock
         ? { at: r.throwClock.at, ms: r.throwClock.throwMs }
-      : // A sacrifice fly he beat still draws the throw, landing behind him.
-        tagUp
-        ? { at: 4, ms: tagUp.throwMs }
-        : null;
+        : // A sacrifice fly he beat still draws the throw, landing behind him.
+          tagUp
+          ? { at: 4, ms: tagUp.throwMs }
+          : null;
 
   // Whether an outfielder has to cut it off on the way. See relaySpot().
   const relaying = needsRelay(r, race.chaser);

@@ -384,6 +384,25 @@ describe('the men in the replay', () => {
       expect(replayLength(r)).toBeGreaterThan(f.air.clock.throwMs);
     });
 
+    it('draws a safe hit throw to the engine-selected bag', () => {
+      const cam = makeCam(420, 340);
+      const r = newReplay({
+        now: 0,
+        outcome: 'single',
+        exitVelocity: 92,
+        launchAngle: 8,
+        direction: -18,
+        speed: 1,
+        safe: true,
+        moves: [{ name: 'R', from: 0, to: 2, speed: 1 }],
+        throwClock: { from: 0, at: 3, runnerSpeed: 1, runnerMs: 2708, throwMs: 3000 },
+      });
+      const { ctx, calls: drawn } = stub();
+      drawOverhead(ctx, cam, r, 3500, { ...PALETTE, figure: () => undefined });
+      const third = basePoint(2, cam.centre.x, cam.centre.y, cam.baseR);
+      expect(drawn).toContain(`lineTo(${third.x},${third.y})`);
+    });
+
     it('he stays on third until the catch', () => {
       const f = first(20, [null, null, { name: 'R', speed: 1 }], () => true);
       const r = newReplay({
