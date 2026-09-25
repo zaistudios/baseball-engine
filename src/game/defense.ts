@@ -437,9 +437,27 @@ export function airRace(o: {
  *
  * The one constant the double-off was allowed (ZAIS-24). Everything else is
  * the catch (the liner's hang), the throw (longThrowMs()) and his legs
- * (runnerMs()). Tuned in the next commit; see the sweep.
+ * (runnerMs()).
+ *
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-24, CARRY 5.5.
+ * On the DOUBLE_OFF die it was 0.06 doubled off a team.
+ *
+ *   break   runs   hits   DP/tm  force/tm  doubled off
+ *   0.20    4.17   8.62   0.92    2.15     0.00
+ *   0.30    4.13   8.59   0.92    2.15     0.02
+ *   0.33    4.12   8.57   0.93    2.14     0.05
+ *   0.35    4.12   8.58   0.93    2.13     0.06
+ *   0.37    4.11   8.55   0.93    2.13     0.08
+ *   0.40    4.11   8.54   0.92    2.11     0.10
+ *   0.50    4.03   8.50   0.91    2.11     0.14
+ *   0.60+   4.00   8.49   0.92    2.13     0.16
+ *
+ * ⚠️ IT IS A CLIFF, from 0.02 to 0.10 across a tenth of the break. The
+ * outfield liners that are most of the population are caught at about the same
+ * hang and thrown from about the same depth, so they all flip together. Above
+ * 0.6 every qualifying liner is already a double-off and nothing moves.
  */
-export const LINER_BREAK = 0.5;
+export const LINER_BREAK = 0.35;
 
 /**
  * Roll the defence on a ball in play, with a real fielder attached.
