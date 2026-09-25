@@ -8,10 +8,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, tripFor, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
+import { makeCam, basePoint, basesFor, pathPoint, runnerPoint, newReplay, drawOverhead, ballShare, raceFor, tripFor, replayLength, REPLAY_CUT_MS, type Replay } from '../overhead.ts';
 import { withPlacement } from '../placement.ts';
 import { overheadPoint, groundBallMs, runnerMs, runToFirstMs, WALL_FT, FIELDERS, type Fielder } from '../plot.ts';
-import { manned, assignPositions, groundRace } from '../defense.ts';
+import { manned, assignPositions, groundRace, airRace } from '../defense.ts';
+import type { Bases } from '../../core/inning.ts';
+import type { HitResult } from '../../core/hit.ts';
 import { HOME } from '../teams.ts';
 
 /** Both screens, plus a deliberately awkward one. */
@@ -326,6 +328,80 @@ describe('the men in the replay', () => {
         },
       });
       expect(running).toHaveLength(2);
+    });
+  });
+
+  /**
+   * THE THROW AFTER A CATCH lands, and is called, when airRace() said — not
+   * at a fixed beat after the catch. ZAIS-24 step 5.
+   */
+  describe('a raced throw after a catch', () => {
+    const first = (la: number, bases: Bases, pick: (out: boolean) => boolean) => {
+      for (let dir = -40; dir <= 40; dir += 2) {
+        for (const ev of [75, 85, 95, 105]) {
+          const hit = { outcome: 'line_out', isHit: false, isOut: true, exitVelocity: ev, launchAngle: la, direction: dir } as HitResult;
+          const placed = withPlacement({ kind: 'in_play', hit });
+          const p = placed.placement;
+          if (placed.result.kind !== 'in_play' || placed.result.hit.outcome !== 'line_out' || !p?.airCatch?.caught) continue;
+          const air = airRace({ hit, placement: p, bases, outs: 0, arm: 1 });
+          if (air && pick(air.out)) return { hit, p, air };
+        }
+      }
+      throw new Error('no such ball');
+    };
+    const replay = (f: ReturnType<typeof first>, o: Partial<Parameters<typeof newReplay>[0]>) =>
+      newReplay({
+        now: 0, outcome: 'line_out', exitVelocity: f.hit.exitVelocity, launchAngle: f.hit.launchAngle,
+        direction: f.hit.direction, speed: 1, safe: false, chaserNum: f.p.fielderNum,
+        airCatch: f.p.airCatch!, airClock: f.air.clock, ...o,
+      });
+    const calls = (r: Replay, now: number, word: string) => {
+      const { ctx, calls: c } = stub();
+      drawOverhead(ctx, makeCam(420, 340), r, now, { ...PALETTE, figure: () => undefined });
+      return c.filter((x) => x.startsWith(`fillText(${word},`)).length;
+    };
+
+    it('doubled off: the second OUT lands with the ball at first', () => {
+      const f = first(15, [{ name: 'R', speed: 0.7 }, null, null], (out) => out);
+      const r = replay(f, { doubledOff: true });
+      expect(calls(r, f.air.clock.throwMs - 20, 'OUT')).toBe(1); // the catch
+      expect(calls(r, f.air.clock.throwMs + 20, 'OUT')).toBe(2);
+    });
+
+    it('back in time: SAFE at first when he gets there, before the ball', () => {
+      const f = first(15, [{ name: 'R', speed: 1.4 }, null, null], (out) => !out);
+      const r = replay(f, { held: [0] });
+      expect(calls(r, f.air.clock.runnerMs - 20, 'SAFE')).toBe(0);
+      expect(calls(r, f.air.clock.runnerMs + 20, 'SAFE')).toBe(1);
+      expect(f.air.clock.runnerMs).toBeLessThan(f.air.clock.throwMs);
+    });
+
+    it('cut down tagging: OUT at the plate when the ball gets there, and the replay waits for it', () => {
+      const f = first(20, [null, null, { name: 'R', speed: 0.6 }], (out) => out);
+      const r = replay(f, { thrownOut: { at: 4, speed: 0.6 } });
+      expect(calls(r, f.air.clock.throwMs - 20, 'OUT')).toBe(1);
+      expect(calls(r, f.air.clock.throwMs + 20, 'OUT')).toBe(2);
+      expect(replayLength(r)).toBeGreaterThan(f.air.clock.throwMs);
+    });
+
+    it('he stays on third until the catch', () => {
+      const f = first(20, [null, null, { name: 'R', speed: 1 }], () => true);
+      const r = newReplay({
+        now: 0, outcome: 'line_out', exitVelocity: f.hit.exitVelocity, launchAngle: f.hit.launchAngle,
+        direction: f.hit.direction, speed: 1, safe: false, airCatch: f.p.airCatch!, airClock: f.air.clock,
+        moves: [{ name: 'R', from: 2, to: 3, speed: 1 }],
+      });
+      const cam = makeCam(420, 340);
+      const third = runnerPoint(cam, 3, 4, 0);
+      const seen: { x: number; y: number }[] = [];
+      drawOverhead(stub().ctx, cam, r, f.air.clock.caughtMs - 50, {
+        ...PALETTE,
+        figure: (_c, o) => {
+          if (o.side === 'batting') seen.push({ x: o.x, y: o.y });
+        },
+      });
+      // Within a figure's height: the callback is handed his feet, not the bag.
+      expect(seen.some((s) => Math.abs(s.x - third.x) < 1 && Math.abs(s.y - third.y) < 12)).toBe(true);
     });
   });
 });

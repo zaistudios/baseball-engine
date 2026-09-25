@@ -27,6 +27,7 @@ import {
   hasPlayAtFirst,
   raceTiming,
   runnerMs,
+  runToFirstMs,
   playCues,
   roleFor,
   relayFor,
@@ -41,7 +42,7 @@ import {
   type Race,
 } from './plot.ts';
 import { SPRITE_SPECS } from './sprites.ts';
-import type { GroundClock } from './defense.ts';
+import { LINER_BREAK, type AirClock, type GroundClock } from './defense.ts';
 import type { AirCatch, CutOff } from './placement.ts';
 import type { Player } from '../core/roster.ts';
 
@@ -370,6 +371,13 @@ export interface Replay {
    */
   clock?: GroundClock;
   /**
+   * THE ARRIVAL TIMES A THROW AFTER A CATCH WAS DECIDED ON — airRace() in
+   * defense.ts. A tag-up is drawn leaving at the catch and the throw home
+   * landing when the engine said; a liner is drawn with the man off first
+   * turning back at the catch and the throw to first landing on its time.
+   */
+  airClock?: AirClock;
+  /**
    * THE ENGINE'S ANSWER ON A BALL IN THE AIR — who got there, when, and how.
    * See catchFly() in placement.ts. Camped, he is standing under it at `ms`;
    * running, he takes it on the move; diving, he makes `reach` of his run and
@@ -441,6 +449,8 @@ export function newReplay(o: {
   clock?: GroundClock;
   /** Who got to a ball in the air. See Replay.airCatch. */
   airCatch?: AirCatch;
+  /** The engine's arrival times on a throw after a catch. See Replay.airClock. */
+  airClock?: AirClock;
   /**
    * THE FENCE THIS BALL WENT TOWARD, in feet — the same number place() resolved
    * out of the park. Omitted is the 400-foot bowl.
@@ -480,6 +490,7 @@ export function newReplay(o: {
     ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
     ...(o.airCatch === undefined ? {} : { airCatch: o.airCatch }),
+    ...(o.airClock === undefined ? {} : { airClock: o.airClock }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
   };
@@ -709,6 +720,8 @@ export const replayLength = (r: Replay): number => {
   return Math.max(
     REPLAY_CUT_MS + r.plot.hangMs + REPLAY_HOLD_MS + extra,
     Math.max(race.runMs, race.throwMs ?? 0) + REPLAY_CALL_MS + extra,
+    // A throw after a catch lands long after the ball came down. Hold for its call.
+    r.airClock ? Math.max(r.airClock.throwMs, r.airClock.runnerMs) + REPLAY_CALL_MS + extra : 0,
   );
 };
 
@@ -1432,17 +1445,31 @@ function drawRace(
    * extra IS the bag he was standing on. See the extra-base clause in
    * core/inning.ts, which is the only thing that can produce this.
    */
+  // The throw after a catch, when the engine raced one. See Replay.airClock.
+  const tagUp = r.airClock?.at === 4 ? r.airClock : undefined;
+  const liner = r.airClock?.at === 1 ? r.airClock : undefined;
+  /**
+   * A MAN TAGGING, `bags` from his bag: nowhere until the catch, then a
+   * standing start at runToFirstMs() a bag — the engine's own clock, so the
+   * man from third crosses at tagUp.runnerMs.
+   */
+  const tagK = (speed: number, bags: number, until = t): number =>
+    Math.max(0, Math.min(t, until) - tagUp!.caughtMs) / (runToFirstMs(speed) * bags);
+
   const gunned =
     // ⚠️ NOT THE BATTER. He is already being drawn by the race below, so a
     // second dot here sprints a leg he never ran while the real one runs the
     // one he did. See ThrownOut.batter.
     r.thrownOut === undefined || r.thrownOut.batter
       ? null
-      : {
-          at: r.thrownOut.at,
-          from: r.thrownOut.at - 1 - basesFor(r.outcome),
-          ms: trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
-        };
+      : tagUp
+        ? // Cut down tagging: from third, and the ball beats him home at its own time.
+          { at: 4, from: 3, ms: tagUp.throwMs }
+        : {
+            at: r.thrownOut.at,
+            from: r.thrownOut.at - 1 - basesFor(r.outcome),
+            ms: trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
+          };
 
   /**
    * THE MAN THE THROW IS GOING AFTER, and when it gets there. It is either a
@@ -1468,7 +1495,10 @@ function drawRace(
     ? { at: bases, ms: tripMs }
     : gunned
       ? { at: gunned.at, ms: gunned.ms }
-      : null;
+      : // A sacrifice fly he beat still draws the throw, landing behind him.
+        tagUp
+        ? { at: 4, ms: tagUp.throwMs }
+        : null;
 
   // Whether an outfielder has to cut it off on the way. See relaySpot().
   const relaying = needsRelay(r, race.chaser);
@@ -1483,6 +1513,8 @@ function drawRace(
   // still baserunners — an occupied base with nobody drawn on it is the thing
   // that made the field look like a diagram.
   for (const bag of r.held) {
+    // The man on first on a raced liner is drawn with the throw, below.
+    if (liner && bag === 0) continue;
     drawRunnerDot(ctx, opts, cam, bag + 1, bag + 2, leadOff(t));
   }
 
@@ -1493,14 +1525,17 @@ function drawRace(
   for (const m of r.moves) {
     const from = m.from + 1;
     const to = m.to + 1;
-    drawRunnerDot(ctx, opts, cam, from, to, t / trip(m.speed, from, to));
+    // Tagging, he waits on the bag for the catch. See tagK().
+    drawRunnerDot(ctx, opts, cam, from, to, tagUp ? tagK(m.speed, to - from) : t / trip(m.speed, from, to));
   }
 
   // The man gunned down going for one too many. He runs it exactly like the
   // rest and then stops, dim, at the bag he did not get — until now the only
   // trace of that on screen was a line of text.
   if (gunned) {
-    drawRunnerDot(ctx, opts, cam, gunned.from, gunned.at, t / gunned.ms, t > gunned.ms);
+    // Tagging, he is short of the plate when the ball gets there, and stops.
+    const k = tagUp && r.thrownOut ? tagK(r.thrownOut.speed, 1, gunned.ms) : t / gunned.ms;
+    drawRunnerDot(ctx, opts, cam, gunned.from, gunned.at, k, t > gunned.ms);
   }
 
   // The forced man, on a double play AND on a plain force. He is erased from
@@ -1615,9 +1650,29 @@ function drawRace(
     call('OUT', bagAt(cam, bases - 1), false, bases >= 3 ? -24 : 22);
   }
 
+  // The sacrifice fly he beat: SAFE when he crosses, with the ball still coming.
+  if (tagUp && !gunned && t > tagUp.runnerMs) call('SAFE', bagAt(cam, 3), true);
+
   if (caught) {
     // Out in the air, so it is called where the catch happened.
     if (t > fieldedAt) call('OUT', landing, false, 0);
+
+    // ⚠️ THE LINER, RACED (airRace()). He broke on contact and is LINER_BREAK
+    // of the way to second at the catch; he turns back then, at the pace the
+    // engine timed, and the throw to first lands when the engine said. Doubled
+    // off, he stops where the ball caught him. Back in time, it is SAFE.
+    if (liner) {
+      const out = !!r.doubledOff;
+      const until = Math.min(t, out ? liner.throwMs : liner.runnerMs);
+      const k =
+        t < liner.caughtMs
+          ? (LINER_BREAK * t) / liner.caughtMs
+          : LINER_BREAK * (1 - (until - liner.caughtMs) / (liner.runnerMs - liner.caughtMs));
+      drawRunnerDot(ctx, opts, cam, 1, 2, k, out && t > liner.throwMs);
+      throwLeg(landing, first, liner.caughtMs, liner.throwMs);
+      if (t > Math.min(liner.throwMs, liner.runnerMs)) call(out ? 'OUT' : 'SAFE', first, !out);
+      return;
+    }
 
     // ⚠️ ...AND THEN THE THROW BACK IN. A line drive caught with a man on first
     // is two outs, and the second of them is a man who is not in `moves`, not

@@ -2335,6 +2335,7 @@ function completePlay(
           ...(placed.placement?.cutOff ? { cutOff: placed.placement.cutOff } : {}),
           // The times the race was decided on, so the picture draws them.
           ...(fielding?.clock ? { clock: fielding.clock } : {}),
+          ...(fielding?.airClock ? { airClock: fielding.airClock } : {}),
           ...(placed.placement?.airCatch ? { airCatch: placed.placement.airCatch } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           // The scorers go in the same list: a man who came all the way home
