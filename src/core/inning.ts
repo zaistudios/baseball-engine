@@ -554,6 +554,8 @@ function tagUp(
    * seeded season, and buys the one thing a sacrifice fly was missing.
    */
   arm?: { odds: number; roll: number },
+  /** The clocks' answer, when there were clocks. See FieldingResult.tagOut. */
+  tagOut?: boolean,
 ): { bases: Bases; runs: number; thrownOut: ThrownOut | null } {
   const next: [Runner | null, Runner | null, Runner | null] = [...bases];
   let runs = 0;
@@ -565,7 +567,7 @@ function tagUp(
   const third = next[2];
   if (third) {
     next[2] = null;
-    if (arm && gunDown(arm.odds * TAG_THROW, arm.roll, third.speed)) {
+    if (tagOut ?? (arm !== undefined && gunDown(arm.odds * TAG_THROW, arm.roll, third.speed))) {
       thrownOut = { runner: third, at: 4, batter: false };
     } else {
       runs++;
@@ -988,7 +990,7 @@ export function applyAtBat(
             // until the ball is not — see TAG_THROW. When it beats him the
             // sacrifice fly is two outs and no run, which is the play the whole
             // outfield-arm rating existed to make possible.
-            const tag = tagUp(bases, runs, fielding.advanceRolls, fielding.extraBase);
+            const tag = tagUp(bases, runs, fielding.advanceRolls, fielding.extraBase, fielding.tagOut);
             bases = tag.bases;
             runs += tag.runs;
             if (tag.thrownOut) {

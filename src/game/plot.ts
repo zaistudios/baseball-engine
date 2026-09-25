@@ -844,6 +844,26 @@ export function throwArrivalMs(from: { x: number; y: number }, toBag: number, ar
   const to = bagFeet(toBag);
   return MIN_THROW_MS + Math.hypot(to.x - from.x, to.y - from.y) / (THROW_SPEED * Math.max(0.1, arm));
 }
+
+/**
+ * HOW MUCH SLOWER A THROW FROM THE OUTFIELD TRAVELS, per foot past the
+ * diamond's diagonal: each of those feet costs 1 + CARRY of an infield foot.
+ *
+ * THROW_SPEED was tuned on infield throws of about 100 feet, and the replay
+ * clock is compressed: at that pace a 300-foot throw home lands in ~600ms and a
+ * 1.0 runner tagging from third needs 1400, so every sacrifice fly in the game
+ * would be cut down (ZAIS-24). The feet inside BASE_FT·√2 cost nothing extra,
+ * which is how this cannot move a single grounder — no groundRace() throw uses
+ * it anyway.
+ */
+export const CARRY = 1;
+
+/** throwArrivalMs(), with CARRY on every foot past the infield. For throws after a catch. */
+export function longThrowMs(from: { x: number; y: number }, toBag: number, arm: number): number {
+  const to = bagFeet(toBag);
+  const past = Math.max(0, Math.hypot(to.x - from.x, to.y - from.y) - BASE_FT * Math.SQRT2);
+  return throwArrivalMs(from, toBag, arm) + (past * CARRY) / (THROW_SPEED * Math.max(0.1, arm));
+}
 /** The closest "he beat him" is allowed to look before it reads as a tie. */
 const MIN_GAP_MS = 60;
 

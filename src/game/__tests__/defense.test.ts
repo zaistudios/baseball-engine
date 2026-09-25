@@ -13,6 +13,7 @@ import {
   fieldBall,
   gloveOf,
   groundRace,
+  airRace,
   pivotReadyMs,
   POSITION_DIFFICULTY,
   type Position,
@@ -33,6 +34,7 @@ import { newRead } from '../ai.ts';
 import { fatigue } from '../bullpen.ts';
 import { makeRng } from '../../core/rng.ts';
 import type { HitResult } from '../../core/hit.ts';
+import { runToFirstMs } from '../plot.ts';
 import type { Player } from '../../core/roster.ts';
 
 const hit = (over: Partial<HitResult> = {}): HitResult => ({
@@ -421,6 +423,77 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
     expect(raced.clock).toBeDefined();
     expect(raced.forceAt).toBe(2);
     expect(fieldBall(hit, a, opts, makeRng(3)).clock).toBeUndefined();
+  });
+});
+
+describe('the throw after a catch is a race (ZAIS-24)', () => {
+  const runner = (speed: number) => ({ name: 'R', speed });
+  /** Every caught deep fly the placement model will make, to every part of the outfield. */
+  const flies = (() => {
+    const out: Placement[] = [];
+    const hits: HitResult[] = [];
+    for (let dir = -40; dir <= 40; dir += 5) {
+      for (const ev of [80, 90, 100]) {
+        for (const la of [24, 30, 36]) {
+          const hit = { outcome: 'line_out', isHit: false, isOut: true, exitVelocity: ev, launchAngle: la, direction: dir } as HitResult;
+          const p = withPlacement({ kind: 'in_play', hit });
+          if (p.result.kind !== 'in_play' || p.result.hit.outcome !== 'line_out' || !p.placement?.airCatch?.caught) continue;
+          out.push(p.placement);
+          hits.push(hit);
+        }
+      }
+    }
+    return out.map((p, i) => ({ p, hit: hits[i]! }));
+  })();
+  const tag = (f: (typeof flies)[number], speed: number, arm = 1, outs = 0) =>
+    airRace({ hit: f.hit, placement: f.p, bases: [null, null, runner(speed)], outs, arm });
+
+  it('the same fly cuts down a 0.7 runner that a 1.4 runner beats', () => {
+    expect(flies.length).toBeGreaterThan(20);
+    const split = flies.filter((f) => tag(f, 0.7)!.out && !tag(f, 1.4)!.out);
+    expect(split.length).toBeGreaterThan(0);
+    // ...and never the other way round.
+    expect(flies.filter((f) => !tag(f, 0.7)!.out && tag(f, 1.4)!.out)).toEqual([]);
+  });
+
+  it('he leaves at the catch from a standing start, and an out means the ball got there first', () => {
+    for (const f of flies) {
+      const r = tag(f, 1)!;
+      expect(r.clock.at).toBe(4);
+      expect(r.clock.runnerMs - r.clock.caughtMs).toBeCloseTo(runToFirstMs(1), 6);
+      expect(r.out).toBe(r.clock.throwMs < r.clock.runnerMs);
+    }
+  });
+
+  it('raising the glove never turns an out into a safe', () => {
+    for (const f of flies) {
+      for (const speed of [0.7, 1, 1.4]) {
+        let wasOut = false;
+        for (let arm = 0.5; arm <= 1.6; arm += 0.1) {
+          const out = tag(f, speed, arm)!.out;
+          if (wasOut) expect(out).toBe(true);
+          wasOut = out;
+        }
+      }
+    }
+  });
+
+  it('no play without a man on third, a deep fly and an out to spare', () => {
+    const f = flies[0]!;
+    expect(airRace({ hit: f.hit, placement: f.p, bases: [runner(1), null, null], outs: 0, arm: 1 })).toBeUndefined();
+    expect(tag(f, 1, 1, 2)).toBeUndefined();
+  });
+
+  it('fieldBall hands tagOut to the book; without bases it keeps the die', () => {
+    const f = flies[0]!;
+    const a = assignPositions(HOME.lineup);
+    const opts = { batterSpeed: 1, forceAtFirst: false, outs: 0, placement: f.p };
+    const raced = fieldBall(f.hit, a, { ...opts, bases: [null, null, runner(1)] }, makeRng(3));
+    expect(raced.error).toBe(false);
+    expect(raced.tagOut).toBe(raced.airClock!.throwMs < raced.airClock!.runnerMs);
+    const rolled = fieldBall(f.hit, a, opts, makeRng(3));
+    expect(rolled.tagOut).toBeUndefined();
+    expect(rolled.airClock).toBeUndefined();
   });
 });
 

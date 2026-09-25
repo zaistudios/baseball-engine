@@ -455,6 +455,13 @@ export interface FieldingResult {
    */
   extraBase?: { odds: number; roll: number };
   /**
+   * THE THROW HOME ON A SACRIFICE FLY, DECIDED FROM THE CLOCKS — true when it
+   * beats the man tagging from third. Set by game/defense.ts's airRace() on a
+   * caught deep fly with a man on third; inning.ts's tagUp() uses it in place
+   * of the TAG_THROW die. Absent is the die: the CLI and the roguelike.
+   */
+  tagOut?: boolean;
+  /**
    * ONE DIE PER OCCUPIED BAG — [first, second, third] — for "does this runner
    * go", pre-rolled for the same reason extraBase is: inning.ts decides, and
    * inning.ts has no rng.

@@ -38,7 +38,7 @@ import {
   type ThrowEffect,
 } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
-import { SAC_FLY_MIN_ANGLE, forcedRunners, type Bases } from '../core/inning.ts';
+import { SAC_FLY_MIN_ANGLE, forcedRunners, isDeepFly, type Bases } from '../core/inning.ts';
 import type { CutOff, Placement } from './placement.ts';
 import type { Rng } from '../core/rng.ts';
 import {
@@ -48,6 +48,7 @@ import {
   feetXY,
   bagFeet,
   throwArrivalMs,
+  longThrowMs,
   runToFirstMs,
   runnerMs,
   REPLAY_CUT_MS,
@@ -237,6 +238,23 @@ export interface DefensivePlay extends FieldingResult {
   fielder: Player | null;
   /** The arrival times a clocked grounder was decided on. See groundRace(). */
   clock?: GroundClock;
+  /** The arrival times a throw after a catch was decided on. See airRace(). */
+  airClock?: AirClock;
+}
+
+/**
+ * THE THROW AFTER A CATCH, in ms from contact on the replay's clock — what
+ * airRace() decided the play on, handed to the picture so it draws them.
+ */
+export interface AirClock {
+  /** The ball is in his glove: the man tagging leaves, the man off first turns back. */
+  caughtMs: number;
+  /** Where the throw went: the plate on a tag-up, first on a double-off. */
+  at: 1 | 4;
+  /** The ball reaches that bag. */
+  throwMs: number;
+  /** The runner reaches it. */
+  runnerMs: number;
 }
 
 /**
@@ -362,6 +380,40 @@ export function groundRace(o: {
 }
 
 /**
+ * STEP (b) FOR BALLS IN THE AIR: the one throw after a catch, raced.
+ *
+ * The ball comes down at the fly's hang — the moment the replay draws it in
+ * his glove — and the throw leaves from where it came down, at longThrowMs().
+ * On a deep fly with a man on third he tags: he leaves at the catch from a
+ * standing start, a full runToFirstMs() for the ninety feet. The throw beats
+ * him or it does not; a tie goes to the runner.
+ *
+ * WHO GOES is not decided here. The man on third always goes on isDeepFly(),
+ * as he always has; this only answers whether he gets there.
+ *
+ * Nothing here rolls. Undefined when there is no such play.
+ */
+export function airRace(o: {
+  hit: HitResult;
+  placement: Placement;
+  bases: Bases;
+  outs: number;
+  arm: number;
+}): { out: boolean; clock: AirClock } | undefined {
+  const { hit, placement: p } = o;
+  if (hit.outcome !== 'line_out' || !p.airCatch?.caught) return undefined;
+  const third = o.bases[2];
+  if (!third || !isDeepFly(hit.outcome, hit.exitVelocity, o.outs, hit.launchAngle)) return undefined;
+  const caughtMs =
+    REPLAY_CUT_MS +
+    plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs;
+  const spot = feetXY(p.distFt, p.dirDeg);
+  const throwMs = caughtMs + longThrowMs(spot, 4, o.arm);
+  const runnerMs = caughtMs + runToFirstMs(third.speed);
+  return { out: throwMs < runnerMs, clock: { caughtMs, at: 4, throwMs, runnerMs } };
+}
+
+/**
  * Roll the defence on a ball in play, with a real fielder attached.
  *
  * The error chance is the league rate, made harder by the POSITION and easier
@@ -454,6 +506,12 @@ export function fieldBall(
         }
       : undefined;
 
+  // A caught ball with a throw after it is raced too. See airRace().
+  const air =
+    opts.placement && bases
+      ? airRace({ hit, placement: opts.placement, bases, outs: opts.outs, arm: glove })
+      : undefined;
+
   const result = rollFielding(
     hit.outcome,
     {
@@ -515,7 +573,17 @@ export function fieldBall(
         { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove }
       : undefined;
 
-  return { ...result, ...(stretch ? { stretch } : {}), ...(clock ? { clock } : {}), by, fielder };
+  // A booted ball has no catch to throw after.
+  const thrown = air && !result.error ? air : undefined;
+  return {
+    ...result,
+    ...(thrown?.clock.at === 4 ? { tagOut: thrown.out } : {}),
+    ...(stretch ? { stretch } : {}),
+    ...(clock ? { clock } : {}),
+    ...(thrown ? { airClock: thrown.clock } : {}),
+    by,
+    fielder,
+  };
 }
 
 /**
