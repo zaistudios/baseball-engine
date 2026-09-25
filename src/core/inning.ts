@@ -534,6 +534,9 @@ export const TAG_UP_RATE = 0.55;
  * THE TAG-UP. Everyone who can advance on a caught fly does, and the arm gets
  * its one throw at the man who is scoring.
  *
+ * Whether that throw beats him is `tagOut` when the caller raced it (airRace()
+ * in game/defense.ts, every Basedball game) and the TAG_THROW die otherwise.
+ *
  * Lead runner first, same as every other advance in this file: whether second
  * can go depends on whether third just emptied.
  *

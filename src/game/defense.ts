@@ -21,8 +21,10 @@
  * move them then.
  *
  * A PARTIAL FIELDING SIMULATION NOW: a fielded grounder is raced on the clocks
- * (groundRace(), ZAIS-21). Everything else is still one alignment, one chaser
- * and one roll: no cutoff men, no assists, no scorer deciding hit-or-error.
+ * (groundRace(), ZAIS-21), and so is the one throw after a catch — the
+ * double-off and the throw home on a sacrifice fly (airRace(), ZAIS-24).
+ * Everything else is still one alignment, one chaser and one roll: no cutoff
+ * men, no assists, no scorer deciding hit-or-error.
  */
 
 import type { Player } from '../core/roster.ts';

@@ -9,11 +9,13 @@
  * And since ZAIS-21 a grounder he FIELDED is played out on the clocks too —
  * the throw to each force bag, the pivot, the relay and the batter's run are
  * raced in game/defense.ts's groundRace() and handed in as `race`, which
- * replaces the double-play and force dice below. What is still rolled HERE is
- * the error on every ball, and the double play and force on every out that
- * has no clock: fly balls, the CLI and the roguelike. Errors charged to a
- * named fielder, extra bases and relays are the next steps of the Unscripted
- * Plays spec.
+ * replaces the double-play and force dice below. Since ZAIS-24 the throw after
+ * a CATCH is raced as well — airRace() in the same file times the double-off
+ * (handed in as `doubleOff`) and the throw home on a sacrifice fly (handed to
+ * inning.ts as `tagOut`). What is still rolled HERE is the error on every
+ * ball, and DOUBLE_OFF and TAG_THROW only for a caller with no placement: the
+ * CLI and the roguelike. Errors charged to a named fielder, extra bases and
+ * relays are the next steps of the Unscripted Plays spec.
  *
  * Rolled here, applied by inning.ts. Same split as baserunning: the core
  * decides whether it happened, the inning layer decides what it cost.
@@ -167,6 +169,12 @@ export const TRIPLE_PLAY = 0.05;
  * THE OTHER DOUBLE PLAY — a LINE DRIVE caught on the fly and the man on first
  * doubled off before he can get back.
  *
+ * ⚠️ ON THE BASEDBALL PATH THIS IS NOT ROLLED ANY MORE. Since ZAIS-24 the
+ * clocks decide it — the throw to first against his run back, airRace() in
+ * game/defense.ts, tuned by LINER_BREAK — and the answer arrives as
+ * `doubleOff`. This rate is only for callers without a placement: the CLI
+ * and the roguelike. The measurements below are what it was set against.
+ *
  * ⚠️ IT IS THE ONLY OUT IN THE GAME RECORDED WITH A TAG, which is why it is
  * worth having at all. Every other out this engine has ever made is a batter
  * retired at first, a man forced at a bag, or a ball caught in the air — all of
@@ -199,6 +207,12 @@ export const DOUBLE_OFF = 0.33;
 
 /**
  * WHAT SHARE OF AN ORDINARY THROW'S ODDS a man TAGGING FROM THIRD faces.
+ *
+ * ⚠️ ON THE BASEDBALL PATH THIS IS NOT ROLLED ANY MORE. Since ZAIS-24 the throw
+ * home is raced — the catch, the throw at longThrowMs() and his standing-start
+ * ninety feet, airRace() in game/defense.ts — and tagUp() reads the answer as
+ * `tagOut`. This share is only for callers without a placement: the CLI and
+ * the roguelike.
  *
  * ⚠️ THE SACRIFICE FLY USED TO BE FREE, and it was the last free base left in
  * the game. Every other advance in this engine is now a bet with a price — the

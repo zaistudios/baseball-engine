@@ -15,6 +15,10 @@
  * at THROW_SPEED and the pivot's run to his bag, compared in defense.ts's
  * groundRace(). The replay draws those same numbers (Replay.clock).
  *
+ * And since ZAIS-24 the one throw after a CATCH: the double-off and the throw
+ * home on a sacrifice fly, timed from the ball's hang, longThrowMs() (CARRY)
+ * and the runner's legs, in defense.ts's airRace(). Replay.airClock.
+ *
  * What is STILL only a picture: the race on everything that has no clock
  * (rolled in fielding.ts and drawn to agree — raceTiming()), errors, and extra
  * bases. Each is its own step in the Unscripted Plays spec.
