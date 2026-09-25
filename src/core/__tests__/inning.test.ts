@@ -588,9 +588,55 @@ describe('gunning down the extra base', () => {
   });
 });
 
+describe('a clocked hit read and race', () => {
+  const single = (): AtBatResult => inPlay('single');
+  const clock = (runnerMs: number, guessMs: number, throwMs: readonly [number, number, number]) => ({
+    barMs: 0,
+    throwMs,
+    runners: [{ from: 1 as const, at: 4 as const, runnerMs, guessMs }],
+  });
+
+  it('lets the faster runner go where the slower runner holds', () => {
+    const fast = applyAtBat(
+      { outs: 0, bases: [null, { name: 'fast', speed: 1.3 }, null] },
+      single(), { name: 'batter', speed: 1 },
+      { error: false, doublePlay: false, hitClock: clock(100, 150, [500, 500, 200]) },
+    );
+    const slow = applyAtBat(
+      { outs: 0, bases: [null, { name: 'slow', speed: 0.7 }, null] },
+      single(), { name: 'batter', speed: 1 },
+      { error: false, doublePlay: false, hitClock: clock(200, 150, [500, 500, 200]) },
+    );
+    expect(fast.runs).toBe(1);
+    expect(fast.thrownOut).toBeNull();
+    expect(slow.runs).toBe(0);
+    expect(slow.bases[2]?.name).toBe('slow');
+  });
+
+  it('throws past a safe lead runner to the trailing runner it beats', () => {
+    const out = applyAtBat(
+      { outs: 0, bases: [{ name: 'trail', speed: 1 }, { name: 'lead', speed: 1 }, null] },
+      single(), { name: 'batter', speed: 1 },
+      {
+        error: false, doublePlay: false,
+        hitClock: {
+          barMs: 0,
+          throwMs: [500, 100, 300],
+          runners: [
+            { from: 1, at: 4, runnerMs: 200, guessMs: 300 },
+            { from: 0, at: 3, runnerMs: 200, guessMs: 300 },
+          ],
+        },
+      },
+    );
+    expect(out.thrownOut?.runner.name).toBe('trail');
+    expect(out.thrownOut?.at).toBe(3);
+    expect(out.thrownOut?.clock?.throwMs).toBe(100);
+    expect(out.runs).toBe(1);
+  });
+});
+
 /**
- * THE GROUND BALL AND THE SEND — 2026-08-25.
- *
  * The complaint that produced this: "runners don't advance on ground outs and
  * don't run home on singles." Both were true. An ordinary grounder froze the
  * bases entirely, and the man on second only scored on a single if his speed

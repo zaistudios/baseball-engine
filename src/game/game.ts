@@ -397,6 +397,8 @@ export interface PlayLog {
    * appearing from nowhere is a line that reads like a bug.
    */
   thrownOut?: ThrownOut | null;
+  /** The true throw and runner arrivals on a clean hit, even when safe. */
+  throwClock?: import('../core/inning.ts').ThrowClock;
   /**
    * How many bags the batter ended on. 1 for a single, 2 for one he stretched.
    * The replay runs him this far rather than reading it off the outcome — see
@@ -488,15 +490,15 @@ export function recordPlay(
   // for exactly that reason.
   if (play.runs > 0 && isWalkOff(next)) {
     next = closeHalf(next, { ...next, over: true, winner: 'home', ending: 'walk_off' });
-    return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.batterTo) };
+    return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.throwClock, play.batterTo) };
   }
 
   if (play.outs < 3) {
-    return { game: next, log: log(play.runs, before, next.bases, batter, side, false, thrownOut, play.batterTo) };
+    return { game: next, log: log(play.runs, before, next.bases, batter, side, false, thrownOut, play.throwClock, play.batterTo) };
   }
 
   next = rollHalf(next);
-  return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.batterTo) };
+  return { game: next, log: log(play.runs, before, next.bases, batter, side, true, thrownOut, play.throwClock, play.batterTo) };
 }
 
 /**
@@ -562,8 +564,9 @@ const log = (
   side: Side,
   halfEnded: boolean,
   thrownOut: ThrownOut | null = null,
+  throwClock?: import('../core/inning.ts').ThrowClock,
   batterTo = 0,
-): PlayLog => ({ runs, before, after, batter, side, halfEnded, scored: runs, thrownOut, batterTo });
+): PlayLog => ({ runs, before, after, batter, side, halfEnded, scored: runs, thrownOut, throwClock, batterTo });
 
 /**
  * The home team is batting in the last of it and just went ahead.

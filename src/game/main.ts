@@ -2208,6 +2208,8 @@ function completePlay(
             placement: contact.placement,
             // Who is running, so a fielded grounder is raced. See groundRace().
             bases: game.bases,
+            inning: game.inning,
+            runDiff: stateOf(game, battingSide(game)).runs - stateOf(game, fieldingSide(game)).runs,
           },
           rng,
         )
@@ -2356,6 +2358,7 @@ function completePlay(
                 },
               }
             : {}),
+          ...(log.throwClock ? { throwClock: log.throwClock } : {}),
         })
       : null,
     before,

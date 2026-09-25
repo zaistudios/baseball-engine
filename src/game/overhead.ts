@@ -14,7 +14,7 @@
  * plays for.
  */
 
-import type { RunnerMove } from '../core/inning.ts';
+import type { RunnerMove, ThrowClock } from '../core/inning.ts';
 import type { Outcome } from '../core/hitTables.ts';
 import type { ForceBag } from '../core/fielding.ts';
 import {
@@ -335,6 +335,8 @@ export interface Replay {
    * never showed it: the throw beat a man nobody could see running.
    */
   thrownOut?: { at: number; speed: number; batter?: boolean };
+  /** The target and true arrival times for a clean-hit send, even when safe. */
+  throwClock?: ThrowClock;
   /**
    * HOW MANY BAGS THE BATTER ENDED ON — 1 unless he stretched. Omitted falls
    * back to basesFor(outcome), which is what every caller that cannot stretch
@@ -440,6 +442,7 @@ export function newReplay(o: {
   /** Where the defence was standing. Omitted is standard depth. */
   fielders?: readonly Fielder[];
   thrownOut?: { at: number; speed: number; batter?: boolean };
+  throwClock?: ThrowClock;
   batterTo?: number;
   steal?: { from: number; to: number; safe: boolean; speed: number };
   chaserNum?: number;
@@ -484,6 +487,7 @@ export function newReplay(o: {
     moves: o.moves ?? [],
     held: o.held ?? [],
     ...(o.thrownOut === undefined ? {} : { thrownOut: o.thrownOut }),
+    ...(o.throwClock === undefined ? {} : { throwClock: o.throwClock }),
     ...(o.batterTo === undefined ? {} : { batterTo: o.batterTo }),
     ...(o.steal === undefined ? {} : { steal: o.steal }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
@@ -658,7 +662,7 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
  * one case where its absence was a hole.
  */
 const needsRelay = (r: Replay, chaser: Fielder): boolean =>
-  chaser.num >= 7 && r.thrownOut !== undefined;
+  chaser.num >= 7 && (r.thrownOut !== undefined || r.throwClock !== undefined);
 
 /**
  * Where the cut-off man stands. Derived rather than stored so the fielder who
@@ -722,6 +726,7 @@ export const replayLength = (r: Replay): number => {
     Math.max(race.runMs, race.throwMs ?? 0) + REPLAY_CALL_MS + extra,
     // A throw after a catch lands long after the ball came down. Hold for its call.
     r.airClock ? Math.max(r.airClock.throwMs, r.airClock.runnerMs) + REPLAY_CALL_MS + extra : 0,
+    r.throwClock ? Math.max(r.throwClock.throwMs, r.throwClock.runnerMs) + REPLAY_CALL_MS + extra : 0,
   );
 };
 
@@ -1464,11 +1469,14 @@ function drawRace(
       ? null
       : tagUp
         ? // Cut down tagging: from third, and the ball beats him home at its own time.
-          { at: 4, from: 3, ms: tagUp.throwMs }
+          { at: 4, from: 3, runnerMs: tagUp.runnerMs, throwMs: tagUp.throwMs }
         : {
             at: r.thrownOut.at,
-            from: r.thrownOut.at - 1 - basesFor(r.outcome),
-            ms: trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
+            from: r.throwClock?.from !== undefined
+              ? r.throwClock.from + 1
+              : r.thrownOut.at - 1 - basesFor(r.outcome),
+            runnerMs: r.throwClock?.runnerMs ?? trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
+            throwMs: r.throwClock?.throwMs ?? trip(r.thrownOut.speed, r.thrownOut.at - 1 - basesFor(r.outcome), r.thrownOut.at),
           };
 
   /**
@@ -1492,9 +1500,11 @@ function drawRace(
    * stretching his own hit, and both are drawn from the same two numbers.
    */
   const gunnedThrow = stretchedOut
-    ? { at: bases, ms: tripMs }
+    ? { at: bases, ms: r.throwClock?.throwMs ?? tripMs }
     : gunned
-      ? { at: gunned.at, ms: gunned.ms }
+      ? { at: gunned.at, ms: gunned.throwMs }
+      : r.throwClock && r.throwClock.from === -1
+        ? { at: r.throwClock.at, ms: r.throwClock.throwMs }
       : // A sacrifice fly he beat still draws the throw, landing behind him.
         tagUp
         ? { at: 4, ms: tagUp.throwMs }
@@ -1534,8 +1544,8 @@ function drawRace(
   // trace of that on screen was a line of text.
   if (gunned) {
     // Tagging, he is short of the plate when the ball gets there, and stops.
-    const k = tagUp && r.thrownOut ? tagK(r.thrownOut.speed, 1, gunned.ms) : t / gunned.ms;
-    drawRunnerDot(ctx, opts, cam, gunned.from, gunned.at, k, t > gunned.ms);
+    const k = tagUp && r.thrownOut ? tagK(r.thrownOut.speed, 1, gunned.runnerMs) : t / gunned.runnerMs;
+    drawRunnerDot(ctx, opts, cam, gunned.from, gunned.at, k, t > gunned.throwMs);
   }
 
   // The forced man, on a double play AND on a plain force. He is erased from
@@ -1596,8 +1606,8 @@ function drawRace(
   // stopped dead at a bag and a line of text said why. Now the ball goes there,
   // through the cut-off man when an outfielder has it — see relaySpot().
   //
-  // It is timed off the runner rather than off a clock of its own, because the
-  // one thing it must never do is arrive after the man it beat.
+  // On a clean hit the engine supplied both arrivals; fallback callers use the
+  // runner's trip for both, which preserves their old picture.
   if (gunnedThrow) {
     const bag = bagAt(cam, gunnedThrow.at - 1);
     const land = gunnedThrow.ms;
@@ -1640,8 +1650,19 @@ function drawRace(
   // The man cut down going for the extra base gets his own call, at his own
   // bag. It is a second out on a play the batter was safe on, which is exactly
   // why it needs saying somewhere other than the play-by-play.
-  if (gunned && t > gunned.ms) {
+  if (gunned && t > gunned.throwMs) {
     call('OUT', bagAt(cam, gunned.at - 1), false, gunned.at === 3 ? -24 : 22);
+  }
+
+  // A clean-hit send that the throw did not beat still shows the throw
+  // arriving behind him. The runner itself is already in `moves`.
+  if (
+    r.throwClock &&
+    !r.thrownOut &&
+    !stretchedOut &&
+    t > Math.min(r.throwClock.runnerMs, r.throwClock.throwMs)
+  ) {
+    call('SAFE', bagAt(cam, r.throwClock.at - 1), true);
   }
 
   // The batter cut down stretching his own hit. Called at the bag he was

@@ -293,6 +293,8 @@ export function playAiAtBat(
             infieldIn: shift === 'in',
             placement: contact.placement,
             bases: g.bases,
+            inning: g.inning,
+            runDiff: stateOf(g, battingSide(g)).runs - stateOf(g, fieldingSide(g)).runs,
           },
           rng,
         )

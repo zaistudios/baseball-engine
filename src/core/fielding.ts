@@ -269,7 +269,8 @@ export const STRETCH_GAP_FT = 78;
 export const STRETCH_RATE = 0.45;
 
 /**
- * ODDS THEY GET HIM, against THROW_RATE's 0.28 for a runner already on base.
+ * FALLBACK ODDS THEY GET HIM, against THROW_RATE's 0.28 for a runner already
+ * on base. A placed Basedball hit uses the batter's read and hitClock instead.
  *
  * ⚠️ MEASURED, AND THE FIRST CUT HAD THE ECONOMICS BACKWARDS. Sharing the
  * runner's 0.28 arm cost **0.08 runs per team per game** — so stretching was a
@@ -456,8 +457,9 @@ export interface FieldingResult {
    */
   forceAt?: ForceBag;
   /**
-   * THE THROW TO THE EXTRA BASE, pre-rolled — see gunDown() and the note on
-   * ARM_STRENGTH below.
+   * FALLBACK THROW ODDS for callers without a placement. The Basedball path
+   * decides sends and throws from `hitClock`; this die remains for the CLI and
+   * other callers that do not hand core a placement.
    *
    * ⚠️ WHY IT IS A ROLL AND NOT A VERDICT. Only advance() knows which runner
    * actually goes: it depends on his legs, on whether the road in front of him
@@ -487,6 +489,12 @@ export interface FieldingResult {
    */
   advanceRolls?: readonly [number, number, number];
   /**
+   * THE READ AND THE RACE ON A CLEAN HIT. `game/defense.ts` computes these
+   * plain numbers from the placement and the clocks; inning.ts only compares
+   * them. Absent is the fallback path for callers without a placement.
+   */
+  hitClock?: HitClock;
+  /**
    * THE BATTER'S OWN GAMBLE, pre-rolled — see stretchChance(). Same shape and
    * the same reason as `extraBase`: only advance() knows whether the bag in
    * front of him is free, and advance() is pure.
@@ -511,11 +519,33 @@ export interface FieldingResult {
   };
 }
 
+/** The one extra bag a runner could try for, and the guess he made about it. */
+export interface HitClockRunner {
+  /** -1 is the batter; 0, 1 and 2 are first, second and third. */
+  from: -1 | 0 | 1 | 2;
+  /** 2, 3 or 4, the extra bag he is trying to reach. */
+  at: 2 | 3 | 4;
+  /** His true arrival, from contact. */
+  runnerMs: number;
+  /** His rough read of the throw, from the same seeded roll. */
+  guessMs: number;
+}
+
+/** The clocks that decide a clean single or double before the picture runs. */
+export interface HitClock {
+  /** The read bar, in replay milliseconds. */
+  barMs: number;
+  /** Throw landing at bags 2, 3 and 4, respectively. */
+  throwMs: readonly [number, number, number];
+  runners: readonly HitClockRunner[];
+}
+
 export const CLEAN: FieldingResult = { error: false, doublePlay: false };
 
 /**
- * ODDS AN AVERAGE RUNNER IS GUNNED DOWN going first-to-third or second-to-home,
- * before his own legs are taken into account.
+ * FALLBACK ODDS AN AVERAGE RUNNER IS GUNNED DOWN going first-to-third or
+ * second-to-home. Basedball's clean-hit path uses the read and true clocks;
+ * this remains for callers without a placement.
  *
  * ⚠️ THE EXTRA BASE USED TO BE FREE, and that is what this changes. A runner at
  * 1.15 speed or better simply took it, every time, with no throw and no risk —
@@ -531,7 +561,8 @@ export const CLEAN: FieldingResult = { error: false, doublePlay: false };
 export const THROW_RATE = 0.28;
 
 /**
- * Does the throw beat him? The runner's own legs divide it, the arm multiplies.
+ * Does the fallback throw beat him? The runner's own legs divide it, the arm
+ * multiplies. Clocked hits compare arrival times in core/inning.ts instead.
  *
  * Exported because the UI has to be able to say what a send is worth — the same
  * reason isSacrificeFly() is exported. A gamble whose price you cannot see is

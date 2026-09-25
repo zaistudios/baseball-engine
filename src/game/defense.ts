@@ -38,6 +38,7 @@ import {
   type FieldingResult,
   type ForceBag,
   type ThrowEffect,
+  type HitClock,
 } from '../core/fielding.ts';
 import { isHit } from '../core/hitTables.ts';
 import { SAC_FLY_MIN_ANGLE, forcedRunners, isDeepFly, type Bases } from '../core/inning.ts';
@@ -257,6 +258,89 @@ export interface AirClock {
   throwMs: number;
   /** The runner reaches it. */
   runnerMs: number;
+}
+
+/**
+ * How much a runner's read can miss the true throw. Tuned in balance.ts.
+ *
+ *   spread  margin  score 2nd  1st→3rd  out/send
+ *    0.10      0       38%       18%       8%
+ *    0.20     40       35%       16%      12%
+ *    0.35     40       34%       14%      24%
+ *
+ * The fixed clock table and the seeded run both keep the read here; the
+ * remaining fallback callers never enter this path.
+ */
+export const READ_SPREAD = 0.1;
+
+/** The minimum lead a runner wants before trusting his read, in replay ms. */
+export const SEND_MARGIN_MS = 0;
+
+/**
+ * THE READ AND RACE ON A CLEAN HIT. Geometry supplies the true clocks; the
+ * runner only sees a rough throw and compares it with his arrival plus a bar.
+ * The rolls are handed in from rollFielding(), so this adds no RNG draw.
+ *
+ * `runDiff` is batting score minus fielding score. The bar follows the same
+ * directions as aiShouldSend(): more cautious with two outs or a large lead,
+ * and more willing to gamble when behind late.
+ */
+export function hitRace(o: {
+  hit: HitResult;
+  placement: Placement;
+  bases: Bases;
+  outs: number;
+  inning: number;
+  runDiff: number;
+  batterSpeed: number;
+  arm: number;
+  advanceRolls: readonly [number, number, number];
+  stretch?: { roll: number };
+}): HitClock | undefined {
+  const { hit, placement: p } = o;
+  if (hit.outcome !== 'single' && hit.outcome !== 'double') return undefined;
+
+  const n = hit.outcome === 'single' ? 1 : 2;
+  const pickupMs =
+    REPLAY_CUT_MS +
+    (p.cutOff?.fielded
+      ? p.cutOff.ms
+      : plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs);
+  const spot = feetXY(p.distFt, p.dirDeg);
+  const throwMs: [number, number, number] = [
+    pickupMs + longThrowMs(spot, 2, o.arm),
+    pickupMs + longThrowMs(spot, 3, o.arm),
+    pickupMs + longThrowMs(spot, 4, o.arm),
+  ];
+  let barMs = SEND_MARGIN_MS;
+  if (o.outs === 2) barMs += SEND_MARGIN_MS * 0.12;
+  if (o.runDiff < 0 && o.inning >= 7) barMs -= SEND_MARGIN_MS * 0.06;
+  if (o.runDiff > 4) barMs += SEND_MARGIN_MS * 0.15;
+
+  const read = (at: 2 | 3 | 4, runnerMs: number, roll: number) => ({
+    at,
+    runnerMs,
+    guessMs: throwMs[at - 2]! * (1 + READ_SPREAD * (2 * roll - 1)),
+  });
+  const runners: HitClock['runners'][number][] = [];
+  o.bases.forEach((runner, from) => {
+    if (!runner) return;
+    const natural = from + 1 + n;
+    if (natural >= 4) return;
+    const at = (natural + 1) as 2 | 3 | 4;
+    runners.push({
+      ...read(at, REPLAY_CUT_MS + runnerMs(runner.speed, from + 1, at), o.advanceRolls[from]!),
+      from: from as 0 | 1 | 2,
+    });
+  });
+  if (o.stretch) {
+    const at = (n + 1) as 2 | 3;
+    runners.push({
+      ...read(at, REPLAY_CUT_MS + runToFirstMs(o.batterSpeed) * at, o.stretch.roll),
+      from: -1,
+    });
+  }
+  return { barMs, throwMs, runners };
 }
 
 /**
@@ -500,8 +584,12 @@ export function fieldBall(
      * WHO IS ON BASE, for the race. With a placement whose grounder was
      * fielded, this is what turns the play from dice into clocks — see
      * groundRace(). Omitted keeps the dice, which is every caller before it.
-     */
+    */
     bases?: Bases;
+    /** Game context for the hit read. Omitted keeps the old extra-base dice. */
+    inning?: number;
+    /** Batting score minus fielding score, for the read bar. */
+    runDiff?: number;
   },
   rng: Rng,
 ): DefensivePlay {
@@ -623,12 +711,35 @@ export function fieldBall(
         { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove }
       : undefined;
 
+  const hitClock =
+    !result.error &&
+    opts.placement &&
+    opts.bases &&
+    opts.inning !== undefined &&
+    opts.runDiff !== undefined &&
+    result.advanceRolls &&
+    isHit(hit.outcome)
+      ? hitRace({
+          hit,
+          placement: opts.placement,
+          bases: opts.bases,
+          outs: opts.outs,
+          inning: opts.inning,
+          runDiff: opts.runDiff,
+          batterSpeed: opts.batterSpeed,
+          arm: glove,
+          advanceRolls: result.advanceRolls,
+          stretch,
+        })
+      : undefined;
+
   // A booted ball has no catch to throw after.
   const thrown = air && !result.error ? air : undefined;
   return {
     ...result,
     ...(thrown?.clock.at === 4 ? { tagOut: thrown.out } : {}),
     ...(stretch ? { stretch } : {}),
+    ...(hitClock ? { hitClock } : {}),
     ...(clock ? { clock } : {}),
     ...(thrown ? { airClock: thrown.clock } : {}),
     by,

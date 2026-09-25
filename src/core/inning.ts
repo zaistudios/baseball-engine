@@ -14,7 +14,7 @@
 
 import { isHit, isOut, type Outcome } from './hitTables.ts';
 import type { AtBatResult } from './atBat.ts';
-import { CLEAN, gunDown, TAG_THROW, type FieldingResult, type ForceBag } from './fielding.ts';
+import { CLEAN, gunDown, TAG_THROW, type FieldingResult, type ForceBag, type HitClock } from './fielding.ts';
 
 /**
  * [first, second, third]. A slot holds the RUNNER standing on it, or null.
@@ -232,12 +232,9 @@ export const EXTRA_BASE_SPEED = 1.15;
  * never did, for his whole career. That is what "runners don't run home on
  * singles" is — for two thirds of the league it was literally true.
  *
- * These are the real rates, and they are the rates BEFORE the throw in
- * fielding.ts gets its chance: second-to-home on a single is about 60% in MLB
- * and first-to-third about 28%, so sending three quarters of the time and
- * getting gunned down on 28% of those lands on 54%, and 0.40 × 0.72 lands on
- * 29%. Multiplied by the runner's legs, so speed still matters — it just
- * stopped being a switch.
+ * These are fallback rates for callers without a placement. The Basedball path
+ * reads its send from `hitClock` and keeps these constants for the frozen
+ * callers that still resolve the play without field geometry.
  */
 export const SEND_HOME = 0.75;
 export const SEND_UP = 0.4;
@@ -257,7 +254,9 @@ const odds = (speed: number, base: number): number =>
   Math.max(0.05, Math.min(0.95, base * speed));
 
 /**
- * Batter and every runner move n bases. Anyone past third scores.
+ * Batter and every runner move n bases. Anyone past third scores. On a clean
+ * single or double, the extra bag is a read followed by the hit clocks in
+ * `hitClock`; callers without those numbers keep the fallback dice below.
  *
  * ⚠️ THE EXTRA BASE, added 2026-08-16. The old note here said "no first-to-third
  * on a single, no runner held at second, no runner thrown out stretching", and
@@ -266,17 +265,100 @@ const odds = (speed: number, base: number): number =>
  * scores from second — the two most ordinary pieces of baseball there are, and
  * neither existed.
  *
- * Still absent, deliberately: nobody is thrown out stretching, and the batter
- * never takes an extra base himself. The batter is excluded because a man
- * stretching a single into a double is a play with a throw and a call at the
- * far end, and the overhead replay stops him at first — see the README. A
- * runner advancing behind the play needs neither.
+ * The batter is included when the placement supplied a stretch read. The same
+ * true throw clock is recorded for a safe send or an out so the replay cannot
+ * invent a second verdict from its geometry.
  *
  * RUNNERS ARE PROCESSED LEAD-FIRST so nobody can run into the back of the man
  * in front. Without `ceiling` a fast runner on first would take third while a
  * slow runner from second was standing on it, and the diff in runnerMoves()
  * would draw two dots on one bag.
  */
+export interface ThrowClock {
+  from: number;
+  at: number;
+  runnerSpeed: number;
+  runnerMs: number;
+  throwMs: number;
+}
+
+function advanceFromHitClock(
+  bases: Bases,
+  n: number,
+  batter: Runner,
+  hitClock: HitClock,
+  extraBases: boolean,
+): { bases: Bases; runs: number; thrownOut: ThrownOut | null; throwClock?: ThrowClock; batterTo: number } {
+  const next: [Runner | null, Runner | null, Runner | null] = [null, null, null];
+  const canStretch = extraBases && (n === 1 || n === 2);
+  const queue: { from: number; who: Runner }[] = [];
+  for (let i = 2; i >= 0; i--) {
+    const who = bases[i];
+    if (who) queue.push({ from: i, who });
+  }
+  queue.push({ from: -1, who: batter });
+
+  // First decide who read "go". This pass is lead-first and preserves the
+  // existing ceiling, while leaving the single throw to a second decision.
+  let ceiling = 4;
+  const plans = queue.map(({ from, who }) => {
+    const to = from + 1 + n;
+    const wants = to + 1;
+    const clock = hitClock.runners.find((r) => r.from === from && r.at === wants);
+    const goes =
+      canStretch &&
+      to < 4 &&
+      (wants >= 4 || wants < ceiling) &&
+      !!clock &&
+      clock.runnerMs + hitClock.barMs < clock.guessMs;
+    if (!goes) ceiling = to < 4 ? to : ceiling;
+    else ceiling = wants;
+    return { from, who, to, wants, clock, goes };
+  });
+
+  const sends = plans.filter((p) => p.goes && p.clock);
+  const beat = sends.find((p) => hitClock.throwMs[p.wants - 2]! < p.clock!.runnerMs);
+  const target = beat ?? sends[0];
+  const targetClock = target?.clock
+    ? {
+        from: target.from,
+        at: target.wants,
+        runnerSpeed: target.who.speed,
+        runnerMs: target.clock.runnerMs,
+        throwMs: hitClock.throwMs[target.wants - 2]!,
+      }
+    : undefined;
+  const out = target && targetClock && targetClock.throwMs < targetClock.runnerMs ? target : undefined;
+
+  let runs = 0;
+  let thrownOut: ThrownOut | null = null;
+  let batterTo = n;
+  ceiling = 4;
+  for (const p of plans) {
+    let to = p.to;
+    if (p.goes) {
+      to = p.wants;
+      if (p === out) {
+        thrownOut = {
+          runner: p.who,
+          at: p.wants,
+          batter: p.from < 0,
+          clock: targetClock,
+        };
+        if (p.from < 0) batterTo = p.wants;
+        continue;
+      }
+    }
+    if (p.from < 0) batterTo = to;
+    if (to >= 4) runs++;
+    else {
+      next[to - 1] = p.who;
+      ceiling = to;
+    }
+  }
+  return { bases: next, runs, thrownOut, ...(targetClock ? { throwClock: targetClock } : {}), batterTo };
+}
+
 function advance(
   bases: Bases,
   n: number,
@@ -286,7 +368,9 @@ function advance(
   rolls?: readonly [number, number, number],
   /** The batter's own gamble on one more bag. See stretchChance(). */
   stretch?: { odds: number; roll: number; armOdds: number },
-): { bases: Bases; runs: number; thrownOut: ThrownOut | null; batterTo: number } {
+  hitClock?: HitClock,
+): { bases: Bases; runs: number; thrownOut: ThrownOut | null; throwClock?: ThrowClock; batterTo: number } {
+  if (hitClock) return advanceFromHitClock(bases, n, batter, hitClock, extraBases);
   const next: [Runner | null, Runner | null, Runner | null] = [null, null, null];
   let runs = 0;
   let thrownOut: ThrownOut | null = null;
@@ -392,6 +476,8 @@ export interface ThrownOut {
    * sprinting a leg he never ran, and once by the race that owns him.
    */
   batter: boolean;
+  /** The true runner and throw arrivals when a hit was clocked. */
+  clock?: ThrowClock;
 }
 
 /**
@@ -875,6 +961,8 @@ export interface PlayResult extends PlayState {
    * not happen to the batter.
    */
   thrownOut?: ThrownOut | null;
+  /** The one throw at a sent runner, including a safe runner. */
+  throwClock?: ThrowClock;
 }
 
 /**
@@ -905,6 +993,7 @@ export function applyAtBat(
   let { outs, bases } = state;
   let runs = 0;
   let thrownOut: ThrownOut | null = null;
+  let throwClock: ThrowClock | undefined;
   // How many bags the man at the plate ended on. The replay cannot read it off
   // the outcome once he is allowed to stretch — see advance().
   let batterTo = 0;
@@ -1039,10 +1128,12 @@ export function applyAtBat(
           fielding.extraBase,
           fielding.advanceRolls,
           fielding.stretch,
+          fielding.hitClock,
         );
         bases = a.bases;
         runs += a.runs;
         batterTo = a.batterTo;
+        throwClock = a.throwClock;
         // Gunned down going for one too many. It is an out like any other, and
         // it is the only out in the file that happens to a man who was not at
         // the plate.
@@ -1066,5 +1157,5 @@ export function applyAtBat(
     }
   }
 
-  return { outs, bases, runs, thrownOut, batterTo };
+  return { outs, bases, runs, thrownOut, throwClock, batterTo };
 }

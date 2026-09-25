@@ -3036,6 +3036,10 @@ agree about when it did — all to spare the player one encounter.
 
 ## The rules this codebase is built on
 
+On a clean single or double, runners read a rough throw and race the engine's
+arrival clocks; the replay draws that same throw and arrival, including a safe
+send or a runner cut down with the ball.
+
 There is a Godot prototype behind this rewrite. Its design was sound; its architecture was not. It carried three GameStates and seven managers, and it stopped working. Four rules come directly out of that autopsy, and none of them are negotiable.
 
 **1. The timing seam has no engine in it.**
