@@ -8,7 +8,7 @@
  * it describes a mismatch rather than the league. Run scripts/league.ts for who
  * WINS and this for what a game LOOKS like.
  */
-import { simulateGame, boxLine } from '../src/game/sim.ts';
+import { simulateGame, boxLine, type ExtraBase } from '../src/game/sim.ts';
 import { LEAGUE } from '../src/game/teams.ts';
 
 /** Every ordered pair, so each club hosts and travels equally. */
@@ -19,6 +19,7 @@ let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfin
 let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
 let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0, hrs = 0, inPlay = 0;
 const caught: { how: string | null; glove: number }[] = [];
+const bags: ExtraBase[] = [];
 const scores: number[] = [];
 
 for (let i = 0; i < N; i++) {
@@ -29,7 +30,7 @@ for (let i = 0; i < N; i++) {
   const {
     game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls,
+    stretchSafe, stretchOut, homeRuns, airBalls, extraBases,
   } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
@@ -59,6 +60,7 @@ for (let i = 0; i < N; i++) {
   hrs += homeRuns;
   inPlay += outcomes.in_play;
   caught.push(...airBalls.filter((b) => b.how));
+  bags.push(...extraBases);
   pas += outcomes.walk + outcomes.hit_by_pitch + outcomes.strikeout + outcomes.in_play;
   if (game.inning > 9) extras++;
   if (game.ending === 'walk_off') walkoffs++;
@@ -87,6 +89,16 @@ console.log(`triple plays     1 per ${tps ? Math.round(played / tps) : 'never'} 
 console.log(`sac flies/team   ${(sf / played / 2).toFixed(2)}   (MLB ~0.25; SAC_FLY_MIN_EV)`);
 console.log(`  ...cut down     ${(sfOut / played / 2).toFixed(2)}   (${((sfOut / Math.max(1, sf + sfOut)) * 100).toFixed(0)}% of the sends; TAG_THROW)`);
 console.log(`stretches/team   ${((strSafe + strOut) / played / 2).toFixed(2)}   (${((strSafe / Math.max(1, strSafe + strOut)) * 100).toFixed(0)}% made it; STRETCH_RATE/STRETCH_THROW)`);
+// THE EXTRA BASE ON A CLEAN SINGLE: of the men standing on that bag, the share
+// who ended the play a bag further on than the hit put them. The send and the
+// throw together — a man gunned down did not score. See AtBatLog.extraBase.
+const rate = (xs: ExtraBase[]) => ((xs.filter((b) => b.went && !b.out).length / Math.max(1, xs.length)) * 100).toFixed(0);
+const onSingle = (from: number) => bags.filter((b) => b.n === 1 && b.from === from);
+const sends = bags.filter((b) => b.went);
+const gunned = sends.filter((b) => b.out).length;
+console.log(`scored from 2nd  ${rate(onSingle(1))}%   of men on second on a single (MLB ~60%)`);
+console.log(`1st to 3rd       ${rate(onSingle(0))}%   of men on first on a single (MLB ~28%)`);
+console.log(`thrown out/team  ${(gunned / played / 2).toFixed(2)}   (${((gunned / Math.max(1, sends.length)) * 100).toFixed(0)}% of ${(sends.length / played / 2).toFixed(2)} sends on hits)`);
 // ⚠️ BALLS IN PLAY INCLUDES FOUL OUTS AND BUNTS, so this runs a little under
 // a scorer's BABIP. It is for before-and-after, not for the back of a card.
 console.log(`BABIP            ${((hits - hrs) / Math.max(1, inPlay - hrs)).toFixed(3)}   (MLB ~.290)`);

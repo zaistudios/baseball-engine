@@ -51,7 +51,7 @@ import { fieldBall, reachOf } from './defense.ts';
 import type { ForceBag } from '../core/fielding.ts';
 
 import { isHit } from '../core/hitTables.ts';
-import { BASES_GAINED, forcedRunners, isSacrificeFly } from '../core/inning.ts';
+import { BASES_GAINED, forcedRunners, isSacrificeFly, type Bases } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement, beatenOut, type CatchHow } from './placement.ts';
 import { pickShift } from './shift.ts';
@@ -106,6 +106,14 @@ export interface AtBatLog {
    * the only thing that says whether the gamble is worth taking.
    */
   stretched?: 'safe' | 'out';
+  /**
+   * EVERY MAN WHO HAD ONE MORE BAG IN FRONT OF HIM ON A CLEAN SINGLE OR DOUBLE
+   * — the bag he stood on (-1 the batter), whether he went for it, and whether
+   * the throw got him. The batter is only listed when he went. Counted because
+   * "about 60% score from second on a single" is the rate the send is tuned to
+   * (ZAIS-25), and nothing else can see it.
+   */
+  extraBase?: ExtraBase[];
   /**
    * WHAT THE DEFENCE TURNED ON THE BALL, all four of the multi-out plays, and
    * counted for exactly the reason `forceAt` is: each one is a rule with a knob
@@ -358,9 +366,47 @@ export function playAiAtBat(
             played.log.batterTo > BASES_GAINED[result.hit.outcome]
           ? 'safe'
           : undefined,
+      ...(result.kind === 'in_play' &&
+      !fielding?.error &&
+      (result.hit.outcome === 'single' || result.hit.outcome === 'double')
+        ? { extraBase: extraBags(g.bases, BASES_GAINED[result.hit.outcome], played.log) }
+        : {}),
       bunt: bunted,
     },
   };
+}
+
+export interface ExtraBase {
+  /** The bases the hit was worth: 1 a single, 2 a double. */
+  n: number;
+  from: number;
+  went: boolean;
+  out: boolean;
+}
+
+/**
+ * Who had an extra bag to take on a hit, and what became of him. See
+ * AtBatLog.extraBase.
+ *
+ * ponytail: when the throw makes the third out the bases are already wiped, so
+ * the men behind him cannot be read and are left out. Rare enough not to move
+ * the rates; carry the pre-roll bases on PlayLog if it ever does.
+ */
+function extraBags(before: Bases, n: number, log: PlayLog): ExtraBase[] {
+  const gunned = log.thrownOut?.runner;
+  const rows: ExtraBase[] = [];
+  before.forEach((who, i) => {
+    if (!who || i + 1 + n >= 4) return;
+    if (who === gunned) return void rows.push({ n, from: i, went: true, out: true });
+    const at = log.after.indexOf(who);
+    if (log.halfEnded && at < 0) return;
+    // Gone and not thrown out is scored, which is past the bag the hit gave him.
+    rows.push({ n, from: i, went: at < 0 || at + 1 > i + 1 + n, out: false });
+  });
+  if (log.thrownOut?.batter || log.batterTo > n) {
+    rows.push({ n, from: -1, went: true, out: !!log.thrownOut?.batter });
+  }
+  return rows;
 }
 
 /**
@@ -494,6 +540,8 @@ export interface SimResult {
   stretchSafe: number;
   /** ...and the ones the arm got. See STRETCH_THROW. */
   stretchOut: number;
+  /** Every extra bag there was to take on a clean single or double. See AtBatLog.extraBase. */
+  extraBases: ExtraBase[];
   /** Home runs, so balance.ts can take them out of BABIP. */
   homeRuns: number;
   /** Every fair ball in the air but a home run. See AtBatLog.air. */
@@ -560,6 +608,7 @@ export function simulateGame(
   let stretchOut = 0;
   let homeRuns = 0;
   const airBalls: AirBall[] = [];
+  const extraBases: ExtraBase[] = [];
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -604,6 +653,7 @@ export function simulateGame(
     if (out.atBat.sacFlyOut) sacFlyOuts++;
     if (out.atBat.outcome === 'home_run') homeRuns++;
     if (out.atBat.air) airBalls.push(out.atBat.air);
+    if (out.atBat.extraBase) extraBases.push(...out.atBat.extraBase);
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -617,7 +667,7 @@ export function simulateGame(
   return {
     game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls,
+    stretchSafe, stretchOut, homeRuns, airBalls, extraBases,
   };
 }
 
