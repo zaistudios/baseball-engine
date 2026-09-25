@@ -495,6 +495,56 @@ describe('the throw after a catch is a race (ZAIS-24)', () => {
     expect(rolled.tagOut).toBeUndefined();
     expect(rolled.airClock).toBeUndefined();
   });
+
+  /** Every caught line drive, infield and outfield. */
+  const liners = (() => {
+    const out: { p: Placement; hit: HitResult }[] = [];
+    for (let dir = -40; dir <= 40; dir += 4) {
+      for (const ev of [75, 90, 105]) {
+        for (const la of [11, 15, 19]) {
+          const hit = { outcome: 'line_out', isHit: false, isOut: true, exitVelocity: ev, launchAngle: la, direction: dir } as HitResult;
+          const p = withPlacement({ kind: 'in_play', hit });
+          if (p.result.kind !== 'in_play' || p.result.hit.outcome !== 'line_out' || !p.placement?.airCatch?.caught) continue;
+          out.push({ p: p.placement, hit });
+        }
+      }
+    }
+    return out;
+  })();
+  const off = (f: (typeof liners)[number], speed: number, arm = 1, outs = 0) =>
+    airRace({ hit: f.hit, placement: f.p, bases: [runner(speed), null, null], outs, arm });
+
+  it('the same liner doubles off a slow man on first and not a fast one', () => {
+    expect(liners.length).toBeGreaterThan(20);
+    for (const f of liners) expect(off(f, 1)!.clock.at).toBe(1);
+    expect(liners.filter((f) => off(f, 0.7)!.out && !off(f, 1.4)!.out).length).toBeGreaterThan(0);
+    expect(liners.filter((f) => !off(f, 0.7)!.out && off(f, 1.4)!.out)).toEqual([]);
+  });
+
+  it('raising the glove never turns a doubled-off man safe', () => {
+    for (const f of liners) {
+      for (const speed of [0.7, 1, 1.4]) {
+        let wasOut = false;
+        for (let arm = 0.5; arm <= 1.6; arm += 0.1) {
+          const out = off(f, speed, arm)!.out;
+          if (wasOut) expect(out).toBe(true);
+          wasOut = out;
+        }
+      }
+    }
+  });
+
+  it('no double-off with two out, and fieldBall books what the clocks said', () => {
+    const f = liners[0]!;
+    expect(off(f, 1, 1, 2)).toBeUndefined();
+    const a = assignPositions(HOME.lineup);
+    const opts = { batterSpeed: 1, forceAtFirst: true, outs: 0, placement: f.p };
+    for (const speed of [0.5, 1.5]) {
+      const r = fieldBall(f.hit, a, { ...opts, bases: [runner(speed), null, null] }, makeRng(3));
+      expect(r.error).toBe(false);
+      expect(r.doubledOff ?? false).toBe(r.airClock!.throwMs < r.airClock!.runnerMs);
+    }
+  });
 });
 
 /**

@@ -611,6 +611,13 @@ export function rollFielding(
      * is every fly ball, the CLI and the roguelike.
      */
     race?: (rng: Rng) => FieldingResult;
+    /**
+     * THE DOUBLE-OFF, DECIDED FROM THE CLOCKS — game/defense.ts's airRace():
+     * did the throw beat the man on first back to the bag. When it is here it
+     * replaces the DOUBLE_OFF die; the error roll still comes first. Absent is
+     * the die: the CLI and the roguelike.
+     */
+    doubleOff?: boolean;
   },
   rng: Rng,
 ): FieldingResult {
@@ -642,6 +649,7 @@ function rollOuts(
     throwEffect?: ThrowEffect;
     lineDrive?: boolean;
     race?: (rng: Rng) => FieldingResult;
+    doubleOff?: boolean;
   },
   rng: Rng,
 ): FieldingResult {
@@ -663,7 +671,8 @@ function rollOuts(
   // the bag. See DOUBLE_OFF for why this needs `lineDrive` and not merely
   // `line_out`.
   if (outcome === 'line_out') {
-    return opts.lineDrive && opts.forceAtFirst && opts.outs < 2 && rng.next() < DOUBLE_OFF
+    // The clocks answer it when there are clocks. See `doubleOff`.
+    return opts.lineDrive && opts.forceAtFirst && opts.outs < 2 && (opts.doubleOff ?? rng.next() < DOUBLE_OFF)
       ? { error: false, doublePlay: false, doubledOff: true }
       : CLEAN;
   }

@@ -391,6 +391,18 @@ export function groundRace(o: {
  * WHO GOES is not decided here. The man on third always goes on isDeepFly(),
  * as he always has; this only answers whether he gets there.
  *
+ * On a line drive — below SAC_FLY_MIN_ANGLE, the same line fieldBall() hands
+ * rollFielding() as `lineDrive` — with a man on first and an out to spare, the
+ * throw goes to first instead. He broke on contact, so at the catch he is
+ * LINER_BREAK of the way to second and has that much ground to get back.
+ *
+ * ⚠️ THE THROW TO FIRST PAYS NO CARRY, and that is measured, not forgotten.
+ * Nine in ten of these liners are caught in the OUTFIELD, and with CARRY on
+ * that throw no LINER_BREAK short of standing on second got the double-off
+ * past 0.03 a team (ZAIS-24). ponytail: so a throw from centre travels at the
+ * infield pace to first and at the carried pace home. Split CARRY by target
+ * only if the replay makes the two throws look like different arms.
+ *
  * Nothing here rolls. Undefined when there is no such play.
  */
 export function airRace(o: {
@@ -402,16 +414,32 @@ export function airRace(o: {
 }): { out: boolean; clock: AirClock } | undefined {
   const { hit, placement: p } = o;
   if (hit.outcome !== 'line_out' || !p.airCatch?.caught) return undefined;
+  const first = o.bases[0];
   const third = o.bases[2];
-  if (!third || !isDeepFly(hit.outcome, hit.exitVelocity, o.outs, hit.launchAngle)) return undefined;
+  const liner = hit.launchAngle < SAC_FLY_MIN_ANGLE && first && o.outs < 2;
+  const tag = third && isDeepFly(hit.outcome, hit.exitVelocity, o.outs, hit.launchAngle);
+  if (!liner && !tag) return undefined;
   const caughtMs =
     REPLAY_CUT_MS +
     plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs;
   const spot = feetXY(p.distFt, p.dirDeg);
-  const throwMs = caughtMs + longThrowMs(spot, 4, o.arm);
-  const runnerMs = caughtMs + runToFirstMs(third.speed);
-  return { out: throwMs < runnerMs, clock: { caughtMs, at: 4, throwMs, runnerMs } };
+  const at = liner ? 1 : 4;
+  const throwMs = caughtMs + (liner ? throwArrivalMs(spot, 1, o.arm) : longThrowMs(spot, 4, o.arm));
+  const arriveMs = liner
+    ? caughtMs + LINER_BREAK * runnerMs(first.speed, 1, 2)
+    : caughtMs + runToFirstMs(third!.speed);
+  return { out: throwMs < arriveMs, clock: { caughtMs, at, throwMs, runnerMs: arriveMs } };
 }
+
+/**
+ * HOW FAR TOWARD SECOND THE MAN ON FIRST HAS GOT when a line drive is caught —
+ * a share of the ninety feet, which is what he has to get back.
+ *
+ * The one constant the double-off was allowed (ZAIS-24). Everything else is
+ * the catch (the liner's hang), the throw (longThrowMs()) and his legs
+ * (runnerMs()). Tuned in the next commit; see the sweep.
+ */
+export const LINER_BREAK = 0.5;
 
 /**
  * Roll the defence on a ball in play, with a real fielder attached.
@@ -545,6 +573,8 @@ export function fieldBall(
       // does not also ask whether an infielder caught it.
       lineDrive: hit.launchAngle < SAC_FLY_MIN_ANGLE,
       ...(race ? { race } : {}),
+      // ...and whether the man on first got back, from the clocks. See airRace().
+      ...(air?.clock.at === 1 ? { doubleOff: air.out } : {}),
     },
     rng,
   );
