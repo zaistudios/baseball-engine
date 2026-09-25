@@ -855,8 +855,31 @@ export function throwArrivalMs(from: { x: number; y: number }, toBag: number, ar
  * would be cut down (ZAIS-24). The feet inside BASE_FT·√2 cost nothing extra,
  * which is how this cannot move a single grounder — no groundRace() throw uses
  * it anyway.
+ *
+ * Measured with scripts/balance.ts, 400 games each, 2026-09-24. Before the
+ * race (TAG_THROW die): 4.10 runs, 8.55 hits, 0.93 DP, 2.15 force outs, 0.13
+ * sac flies, cut down 0.01 = 7% of the sends.
+ *
+ *   carry   runs   hits   DP/tm  force/tm  sac fly  cut down
+ *   0       4.01   8.54   0.90    2.14     0.11     0.11  49%
+ *   1       4.01   8.53   0.90    2.14     0.11     0.11  49%
+ *   2       4.00   8.56   0.92    2.17     0.11     0.09  44%
+ *   3       4.04   8.55   0.93    2.15     0.12     0.06  32%
+ *   4       4.08   8.54   0.92    2.15     0.13     0.03  18%
+ *   5       4.07   8.52   0.93    2.15     0.13     0.02  13%
+ *   5.25    4.08   8.53   0.92    2.14     0.13     0.02  11%
+ *   5.5     4.08   8.52   0.92    2.14     0.13     0.01   8%
+ *   5.75    4.08   8.51   0.92    2.14     0.13     0.01   5%
+ *   6       4.08   8.52   0.93    2.15     0.13     0.01   5%
+ *   7       4.09   8.53   0.93    2.15     0.13     0.00   0%
+ *
+ * ⚠️ IT IS BIG BECAUSE THE RUNNER IS SLOW, not because the arm is weak. A
+ * standing-start 90 feet is a whole runToFirstMs(), 1400ms at 1.0, and the
+ * shortest sac fly is ~200 feet out; at 5.5 only the shallow ones against a
+ * slow man are close. Below ~2 the throw home beats half the men sent, and the
+ * sac flies they would have been come off the total.
  */
-export const CARRY = 1;
+export const CARRY = 5.5;
 
 /** throwArrivalMs(), with CARRY on every foot past the infield. For throws after a catch. */
 export function longThrowMs(from: { x: number; y: number }, toBag: number, arm: number): number {
