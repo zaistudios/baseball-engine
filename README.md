@@ -1521,6 +1521,43 @@ catches: 2.3% for the bottom glove quartile, 3.8% for the top.
 to a named fielder, and extra bases. The 900–2600 ms clamp on `airHang()` is the
 known ceiling on how long a ball can hang.
 
+### The throw after a catch is a race — 2026-09-24 (ZAIS-24)
+
+The two throws that follow a catch were dice (`TAG_THROW`, `DOUBLE_OFF`).
+`airRace()` in `defense.ts` now times each one from the moment the ball comes
+down (`plot.hangMs`, the moment the replay draws it in the glove):
+
+- **Tag-up.** On a deep fly with a man on third, he leaves at the catch from a
+  standing start, a full `runToFirstMs()` for the ninety feet. The throw home
+  leaves from where the ball came down at `longThrowMs()`: `throwArrivalMs()`
+  plus `CARRY` on every foot past the diamond's diagonal. The throw has to beat
+  him, and a tie goes to the runner. `tagUp()` reads the answer as `tagOut`.
+- **Double-off.** On a caught line drive with a man on first and under two out,
+  he is `LINER_BREAK` of the way to second at the catch. His run back is timed
+  at his `runnerMs()` pace, and the throw to first at `throwArrivalMs()`, with
+  no `CARRY`. The answer goes to `rollFielding()` as `doubleOff`, after the
+  error roll.
+
+Who goes has not changed: the man on third always goes on `isDeepFly()`, and
+the man on second rolls `TAG_UP_RATE`. The dice stay for callers without a
+placement (the CLI and `src/web`).
+
+The replay draws the same numbers (`Replay.airClock`). A man tagging waits on
+third until the catch, and the throw and the call at the plate land at the
+engine's times. On a safe tag the SAFE call comes as he crosses, with the ball
+still on its way. On a liner the man off first turns back at the catch. He's
+called OUT when the ball reaches first, or SAFE when he gets back first.
+
+`CARRY` is **5.5** and `LINER_BREAK` is **0.35**. Both sweeps are in their
+comments. At 400 games, before → after: runs 4.10 → 4.12, hits 8.55 → 8.58,
+DP 0.93 → 0.93, force outs 2.15 → 2.13, doubled off 0.06 → 0.06, sac flies
+0.13 → 0.12, cut down 7% → 6% of the sends.
+
+⚠️ **The throw to first pays no `CARRY`, and the throw home does.** Nine in ten
+qualifying liners are caught in the outfield. With `CARRY` on the throw to
+first, no `LINER_BREAK` got double-offs past 0.03 a team. So a throw from
+centre crosses the field faster when it goes to first than when it goes home.
+
 ### ⚠️ The third trap: a search that overfits
 
 The two lineups were picked by a random partition search scored on a small
