@@ -279,8 +279,8 @@ export interface AirClock {
  *   -1000    0.05       38%       22%      56%
  *
  * The -100 / 0 row was chosen because the rates plateau at about 42% / 21%;
- * the target bands wait on the runner clocks (spec §6b). The remaining
- * fallback callers never enter this path.
+ * `CLEAN_HIT_RUNNING_START` supplies the separate hit-only clock tuning in
+ * plot.ts (spec §6b). The remaining fallback callers never enter this path.
  */
 export const READ_SPREAD = 0;
 

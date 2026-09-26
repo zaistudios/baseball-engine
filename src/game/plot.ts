@@ -726,8 +726,17 @@ export const RUNNING_START = 0.86;
  * A man on base gets this start on a clean hit. It stays separate from
  * `RUNNING_START` so hit tuning cannot move the pinned grounder and tag-up
  * balance that share `runnerMs()`.
+ *
+ *   start  score 2nd  1st→3rd  out/send
+ *    0.86      42%       19%        7%
+ *    0.84      43%       20%        7%
+ *    0.82      45%       21%        6%
+ *    0.80      49%       24%        7%
+ *    0.78      51%       26%        6%
+ *    0.76      52%       27%        7%
+ *    0.74      56%       30%        6%  ← first value in both bands
  */
-export const CLEAN_HIT_RUNNING_START = RUNNING_START;
+export const CLEAN_HIT_RUNNING_START = 0.74;
 
 /**
  * A RUNNER'S CLOCK — ms from contact for a man of `speed` to get from bag

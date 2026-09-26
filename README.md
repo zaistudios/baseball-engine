@@ -2939,12 +2939,12 @@ and the double play used to read — so legs finally matter on a ball you hit.
   It gets its own scorer's line (`SF8`) and its own booth call, because `popup`
   and `line_out` never mention runs and a run scoring silently is exactly the
   picture-contradicting-the-book failure the replay may never commit.
-- **The extra base.** On a single or a double, a runner at or above
-  `EXTRA_BASE_SPEED` (1.15) takes one more bag than the batter did — first to
-  third, and second scores from second. Runners are processed **lead-first** so
-  nobody runs into the back of the man in front. The batter is excluded: him
-  stretching one is a play with a throw and a call at the far end, and the replay
-  stops him at first.
+- **The extra base.** On a single or a double, a runner reads a rough throw
+  against his clean-hit arrival clock — first to third, and second scores from
+  second. Runners are processed **lead-first** so nobody runs into the back of
+  the man in front. The hit-only running start is tuned separately from
+  `RUNNING_START`, so the grounder and tag-up races do not drift; the first
+  value in both target bands is `CLEAN_HIT_RUNNING_START = 0.74`.
 
 **These close the balance pair the double play opened.** `inning.ts` carried a
 standing note that an out never scores a runner and never costs two, and that
