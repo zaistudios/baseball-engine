@@ -276,6 +276,11 @@ export const READ_SPREAD = 0.1;
 /** The minimum lead a runner wants before trusting his read, in replay ms. */
 export const SEND_MARGIN_MS = 0;
 
+/** Situation-specific changes to the send bar, independent of its base margin. */
+export const SEND_TWO_OUTS_MS = 120;
+export const SEND_LATE_DEFICIT_MS = -60;
+export const SEND_BIG_LEAD_MS = 150;
+
 /**
  * THE READ AND RACE ON A CLEAN HIT. Geometry supplies the true clocks; the
  * runner only sees a rough throw and compares it with his arrival plus a bar.
@@ -313,9 +318,9 @@ export function hitRace(o: {
     pickupMs + longThrowMs(spot, 4, o.arm),
   ];
   let barMs = SEND_MARGIN_MS;
-  if (o.outs === 2) barMs += SEND_MARGIN_MS * 0.12;
-  if (o.runDiff < 0 && o.inning >= 7) barMs -= SEND_MARGIN_MS * 0.06;
-  if (o.runDiff > 4) barMs += SEND_MARGIN_MS * 0.15;
+  if (o.outs === 2) barMs += SEND_TWO_OUTS_MS;
+  if (o.runDiff < 0 && o.inning >= 7) barMs += SEND_LATE_DEFICIT_MS;
+  if (o.runDiff > 4) barMs += SEND_BIG_LEAD_MS;
 
   const read = (at: 2 | 3 | 4, runnerMs: number, roll: number) => ({
     at,

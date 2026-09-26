@@ -14,6 +14,7 @@ import {
   gloveOf,
   groundRace,
   airRace,
+  hitRace,
   pivotReadyMs,
   POSITION_DIFFICULTY,
   type Position,
@@ -423,6 +424,26 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
     expect(raced.clock).toBeDefined();
     expect(raced.forceAt).toBe(2);
     expect(fieldBall(hit, a, opts, makeRng(3)).clock).toBeUndefined();
+  });
+});
+
+describe('a clean hit is read against the send bar', () => {
+  it('keeps situation pressure when the base margin is zero', () => {
+    const single = hit({ outcome: 'single', isHit: true, isOut: false, launchAngle: 12 });
+    const placed = withPlacement({ kind: 'in_play', hit: single });
+    expect(placed.placement).toBeDefined();
+    const common = {
+      hit: single,
+      placement: placed.placement!,
+      bases: [null, null, null] as Bases,
+      inning: 1,
+      runDiff: 0,
+      batterSpeed: 1,
+      arm: 1,
+      advanceRolls: [0.5, 0.5, 0.5] as const,
+    };
+    expect(hitRace({ ...common, outs: 0 })!.barMs).toBe(0);
+    expect(hitRace({ ...common, outs: 2 })!.barMs).toBeGreaterThan(0);
   });
 });
 
