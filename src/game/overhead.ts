@@ -16,7 +16,7 @@
 
 import type { RunnerMove, ThrowClock } from '../core/inning.ts';
 import type { Outcome } from '../core/hitTables.ts';
-import type { ForceBag } from '../core/fielding.ts';
+import type { ForceBag, HitClock } from '../core/fielding.ts';
 import {
   WALL_FT,
   BASE_FT,
@@ -337,6 +337,8 @@ export interface Replay {
   thrownOut?: { at: number; speed: number; batter?: boolean };
   /** The target and true arrival times for a clean-hit send, even when safe. */
   throwClock?: ThrowClock;
+  /** The true arrival times for clean-hit runners, including sends not taken. */
+  hitClock?: HitClock;
   /**
    * HOW MANY BAGS THE BATTER ENDED ON — 1 unless he stretched. Omitted falls
    * back to basesFor(outcome), which is what every caller that cannot stretch
@@ -443,6 +445,8 @@ export function newReplay(o: {
   fielders?: readonly Fielder[];
   thrownOut?: { at: number; speed: number; batter?: boolean };
   throwClock?: ThrowClock;
+  /** The engine's runner clocks on a clean single or double. See Replay.hitClock. */
+  hitClock?: HitClock;
   batterTo?: number;
   steal?: { from: number; to: number; safe: boolean; speed: number };
   chaserNum?: number;
@@ -488,6 +492,7 @@ export function newReplay(o: {
     held: o.held ?? [],
     ...(o.thrownOut === undefined ? {} : { thrownOut: o.thrownOut }),
     ...(o.throwClock === undefined ? {} : { throwClock: o.throwClock }),
+    ...(o.hitClock === undefined ? {} : { hitClock: o.hitClock }),
     ...(o.batterTo === undefined ? {} : { batterTo: o.batterTo }),
     ...(o.steal === undefined ? {} : { steal: o.steal }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
@@ -1385,7 +1390,8 @@ const leadOff = (t: number): number => Math.sin(Math.min(1, t / 900) * Math.PI) 
  */
 export function tripFor(r: Replay, speed: number, from: number, to: number): number {
   const onScreen = replayLength(r) - REPLAY_FADE_MS;
-  return Math.min(runnerMs(speed, from, to), Math.max(onScreen, raceFor(r).runMs));
+  const hitRunnerMs = r.hitClock?.runners.find((runner) => runner.from === from - 1 && runner.at === to)?.runnerMs;
+  return Math.min(hitRunnerMs ?? runnerMs(speed, from, to), Math.max(onScreen, raceFor(r).runMs));
 }
 
 /**

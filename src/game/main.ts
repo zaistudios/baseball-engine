@@ -2337,6 +2337,7 @@ function completePlay(
           ...(placed.placement?.cutOff ? { cutOff: placed.placement.cutOff } : {}),
           // The times the race was decided on, so the picture draws them.
           ...(fielding?.clock ? { clock: fielding.clock } : {}),
+          ...(fielding?.hitClock ? { hitClock: fielding.hitClock } : {}),
           ...(fielding?.airClock ? { airClock: fielding.airClock } : {}),
           ...(placed.placement?.airCatch ? { airCatch: placed.placement.airCatch } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.

@@ -516,6 +516,26 @@ describe('a runner has one clock', () => {
     expect(runnerMs(1, 0, 1)).toBe(runToFirstMs(1));
     expect(runnerMs(1, 1, 2)).toBeLessThan(runToFirstMs(1));
   });
+
+  it("draws a clean-hit runner at the HitClock's arrival", () => {
+    const runnerMsOnHit = 1800;
+    const r = newReplay({
+      now: 0,
+      outcome: 'single',
+      exitVelocity: 95,
+      launchAngle: 22,
+      direction: 0,
+      speed: 1,
+      safe: true,
+      hitClock: {
+        barMs: -100,
+        throwMs: [2200, 2500, 2800],
+        runners: [{ from: 0, at: 3, runnerMs: runnerMsOnHit, guessMs: 2000 }],
+      },
+      throwClock: { from: 0, at: 3, runnerSpeed: 1, runnerMs: runnerMsOnHit, throwMs: 2200 },
+    });
+    expect(tripFor(r, 1, 1, 3)).toBe(runnerMsOnHit);
+  });
 });
 
 describe('a ball in the air is drawn the way the engine caught it', () => {
