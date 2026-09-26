@@ -723,6 +723,13 @@ export function runToFirstMs(speed: number): number {
 export const RUNNING_START = 0.86;
 
 /**
+ * A man on base gets this start on a clean hit. It stays separate from
+ * `RUNNING_START` so hit tuning cannot move the pinned grounder and tag-up
+ * balance that share `runnerMs()`.
+ */
+export const CLEAN_HIT_RUNNING_START = RUNNING_START;
+
+/**
  * A RUNNER'S CLOCK — ms from contact for a man of `speed` to get from bag
  * `from` to bag `to`, counted the way runnerPoint() counts: 0 is the box, 1
  * first, 4 the plate. Anyone already on base gets his running start.

@@ -54,6 +54,7 @@ import {
   longThrowMs,
   runToFirstMs,
   runnerMs,
+  CLEAN_HIT_RUNNING_START,
   REPLAY_CUT_MS,
   REACTION_MS,
   INFIELD_RANGE,
@@ -344,7 +345,12 @@ export function hitRace(o: {
     if (natural >= 4) return;
     const at = (natural + 1) as 2 | 3 | 4;
     runners.push({
-      ...read(at, REPLAY_CUT_MS + runnerMs(runner.speed, from + 1, at), o.advanceRolls[from]!),
+      ...read(
+        at,
+        REPLAY_CUT_MS +
+          runToFirstMs(runner.speed) * CLEAN_HIT_RUNNING_START * (at - (from + 1)),
+        o.advanceRolls[from]!,
+      ),
       from: from as 0 | 1 | 2,
     });
   });
