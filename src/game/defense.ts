@@ -263,18 +263,28 @@ export interface AirClock {
 /**
  * How much a runner's read can miss the true throw. Tuned in balance.ts.
  *
- *   spread  margin  score 2nd  1st→3rd  out/send
- *    0.10      0       38%       18%       8%
- *    0.20     40       35%       16%      12%
- *    0.35     40       34%       14%      24%
+ *   margin  spread  score 2nd  1st→3rd  out/send
+ *       0    0.10       37%       17%       7%
+ *    -100    0.00       42%       19%       7%
+ *    -100    0.10       39%       19%      11%
+ *    -200    0.00       41%       19%      13%
+ *    -200    0.10       41%       19%      16%
+ *    -300    0.00       42%       20%      21%
+ *    -300    0.10       41%       19%      21%
+ *    -300    0.20       40%       18%      27%
+ *    -400    0.00       42%       20%      27%
+ *    -600    0.10       42%       21%      38%
+ *    -800    0.35       41%       21%      48%
+ *   -1000    0.05       38%       22%      56%
  *
- * The fixed clock table and the seeded run both keep the read here; the
- * remaining fallback callers never enter this path.
+ * The -100 / 0 row was chosen because the rates plateau at about 42% / 21%;
+ * the target bands wait on the runner clocks (spec §6b). The remaining
+ * fallback callers never enter this path.
  */
-export const READ_SPREAD = 0.1;
+export const READ_SPREAD = 0;
 
 /** The minimum lead a runner wants before trusting his read, in replay ms. */
-export const SEND_MARGIN_MS = 0;
+export const SEND_MARGIN_MS = -100;
 
 /** Situation-specific changes to the send bar, independent of its base margin. */
 export const SEND_TWO_OUTS_MS = 120;

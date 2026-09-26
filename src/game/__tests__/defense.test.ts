@@ -428,7 +428,7 @@ describe('a fielded grounder is a race (ZAIS-21)', () => {
 });
 
 describe('a clean hit is read against the send bar', () => {
-  it('keeps situation pressure when the base margin is zero', () => {
+  it('keeps situation pressure with the chosen base margin', () => {
     const single = hit({ outcome: 'single', isHit: true, isOut: false, launchAngle: 12 });
     const placed = withPlacement({ kind: 'in_play', hit: single });
     expect(placed.placement).toBeDefined();
@@ -442,7 +442,7 @@ describe('a clean hit is read against the send bar', () => {
       arm: 1,
       advanceRolls: [0.5, 0.5, 0.5] as const,
     };
-    expect(hitRace({ ...common, outs: 0 })!.barMs).toBe(0);
+    expect(hitRace({ ...common, outs: 0 })!.barMs).toBe(-100);
     expect(hitRace({ ...common, outs: 2 })!.barMs).toBeGreaterThan(0);
   });
 });
