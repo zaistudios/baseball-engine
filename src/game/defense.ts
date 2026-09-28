@@ -35,7 +35,10 @@ import {
   STRETCH_THROW,
   TRIPLE_PLAY,
   CLEAN_THROW,
+  goesOn,
   type FieldingResult,
+  type HitClockRunner,
+  type OutReads,
   type ForceBag,
   type ThrowEffect,
   type HitClock,
@@ -256,8 +259,11 @@ export interface DefensivePlay extends FieldingResult {
 export interface AirClock {
   /** The ball is in his glove: the man tagging leaves, the man off first turns back. */
   caughtMs: number;
-  /** Where the throw went: the plate on a tag-up, first on a double-off. */
-  at: 1 | 4;
+  /**
+   * Where the throw went: first on a double-off; on a tag-up the plate, or
+   * third when that is where the out is (or nobody tagged from third).
+   */
+  at: 1 | 3 | 4;
   /** The ball reaches that bag. */
   throwMs: number;
   /** The runner reaches it. */
@@ -294,6 +300,22 @@ export const SEND_MARGIN_MS = -100;
 export const SEND_TWO_OUTS_MS = 120;
 export const SEND_LATE_DEFICIT_MS = -60;
 export const SEND_BIG_LEAD_MS = 150;
+
+/**
+ * THE SEND BAR for this situation: SEND_MARGIN_MS moved the same directions as
+ * aiShouldSend(). More cautious with two outs or a big lead, more willing to
+ * gamble when behind late. `runDiff` is batting score minus fielding score.
+ */
+export function sendBar(outs: number, inning: number, runDiff: number): number {
+  let barMs = SEND_MARGIN_MS;
+  if (outs === 2) barMs += SEND_TWO_OUTS_MS;
+  if (runDiff < 0 && inning >= 7) barMs += SEND_LATE_DEFICIT_MS;
+  if (runDiff > 4) barMs += SEND_BIG_LEAD_MS;
+  return barMs;
+}
+
+/** His rough guess at a throw, off the seeded roll. See READ_SPREAD. */
+const guessOf = (throwMs: number, roll: number): number => throwMs * (1 + READ_SPREAD * (2 * roll - 1));
 
 /**
  * THE READ AND RACE ON A CLEAN HIT. Geometry supplies the true clocks; the
@@ -349,15 +371,12 @@ export function hitRace(o: {
     relay = { num, x, y, ms: pickupMs + throwBetweenMs(spot, { x, y }, o.arm) };
   }
   const throwMs: [number, number, number] = [legTo(2), legTo(3), legTo(4)];
-  let barMs = SEND_MARGIN_MS;
-  if (o.outs === 2) barMs += SEND_TWO_OUTS_MS;
-  if (o.runDiff < 0 && o.inning >= 7) barMs += SEND_LATE_DEFICIT_MS;
-  if (o.runDiff > 4) barMs += SEND_BIG_LEAD_MS;
+  const barMs = sendBar(o.outs, o.inning, o.runDiff);
 
   const read = (at: 2 | 3 | 4, runnerMs: number, roll: number) => ({
     at,
     runnerMs,
-    guessMs: throwMs[at - 2]! * (1 + READ_SPREAD * (2 * roll - 1)),
+    guessMs: guessOf(throwMs[at - 2]!, roll),
   });
   const runners: HitClock['runners'][number][] = [];
   o.bases.forEach((runner, from) => {
@@ -516,8 +535,11 @@ export function groundRace(o: {
  * standing start, a full runToFirstMs() for the ninety feet. The throw beats
  * him or it does not; a tie goes to the runner.
  *
- * WHO GOES is not decided here. The man on third always goes on isDeepFly(),
- * as he always has; this only answers whether he gets there.
+ * The man on third always goes on isDeepFly(), as he always has. The man on
+ * SECOND reads it (ZAIS-27): his own standing-start ninety feet against a rough
+ * guess at the throw to third, handed in as `read`, the same compare as a hit
+ * (goesOn()). The throw goes where it gets an out, the plate first; with nobody
+ * tagging from third it goes to third. Whoever it does not go to is safe.
  *
  * On a line drive — below SAC_FLY_MIN_ANGLE, the same line fieldBall() hands
  * rollFielding() as `lineDrive` — with a man on first and an out to spare, the
@@ -539,24 +561,73 @@ export function airRace(o: {
   bases: Bases;
   outs: number;
   arm: number;
-}): { out: boolean; clock: AirClock } | undefined {
+  /** The man on second's roll and the send bar. Omitted, he is not read here. */
+  read?: { roll: number; barMs: number };
+}): { out: boolean; clock: AirClock; read?: HitClockRunner } | undefined {
   const { hit, placement: p } = o;
   if (hit.outcome !== 'line_out' || !p.airCatch?.caught) return undefined;
-  const first = o.bases[0];
-  const third = o.bases[2];
-  const liner = hit.launchAngle < SAC_FLY_MIN_ANGLE && first && o.outs < 2;
-  const tag = third && isDeepFly(hit.outcome, hit.exitVelocity, o.outs, hit.launchAngle);
-  if (!liner && !tag) return undefined;
+  const [first, second, third] = o.bases;
   const caughtMs =
     REPLAY_CUT_MS +
     plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs;
   const spot = feetXY(p.distFt, p.dirDeg);
-  const at = liner ? 1 : 4;
-  const throwMs = caughtMs + (liner ? throwArrivalMs(spot, 1, o.arm) : longThrowMs(spot, 4, o.arm));
-  const arriveMs = liner
-    ? caughtMs + LINER_BREAK * runnerMs(first.speed, 1, 2)
-    : caughtMs + runToFirstMs(third!.speed);
-  return { out: throwMs < arriveMs, clock: { caughtMs, at, throwMs, runnerMs: arriveMs } };
+  if (hit.launchAngle < SAC_FLY_MIN_ANGLE && first && o.outs < 2) {
+    const throwMs = caughtMs + throwArrivalMs(spot, 1, o.arm);
+    const arriveMs = caughtMs + LINER_BREAK * runnerMs(first.speed, 1, 2);
+    return { out: throwMs < arriveMs, clock: { caughtMs, at: 1, throwMs, runnerMs: arriveMs } };
+  }
+  if (!isDeepFly(hit.outcome, hit.exitVelocity, o.outs, hit.launchAngle)) return undefined;
+
+  const read: HitClockRunner | undefined =
+    second && o.read
+      ? {
+          from: 1,
+          at: 3,
+          runnerMs: caughtMs + runToFirstMs(second.speed),
+          guessMs: guessOf(caughtMs + longThrowMs(spot, 3, o.arm), o.read.roll),
+        }
+      : undefined;
+  const plays: AirClock[] = [];
+  if (third) {
+    const throwMs = caughtMs + longThrowMs(spot, 4, o.arm);
+    plays.push({ caughtMs, at: 4, throwMs, runnerMs: caughtMs + runToFirstMs(third.speed) });
+  }
+  if (read && goesOn(read, o.read!.barMs)) {
+    plays.push({ caughtMs, at: 3, throwMs: caughtMs + longThrowMs(spot, 3, o.arm), runnerMs: read.runnerMs });
+  }
+  const clock = plays.find((c) => c.throwMs < c.runnerMs) ?? plays[0];
+  // Nobody tagged: the man on second read "hold" and nobody is on third.
+  if (!clock) return undefined;
+  return { out: clock.throwMs < clock.runnerMs, clock, ...(read ? { read } : {}) };
+}
+
+/**
+ * THE READS ON A FIELDED GROUNDER (ZAIS-27): every man on second or third who
+ * is not forced reads his legs against a rough guess at the fielder's throw to
+ * the bag in front of him. He breaks on contact at runnerMs(), the same clock a
+ * forced man runs in groundRace(). The compare is goesOn(), in inning.ts.
+ */
+export function groundReads(o: {
+  fieldedMs: number;
+  from: { x: number; y: number };
+  arm: number;
+  bases: Bases;
+  rolls: readonly [number, number, number];
+}): HitClockRunner[] {
+  const forced = forcedRunners(o.bases);
+  const reads: HitClockRunner[] = [];
+  for (const from of [1, 2] as const) {
+    const who = o.bases[from];
+    if (!who || forced > from) continue;
+    const at = (from + 2) as 3 | 4;
+    reads.push({
+      from,
+      at,
+      runnerMs: REPLAY_CUT_MS + runnerMs(who.speed, from + 1, at),
+      guessMs: guessOf(o.fieldedMs + throwArrivalMs(o.from, at, o.arm), o.rolls[from]!),
+    });
+  }
+  return reads;
 }
 
 /**
@@ -684,8 +755,9 @@ export function fieldBall(
         }
       : undefined;
 
-  // A caught ball with a throw after it is raced too. See airRace().
-  const air =
+  // A caught ball with a throw after it is raced too. See airRace(). The
+  // liner's double-off goes into the dice; the tag-up's read comes off them.
+  const liner =
     opts.placement && bases
       ? airRace({ hit, placement: opts.placement, bases, outs: opts.outs, arm: glove })
       : undefined;
@@ -724,7 +796,7 @@ export function fieldBall(
       lineDrive: hit.launchAngle < SAC_FLY_MIN_ANGLE,
       ...(race ? { race } : {}),
       // ...and whether the man on first got back, from the clocks. See airRace().
-      ...(air?.clock.at === 1 ? { doubleOff: air.out } : {}),
+      ...(liner?.clock.at === 1 ? { doubleOff: liner.out } : {}),
     },
     rng,
   );
@@ -776,11 +848,44 @@ export function fieldBall(
         })
       : undefined;
 
+  // THE READS ON AN OUT (ZAIS-27), off the dice rollFielding() just drew, so
+  // they cost no draw. A booted ball is nobody's read. See FieldingResult.outReads.
+  const barMs =
+    opts.inning !== undefined && opts.runDiff !== undefined ? sendBar(opts.outs, opts.inning, opts.runDiff) : undefined;
+  const reading = barMs !== undefined && result.advanceRolls && !result.error ? result.advanceRolls : undefined;
+  const tagging =
+    reading && bases && opts.placement?.airCatch?.caught && isDeepFly(hit.outcome, hit.exitVelocity, opts.outs, hit.launchAngle);
+  const air = tagging
+    ? airRace({
+        hit,
+        placement: opts.placement!,
+        bases: bases!,
+        outs: opts.outs,
+        arm: glove,
+        read: { roll: reading[1], barMs: barMs! },
+      })
+    : liner;
+  const outReads: OutReads | undefined = tagging
+    ? { barMs: barMs!, runners: air?.read ? [air.read] : [] }
+    : reading && clock && cut
+      ? {
+          barMs: barMs!,
+          runners: groundReads({
+            fieldedMs: clock.fieldedMs,
+            from: feetXY(cut.alongFt, opts.placement!.dirDeg),
+            arm: glove * (opts.throwEffect ?? CLEAN_THROW).dp,
+            bases: bases!,
+            rolls: reading,
+          }),
+        }
+      : undefined;
+
   // A booted ball has no catch to throw after.
   const thrown = air && !result.error ? air : undefined;
   return {
     ...result,
-    ...(thrown?.clock.at === 4 ? { tagOut: thrown.out } : {}),
+    ...(thrown && thrown.clock.at !== 1 ? { tagThrow: { at: thrown.clock.at, out: thrown.out } } : {}),
+    ...(outReads ? { outReads } : {}),
     ...(stretch ? { stretch } : {}),
     ...(hitClock ? { hitClock } : {}),
     ...(clock ? { clock } : {}),

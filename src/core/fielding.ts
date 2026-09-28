@@ -11,8 +11,8 @@
  * raced in game/defense.ts's groundRace() and handed in as `race`, which
  * replaces the double-play and force dice below. Since ZAIS-24 the throw after
  * a CATCH is raced as well — airRace() in the same file times the double-off
- * (handed in as `doubleOff`) and the throw home on a sacrifice fly (handed to
- * inning.ts as `tagOut`). What is still rolled HERE is the error on every
+ * (handed in as `doubleOff`) and the throw after a tag-up (handed to
+ * inning.ts as `tagThrow`). What is still rolled HERE is the error on every
  * ball, and DOUBLE_OFF and TAG_THROW only for a caller with no placement: the
  * CLI and the roguelike. Errors charged to a named fielder, extra bases and
  * relays are the next steps of the Unscripted Plays spec.
@@ -211,7 +211,7 @@ export const DOUBLE_OFF = 0.33;
  * ⚠️ ON THE BASEDBALL PATH THIS IS NOT ROLLED ANY MORE. Since ZAIS-24 the throw
  * home is raced — the catch, the throw at longThrowMs() and his standing-start
  * ninety feet, airRace() in game/defense.ts — and tagUp() reads the answer as
- * `tagOut`. This share is only for callers without a placement: the CLI and
+ * `tagThrow`. This share is only for callers without a placement: the CLI and
  * the roguelike.
  *
  * ⚠️ THE SACRIFICE FLY USED TO BE FREE, and it was the last free base left in
@@ -471,12 +471,20 @@ export interface FieldingResult {
    */
   extraBase?: { odds: number; roll: number };
   /**
-   * THE THROW HOME ON A SACRIFICE FLY, DECIDED FROM THE CLOCKS — true when it
-   * beats the man tagging from third. Set by game/defense.ts's airRace() on a
-   * caught deep fly with a man on third; inning.ts's tagUp() uses it in place
-   * of the TAG_THROW die. Absent is the die: the CLI and the roguelike.
+   * THE THROW AFTER A TAG-UP, DECIDED FROM THE CLOCKS — the bag it went to and
+   * whether it beat the man running there. Set by game/defense.ts's airRace()
+   * on a caught deep fly somebody tagged on: home when that gets an out or
+   * nobody tagged to third, third otherwise. inning.ts's tagUp() uses it in
+   * place of the TAG_THROW die. Absent is the die: the CLI and the roguelike.
    */
-  tagOut?: boolean;
+  tagThrow?: { at: 3 | 4; out: boolean };
+  /**
+   * THE READS ON AN OUT (ZAIS-27): the man on second tagging on a deep fly,
+   * and the men not forced on a fielded grounder. Same shape and same compare
+   * as the hit read — see goesOn(). Absent is the TAG_UP_RATE and GROUND_SEND
+   * dice, for callers without a placement.
+   */
+  outReads?: OutReads;
   /**
    * ONE DIE PER OCCUPIED BAG — [first, second, third] — for "does this runner
    * go", pre-rolled for the same reason extraBase is: inning.ts decides, and
@@ -545,6 +553,20 @@ export interface HitClock {
    */
   relay?: { num: number; x: number; y: number; ms: number };
 }
+
+/** The reads on an out. `from` is 1 or 2 here; nobody reads from first. */
+export interface OutReads {
+  barMs: number;
+  runners: readonly HitClockRunner[];
+}
+
+/**
+ * THE READ, the one compare every send makes: he goes when his own clock plus
+ * the bar beats his rough guess at the throw. One function so the hit, the
+ * tag-up and the grounder cannot drift apart.
+ */
+export const goesOn = (r: Pick<HitClockRunner, 'runnerMs' | 'guessMs'>, barMs: number): boolean =>
+  r.runnerMs + barMs < r.guessMs;
 
 export const CLEAN: FieldingResult = { error: false, doublePlay: false };
 

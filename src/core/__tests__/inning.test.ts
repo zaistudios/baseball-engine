@@ -1188,3 +1188,50 @@ describe('the throw home on a sacrifice fly', () => {
     expect(p.bases[2]?.name).toBe('c');
   });
 });
+
+/**
+ * THE SENDS ON AN OUT ARE READS (ZAIS-27). With `outReads` the man on second
+ * tagging and the man not forced on a grounder go on goesOn(), and the die in
+ * advanceRolls says nothing.
+ */
+describe('reads on an out', () => {
+  const man = (name: string, speed = 1): Runner => ({ name, speed });
+  // A roll that would send anybody, so a hold can only be the read.
+  const withRead = (from: 1 | 2, at: 3 | 4, go: boolean, extra = {}) =>
+    ({
+      error: false,
+      doublePlay: false,
+      advanceRolls: [0, 0, 0],
+      outReads: { barMs: 0, runners: [{ from, at, runnerMs: 1000, guessMs: go ? 1100 : 900 }] },
+      ...extra,
+    }) as const;
+  const tagFly = inPlay('line_out', SAC_FLY_MIN_EV);
+
+  it('tags from second when the read says go, and holds when it says hold', () => {
+    const on2: Bases = [null, man('b'), null];
+    expect(occupied(applyAtBat({ outs: 0, bases: on2 }, tagFly, ANON, withRead(1, 3, true)).bases)).toEqual([false, false, true]);
+    expect(occupied(applyAtBat({ outs: 0, bases: on2 }, tagFly, ANON, withRead(1, 3, false)).bases)).toEqual([false, true, false]);
+  });
+
+  it('a throw to third that beats him is the out, and the man from third scores', () => {
+    const p = applyAtBat(
+      { outs: 0, bases: [null, man('b'), man('c')] },
+      tagFly,
+      ANON,
+      withRead(1, 3, true, { tagThrow: { at: 3, out: true } }),
+    );
+    expect(p.runs).toBe(1);
+    expect(p.outs).toBe(2);
+    expect(p.thrownOut).toMatchObject({ at: 3, runner: { name: 'b' } });
+    expect(occupied(p.bases)).toEqual([false, false, false]);
+  });
+
+  it('the man on third goes home on a grounder only on the read', () => {
+    const on3: Bases = [null, null, man('c')];
+    const ground = inPlay('ground_out');
+    expect(applyAtBat({ outs: 0, bases: on3 }, ground, ANON, withRead(2, 4, true)).runs).toBe(1);
+    const held = applyAtBat({ outs: 0, bases: on3 }, ground, ANON, withRead(2, 4, false));
+    expect(held.runs).toBe(0);
+    expect(occupied(held.bases)).toEqual([false, false, true]);
+  });
+});

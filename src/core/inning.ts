@@ -14,7 +14,7 @@
 
 import { isHit, isOut, type Outcome } from './hitTables.ts';
 import type { AtBatResult } from './atBat.ts';
-import { CLEAN, gunDown, TAG_THROW, type FieldingResult, type ForceBag, type HitClock } from './fielding.ts';
+import { CLEAN, goesOn, gunDown, TAG_THROW, type FieldingResult, type ForceBag, type HitClock, type OutReads } from './fielding.ts';
 
 /**
  * [first, second, third]. A slot holds the RUNNER standing on it, or null.
@@ -310,7 +310,7 @@ function advanceFromHitClock(
       to < 4 &&
       (wants >= 4 || wants < ceiling) &&
       !!clock &&
-      clock.runnerMs + hitClock.barMs < clock.guessMs;
+      goesOn(clock, hitClock.barMs);
     if (!goes) ceiling = to < 4 ? to : ceiling;
     else ceiling = wants;
     return { from, who, to, wants, clock, goes };
@@ -610,18 +610,19 @@ export function isDeepFly(
  * left. 0.55 × his legs puts a burner near the top of the range and a catcher
  * nowhere near it.
  *
- * ponytail: no second throw at the tagging runner. The arm gets ONE chance per
- * play and it spends it on the man going home — see tagUp() — because that is
- * the run. The man taking third goes or he holds.
+ * ⚠️ THE FALLBACK ONLY. A placed Basedball fly hands tagUp() `outReads`: the
+ * man on second reads his own ninety feet against a rough guess at the throw
+ * to third, the same compare as a hit (ZAIS-27). This die is for the CLI.
  */
 export const TAG_UP_RATE = 0.55;
 
 /**
  * THE TAG-UP. Everyone who can advance on a caught fly does, and the arm gets
- * its one throw at the man who is scoring.
+ * one throw.
  *
- * Whether that throw beats him is `tagOut` when the caller raced it (airRace()
- * in game/defense.ts, every Basedball game) and the TAG_THROW die otherwise.
+ * Where it went and whether it beat him is `tagThrow` when the caller raced it
+ * (airRace() in game/defense.ts, every Basedball game): home, or third when
+ * that is where the out is. Without it the throw is home and the TAG_THROW die.
  *
  * Lead runner first, same as every other advance in this file: whether second
  * can go depends on whether third just emptied.
@@ -643,8 +644,10 @@ function tagUp(
    * seeded season, and buys the one thing a sacrifice fly was missing.
    */
   arm?: { odds: number; roll: number },
-  /** The clocks' answer, when there were clocks. See FieldingResult.tagOut. */
-  tagOut?: boolean,
+  /** The clocks' answer, when there were clocks. See FieldingResult.tagThrow. */
+  tagThrow?: { at: 3 | 4; out: boolean },
+  /** The man on second's read. See FieldingResult.outReads. */
+  reads?: OutReads,
 ): { bases: Bases; runs: number; thrownOut: ThrownOut | null } {
   const next: [Runner | null, Runner | null, Runner | null] = [...bases];
   let runs = 0;
@@ -656,27 +659,41 @@ function tagUp(
   const third = next[2];
   if (third) {
     next[2] = null;
-    if (tagOut ?? (arm !== undefined && gunDown(arm.odds * TAG_THROW, arm.roll, third.speed))) {
+    if (
+      tagThrow
+        ? tagThrow.at === 4 && tagThrow.out
+        : arm !== undefined && gunDown(arm.odds * TAG_THROW, arm.roll, third.speed)
+    ) {
       thrownOut = { runner: third, at: 4, batter: false };
     } else {
       runs++;
     }
   }
 
-  // ...and the man on second takes the bag he just vacated, if he goes. He is
-  // not thrown at whether or not the man in front of him was: there is one ball
-  // and it went to the plate.
+  // ...and the man on second takes the bag he just vacated, if he goes. There
+  // is one ball: he is only thrown at when it went to third.
   const second = next[1];
   if (second && next[2] === null) {
-    const goes = rolls ? rolls[1]! < odds(second.speed, TAG_UP_RATE) : false;
+    const goes = reads
+      ? readGoes(reads, 1)
+      : rolls
+        ? rolls[1]! < odds(second.speed, TAG_UP_RATE)
+        : false;
     if (goes) {
-      next[2] = second;
       next[1] = null;
+      if (tagThrow?.at === 3 && tagThrow.out) thrownOut = { runner: second, at: 3, batter: false };
+      else next[2] = second;
     }
   }
 
   return { bases: next, runs, thrownOut };
 }
+
+/** Did the man on `from` read "go"? No read for him is a hold. */
+const readGoes = (reads: OutReads, from: number): boolean => {
+  const r = reads.runners.find((x) => x.from === from);
+  return !!r && goesOn(r, reads.barMs);
+};
 
 /** A walk pushes only the runners it has to. Bases loaded forces in a run. */
 function walk(bases: Bases, batter: Runner): { bases: Bases; runs: number } {
@@ -740,8 +757,9 @@ function turnTwo(
   at: ForceBag,
   rolls?: readonly [number, number, number],
   infieldIn = false,
+  reads?: OutReads,
 ): { bases: Bases; runs: number } {
-  return fieldersChoice(bases, null, at, rolls, infieldIn);
+  return fieldersChoice(bases, null, at, rolls, infieldIn, reads);
 }
 
 /**
@@ -752,6 +770,11 @@ function turnTwo(
  * infield is in or the ball is hit at the wrong man. Going first-to-second is
  * free (he was forced); second-to-third with first empty is the ball hit to
  * the right side, which is about a third of them.
+ *
+ * ⚠️ THE FALLBACK ONLY. A fielded Basedball grounder hands groundOut()
+ * `outReads`, and the man reads his legs against a rough guess at the throw
+ * to his bag, the same compare as a hit (ZAIS-27). These dice are for the CLI
+ * and the bunt.
  */
 export const GROUND_SEND_HOME = 0.45;
 export const GROUND_SEND_UP = 0.35;
@@ -788,6 +811,8 @@ function groundOut(
    * to go back to and the play is at the plate anyway.
    */
   infieldIn = false,
+  /** The unforced men's reads. See FieldingResult.outReads. */
+  reads?: OutReads,
 ): { bases: Bases; runs: number } {
   const next: [Runner | null, Runner | null, Runner | null] = [null, null, null];
   let runs = 0;
@@ -805,11 +830,16 @@ function groundOut(
     // Nobody rolled a die: forced runners still have to go, and nobody else
     // does. That is the old frozen behaviour for every caller passing CLEAN.
     const held = infieldIn && to >= 4;
+    // ponytail: a man who reads "go" is never thrown at. The fielder takes the
+    // out groundRace() chose, so a gamble past the bar costs nothing here; add
+    // a tag play to groundRace() if runners start scoring on balls they shouldn't.
     const sends =
       forced ||
       (!held &&
-        !!rolls &&
-        rolls[from]! < odds(who.speed, to >= 4 ? GROUND_SEND_HOME : GROUND_SEND_UP));
+        (reads
+          ? readGoes(reads, from)
+          : !!rolls &&
+            rolls[from]! < odds(who.speed, to >= 4 ? GROUND_SEND_HOME : GROUND_SEND_UP)));
 
     if (!clear || !sends) {
       next[from] = who;
@@ -852,8 +882,9 @@ function fieldersChoice(
   at: ForceBag,
   rolls?: readonly [number, number, number],
   infieldIn = false,
+  reads?: OutReads,
 ): { bases: Bases; runs: number } {
-  const g = groundOut(bases, rolls, infieldIn);
+  const g = groundOut(bases, rolls, infieldIn, reads);
   // g.bases[0] is always null — nobody advances INTO first on a ground ball —
   // so the batter drops straight in behind everybody.
   const next: [Runner | null, Runner | null, Runner | null] = [batter, g.bases[1], g.bases[2]];
@@ -1056,7 +1087,7 @@ export function applyAtBat(
           // third scores ahead of it — the ordinary RBI ground ball. With ONE
           // out it is the second and third, the third of them a force, and no
           // run can cross on it.
-          const t = turnTwo(bases, fielding.forceAt ?? 2, fielding.advanceRolls, defense.infieldIn);
+          const t = turnTwo(bases, fielding.forceAt ?? 2, fielding.advanceRolls, defense.infieldIn, fielding.outReads);
           bases = t.bases;
           if (outs === 0) runs += t.runs;
           outs += 2;
@@ -1082,7 +1113,7 @@ export function applyAtBat(
             // until the ball is not — see TAG_THROW. When it beats him the
             // sacrifice fly is two outs and no run, which is the play the whole
             // outfield-arm rating existed to make possible.
-            const tag = tagUp(bases, runs, fielding.advanceRolls, fielding.extraBase, fielding.tagOut);
+            const tag = tagUp(bases, runs, fielding.advanceRolls, fielding.extraBase, fielding.tagThrow, fielding.outReads);
             bases = tag.bases;
             runs += tag.runs;
             if (tag.thrownOut) {
@@ -1104,9 +1135,9 @@ export function applyAtBat(
             // over, so they are set for the picture's sake and nothing else.
             const g =
               fielding.forceAt && bases[0] !== null
-                ? fieldersChoice(bases, batter, fielding.forceAt, fielding.advanceRolls, defense.infieldIn)
+                ? fieldersChoice(bases, batter, fielding.forceAt, fielding.advanceRolls, defense.infieldIn, fielding.outReads)
                 : outs < 2
-                  ? groundOut(bases, fielding.advanceRolls, defense.infieldIn)
+                  ? groundOut(bases, fielding.advanceRolls, defense.infieldIn, fielding.outReads)
                   : null;
             if (g) {
               bases = g.bases;

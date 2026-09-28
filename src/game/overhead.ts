@@ -1463,7 +1463,8 @@ function drawRace(
    * core/inning.ts, which is the only thing that can produce this.
    */
   // The throw after a catch, when the engine raced one. See Replay.airClock.
-  const tagUp = r.airClock?.at === 4 ? r.airClock : undefined;
+  // A tag-up throw goes home, or to third when that is where the out is.
+  const tagUp = r.airClock && r.airClock.at !== 1 ? r.airClock : undefined;
   const liner = r.airClock?.at === 1 ? r.airClock : undefined;
   /**
    * A MAN TAGGING, `bags` from his bag: nowhere until the catch, then a
@@ -1480,8 +1481,8 @@ function drawRace(
     r.thrownOut === undefined || r.thrownOut.batter
       ? null
       : tagUp
-        ? // Cut down tagging: from third, and the ball beats him home at its own time.
-          { at: 4, from: 3, runnerMs: tagUp.runnerMs, throwMs: tagUp.throwMs }
+        ? // Cut down tagging, and the ball beats him to the bag at its own time.
+          { at: tagUp.at, from: tagUp.at - 1, runnerMs: tagUp.runnerMs, throwMs: tagUp.throwMs }
         : {
             at: r.thrownOut.at,
             from: r.throwClock?.from !== undefined
@@ -1519,7 +1520,7 @@ function drawRace(
         ? { at: r.throwClock.at, ms: r.throwClock.throwMs }
         : // A sacrifice fly he beat still draws the throw, landing behind him.
           tagUp
-          ? { at: 4, ms: tagUp.throwMs }
+          ? { at: tagUp.at, ms: tagUp.throwMs }
           : null;
 
   // Whether an outfielder has to cut it off on the way. See relaySpot().
@@ -1691,8 +1692,8 @@ function drawRace(
     call('OUT', bagAt(cam, bases - 1), false, bases >= 3 ? -24 : 22);
   }
 
-  // The sacrifice fly he beat: SAFE when he crosses, with the ball still coming.
-  if (tagUp && !gunned && t > tagUp.runnerMs) call('SAFE', bagAt(cam, 3), true);
+  // The tag he beat: SAFE when he gets there, with the ball still coming.
+  if (tagUp && !gunned && t > tagUp.runnerMs) call('SAFE', bagAt(cam, tagUp.at - 1), true);
 
   if (caught) {
     // Out in the air, so it is called where the catch happened.

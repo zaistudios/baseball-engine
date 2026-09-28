@@ -541,16 +541,35 @@ describe('the throw after a catch is a race (ZAIS-24)', () => {
     expect(tag(f, 1, 1, 2)).toBeUndefined();
   });
 
-  it('fieldBall hands tagOut to the book; without bases it keeps the die', () => {
+  it('fieldBall hands tagThrow to the book; without bases it keeps the die', () => {
     const f = flies[0]!;
     const a = assignPositions(HOME.lineup);
     const opts = { batterSpeed: 1, forceAtFirst: false, outs: 0, placement: f.p };
     const raced = fieldBall(f.hit, a, { ...opts, bases: [null, null, runner(1)] }, makeRng(3));
     expect(raced.error).toBe(false);
-    expect(raced.tagOut).toBe(raced.airClock!.throwMs < raced.airClock!.runnerMs);
+    expect(raced.tagThrow).toEqual({ at: 4, out: raced.airClock!.throwMs < raced.airClock!.runnerMs });
     const rolled = fieldBall(f.hit, a, opts, makeRng(3));
-    expect(rolled.tagOut).toBeUndefined();
+    expect(rolled.tagThrow).toBeUndefined();
     expect(rolled.airClock).toBeUndefined();
+  });
+
+  it('the man on second reads the throw to third, and the throw goes where the out is', () => {
+    const go = { roll: 0.5, barMs: -1e6 };
+    const hold = { roll: 0.5, barMs: 1e6 };
+    for (const f of flies) {
+      const race = (bases: Bases, read: typeof go) =>
+        airRace({ hit: f.hit, placement: f.p, bases, outs: 0, arm: 1, read });
+      // Alone on second: he goes and the throw chases him, or he holds and there is no throw.
+      const alone = race([null, runner(1), null], go)!;
+      expect(alone.clock.at).toBe(3);
+      expect(alone.clock.runnerMs - alone.clock.caughtMs).toBeCloseTo(runToFirstMs(1), 6);
+      expect(race([null, runner(1), null], hold)).toBeUndefined();
+      // Both tagging: home when it gets an out, or when neither does.
+      const both = race([null, runner(1), runner(1)], go)!;
+      const home = both.clock.at === 4;
+      expect(home || !tag(f, 1)!.out).toBe(true);
+      expect(home ? true : both.out).toBe(true);
+    }
   });
 
   /** Every caught line drive, infield and outfield. */
