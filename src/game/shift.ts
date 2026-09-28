@@ -4,7 +4,7 @@
  * ⚠️ THE GAME HAS BEEN TALKING ABOUT THIS FEATURE FOR WEEKS WITHOUT HAVING IT.
  * `describePlay()` in placement.ts says the scorer's sentence exists so the
  * player learns "that pulling everything into the shift is why they keep making
- * outs" — and there was no shift. `FIELDERS` in web/plot.ts is one fixed table
+ * outs" — and there was no shift. `FIELDERS` in plot.ts is one fixed table
  * and every hitter in the league was played straight up, so the sentence was
  * describing a punishment the game could not administer.
  *

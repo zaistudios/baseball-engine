@@ -17,7 +17,7 @@
  *
  * ⚠️ NOTHING HERE IS EVER REQUIRED. `sprite()` returns undefined until a part
  * exists and drawFigure() falls through to the shape it drew before — the same
- * contract src/web/sprites.ts has always had, moved down a level so it applies
+ * contract src/game/sprites.ts has always had, moved down a level so it applies
  * per part instead of per player. An empty library is the shipped state and the
  * game is complete without it.
  *

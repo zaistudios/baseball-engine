@@ -130,9 +130,7 @@ export const levelOf = (key: string): Level =>
  * swings on an unscaled offset and a bat that did not compress could not
  * physically arrive. Nobody is watching here: a human is holding the bat, his
  * reflexes are the length they are, and slowing his swing down with the pitch
- * would hand back the reading time this exists to give him. The roguelike half
- * of this repo settled the same question the same way — see `pitchSpeed` in
- * web/settings.ts, whose batterTravel() is likewise unscaled.
+ * would hand back the reading time this exists to give him.
  *
  * ⚠️ AND IT APPLIES TO YOUR AT-BATS ONLY. readScale() in main.ts returns 1 in
  * watch mode and on your half in the field, so nothing here can reach the

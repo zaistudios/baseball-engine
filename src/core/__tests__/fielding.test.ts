@@ -10,7 +10,12 @@ import {
   isClosePlay,
 } from '../fielding.ts';
 import { makeRng } from '../rng.ts';
-import { recordAtBat, newMatch, EMPTY_BASES, type Bases, type Runner } from '../inning.ts';
+import {
+  EMPTY_BASES,
+  type Bases,
+  type Runner,
+} from '../inning.ts';
+import { recordAtBat, newMatch } from './match.ts';
 import type { AtBatResult } from '../atBat.ts';
 
 /** An rng that returns exactly what the test tells it to, in order. */

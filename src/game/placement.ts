@@ -3,8 +3,8 @@
  *
  * ⚠️ THE GAP THIS FILLS. Until now the outcome table decided everything and
  * the ball's flight was decoration: plotBatted() ran only so the overhead
- * replay had something to draw, and web/plot.ts says so out loud — chaseReach()
- * is "the one place the replay is rigged", deriving the fielder's position from
+ * replay had something to draw, and chaseReach() in plot.ts was "the one
+ * place the replay is rigged", deriving the fielder's position from
  * an outcome that was already in the book. So a single was a single whether it
  * was a seeing-eye grounder or a rocket into the left-centre gap, and the
  * player never learned that hitting it WHERE THEY AREN'T is the actual skill.

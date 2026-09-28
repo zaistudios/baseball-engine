@@ -7,15 +7,14 @@ import { describe, it, expect } from 'vitest';
 import { attemptSteal, stealChance, STEAL_BASE_RATE } from '../baserunning.ts';
 import { makeRng } from '../rng.ts';
 import {
-  newMatch,
-  recordAtBat,
   moveRunner,
   removeRunner,
   occupied,
   type Bases,
   type Runner,
 } from '../inning.ts';
-import { POOL } from '../roster.ts';
+import { newMatch, recordAtBat } from './match.ts';
+import { POOL } from './pool.ts';
 
 const burner: Runner = { name: 'Orbital Pete', speed: 1.5 };
 const anchor: Runner = { name: 'The Gantry', speed: 0.6 };

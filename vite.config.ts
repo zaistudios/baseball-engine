@@ -1,64 +1,29 @@
 import { defineConfig } from 'vite';
 
 /**
- * Build config exists for exactly one reason: the demo has to run from a
- * file:// URL.
+ * The build exists for one reason: the game has to run from a file:// URL.
  *
- * `npm run demo` folds the build into a single html file you open by
- * double-clicking on whatever device you are testing on. Browsers treat
- * file:// as an opaque origin and refuse to fetch ES modules across it, so the
- * default `<script type="module">` output is the wrong shape for that — an
- * inline module has no fetch and would probably survive, but "probably" is not
- * what you want in the one artifact whose whole job is to open anywhere.
- *
- * `iife` gives a plain classic script instead, which has never had an origin
- * restriction. bundle.mjs then drops it at the end of <body>, because a
- * classic script runs where it sits and main.ts reads the DOM at module scope.
- *
- * ponytail: no plugins, no polyfills, no legacy target. Two build settings.
- * Everything else vite already does correctly.
+ * scripts/bundle.mjs folds the build into a single html file you open by
+ * double-clicking. Browsers refuse to fetch ES modules across a file://
+ * origin, so the output is a classic `iife` script, which bundle.mjs drops at
+ * the end of <body> because main.ts reads the DOM at module scope.
  */
 export default defineConfig({
   base: './',
   build: {
-    /**
-     * ⚠️ EACH PAGE BUILDS INTO ITS OWN DIRECTORY, and that is not tidiness.
-     *
-     * Both pages used to build straight into `dist/`, and vite empties its
-     * outDir on every build — so `npm run demo` (the roguelike) and
-     * `npm run export` (the game) each deleted the other's output. Whichever
-     * you ran last was the only one you had, and `dist/` never said which.
-     *
-     * The intermediates go here; bundle.mjs reads them from here and writes
-     * the DELIVERABLES — the versioned one-file builds and the artifact
-     * fragments — up in `dist/`, where their names already differ and nothing
-     * empties anything. Run both in either order and both survive.
-     *
-     * vite.game.config.ts overrides this to dist/build-game.
-     */
-    outDir: 'dist/build-index',
+    // bundle.mjs reads the build from here and writes the one-file game up in dist/.
+    outDir: 'dist/build-game',
     modulePreload: false,
     /**
-     * EVERY ASSET IS INLINED AS A data: URI, whatever its size.
-     *
-     * The default is 4kB, above which vite emits a separate file next to the
-     * bundle. That would break the demo twice over: scripts/bundle.mjs asserts
-     * the build produced exactly ONE asset to inline and throws otherwise, and
-     * the resulting html is opened by double-click from a file:// origin where
-     * there is no server to serve a sibling PNG from anyway.
-     *
-     * The cost is that art lands in the html as base64, at about 4/3 its size
-     * on disk. Twenty batter sprites at a few kB each is nothing against the
-     * 16MB artifact ceiling; a folder of full-resolution photographs would not
-     * be, and bundle.mjs prints the file size on every build so that shows up
-     * the moment it starts to matter.
+     * EVERY ASSET IS INLINED AS A data: URI, whatever its size. bundle.mjs
+     * asserts the build produced exactly one asset, and a file opened from
+     * disk has no server to fetch a sibling PNG from anyway.
      */
     assetsInlineLimit: () => true,
     rollupOptions: {
+      input: 'game.html',
       output: {
         format: 'iife',
-        // One chunk. Code-splitting an iife bundle is not a thing, and a
-        // single-file demo has nothing to split anyway.
         inlineDynamicImports: true,
       },
     },

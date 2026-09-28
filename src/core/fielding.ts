@@ -13,8 +13,8 @@
  * a CATCH is raced as well — airRace() in the same file times the double-off
  * (handed in as `doubleOff`) and the throw after a tag-up (handed to
  * inning.ts as `tagThrow`). What is still rolled HERE is the error on every
- * ball, and DOUBLE_OFF and TAG_THROW only for a caller with no placement: the
- * CLI and the roguelike. Errors charged to a named fielder, extra bases and
+ * ball, and DOUBLE_OFF and TAG_THROW only for a caller with no placement,
+ * which is the tests. Errors charged to a named fielder, extra bases and
  * relays are the next steps of the Unscripted Plays spec.
  *
  * Rolled here, applied by inning.ts. Same split as baserunning: the core
@@ -172,8 +172,8 @@ export const TRIPLE_PLAY = 0.05;
  * ⚠️ ON THE BASEDBALL PATH THIS IS NOT ROLLED ANY MORE. Since ZAIS-24 the
  * clocks decide it — the throw to first against his run back, airRace() in
  * game/defense.ts, tuned by LINER_BREAK — and the answer arrives as
- * `doubleOff`. This rate is only for callers without a placement: the CLI
- * and the roguelike. The measurements below are what it was set against.
+ * `doubleOff`. This rate is only for callers without a placement, which is
+ * the tests. The measurements below are what it was set against.
  *
  * ⚠️ IT IS THE ONLY OUT IN THE GAME RECORDED WITH A TAG, which is why it is
  * worth having at all. Every other out this engine has ever made is a batter
@@ -211,8 +211,8 @@ export const DOUBLE_OFF = 0.33;
  * ⚠️ ON THE BASEDBALL PATH THIS IS NOT ROLLED ANY MORE. Since ZAIS-24 the throw
  * home is raced — the catch, the throw at longThrowMs() and his standing-start
  * ninety feet, airRace() in game/defense.ts — and tagUp() reads the answer as
- * `tagThrow`. This share is only for callers without a placement: the CLI and
- * the roguelike.
+ * `tagThrow`. This share is only for callers without a placement, which is
+ * the tests.
  *
  * ⚠️ THE SACRIFICE FLY USED TO BE FREE, and it was the last free base left in
  * the game. Every other advance in this engine is now a bet with a price — the
@@ -475,7 +475,7 @@ export interface FieldingResult {
    * whether it beat the man running there. Set by game/defense.ts's airRace()
    * on a caught deep fly somebody tagged on: home when that gets an out or
    * nobody tagged to third, third otherwise. inning.ts's tagUp() uses it in
-   * place of the TAG_THROW die. Absent is the die: the CLI and the roguelike.
+   * place of the TAG_THROW die. Absent is the die.
    */
   tagThrow?: { at: 3 | 4; out: boolean };
   /**
@@ -633,16 +633,16 @@ export function rollFielding(
      *
      * Added 2026-08-20 for the positional defence in game/defense.ts, where a
      * ball hit at a shortstop and a ball hit at a first baseman are no longer
-     * the same play. Defaults to 1, so the roguelike — which has no fielders —
-     * behaves exactly as it always did.
+     * the same play. Defaults to 1, league average, for a caller with no
+     * fielders.
      */
     errorMult?: number;
     /** Same idea for the relay. A better middle infield turns more of them. */
     dpMult?: number;
     /**
      * WHAT THE PLAYER'S THROW WAS WORTH, when there was one. Omitted is
-     * CLEAN_THROW — exactly the league — which is what the headless sim, watch
-     * mode and the roguelike all get. See THROW_EFFECT.
+     * CLEAN_THROW — exactly the league — which is what the headless sim and watch
+     * mode get. See THROW_EFFECT.
      */
     throwEffect?: ThrowEffect;
     /**
@@ -664,7 +664,7 @@ export function rollFielding(
     /**
      * The arm out there, as a multiplier around 1.0. Scales THROW_RATE, so a
      * cannon in right actually costs a runner the base he used to get free.
-     * Defaults to 1 — the roguelike has no fielders and is unchanged.
+     * Defaults to 1, for a caller with no fielders.
      */
     arm?: number;
     /**
@@ -672,23 +672,21 @@ export function rollFielding(
      * unlocks is the double-off — see DOUBLE_OFF, which explains why one
      * `line_out` outcome now has to carry two completely different plays.
      *
-     * Defaults to false, so the roguelike and the CLI — neither of which has a
-     * launch angle to hand this off — behave exactly as they always did.
+     * Defaults to false, for a caller with no launch angle to hand over.
      */
     lineDrive?: boolean;
     /**
      * THE PLAY, DECIDED FROM THE CLOCKS, for a ground ball an infielder
      * fielded — game/defense.ts's groundRace(). When it is here it replaces the
      * double-play and force dice below; the error roll still comes first,
-     * unchanged, and so does everything rolled after. Absent is the dice, which
-     * is every fly ball, the CLI and the roguelike.
+     * unchanged, and so does everything rolled after. Absent is the dice.
      */
     race?: (rng: Rng) => FieldingResult;
     /**
      * THE DOUBLE-OFF, DECIDED FROM THE CLOCKS — game/defense.ts's airRace():
      * did the throw beat the man on first back to the bag. When it is here it
      * replaces the DOUBLE_OFF die; the error roll still comes first. Absent is
-     * the die: the CLI and the roguelike.
+     * the die.
      */
     doubleOff?: boolean;
   },

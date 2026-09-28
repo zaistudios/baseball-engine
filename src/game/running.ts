@@ -2,8 +2,8 @@
  * The running game, connected to an actual game for the first time.
  *
  * ⚠️ core/baserunning.ts has existed since the first build and NOTHING HAS
- * EVER CALLED IT. `attemptSteal()` was written, tested and wired to nothing —
- * the roguelike's at-bat screen never sent a runner. This file is the missing
+ * EVER CALLED IT. `attemptSteal()` was written, tested and wired to nothing.
+ * This file is the missing
  * half: who is allowed to go, whether the computer sends him, and what it does
  * to the game state when he goes.
  *

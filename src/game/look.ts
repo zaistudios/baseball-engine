@@ -1235,13 +1235,9 @@ function drawCrest(
  * coordinates — it says so at the top of the file — so hanging it on a canvas
  * is an origin and nothing else.
  *
- * The comment this replaces claimed the table was authored against the
- * roguelike's 640-wide canvas and would need five keyframes rescaled. It was
- * wrong on both counts. The roguelike draws it at `W / 2 + pose.hx`,
- * `PLATE_Y + pose.hy` — the same two numbers this takes — and the two views
- * hang the batter off the plate almost identically: a 92px man centred 83px to
- * the side of the plate there, a 96px man centred 76px to the side of it here.
- * The hands land on his body at 1:1, which is the only thing a bat has to do.
+ * The pose table is drawn at the plate plus `pose.hx`/`pose.hy`, for a 96px
+ * man centred 76px to the side of it. The hands land on his body at 1:1,
+ * which is the only thing a bat has to do.
  */
 export interface BatAnchor {
   /** The plate's centre line. */
@@ -1289,8 +1285,7 @@ export function batLine(
  * THE BAT — one pose of it, hands and all.
  *
  * Handle, then a fatter barrel over the outer third, which is what makes a
- * line read as a bat. Same two strokes the roguelike has drawn for months;
- * this is the drawing that was already proven, moved to the view that was
+ * line read as a bat. The drawing that was already proven, moved to the view that was
  * still drawing a stick.
  *
  * ⚠️ DRAWN OVER THE BODY, ALWAYS. The barrel passes behind the hitter at the

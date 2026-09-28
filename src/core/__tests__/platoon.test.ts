@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { platoonContact, resolveSwing, type Hand, type SwingInput } from '../hit.ts';
 import { grade } from '../timing.ts';
 import { makeRng } from '../rng.ts';
-import { POOL } from '../roster.ts';
+import { POOL } from './pool.ts';
 import { PITCHERS, scoutingReport } from '../pitcher.ts';
 import { ALL_PITCH_TYPES } from '../hitTables.ts';
 

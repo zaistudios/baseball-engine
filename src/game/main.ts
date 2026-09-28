@@ -3297,10 +3297,8 @@ if (import.meta.env.DEV) {
    * live batter.
    *
    * ⚠️ THE SWING IS 340ms AND ONLY HAPPENS WHEN YOU SWING, which is not
-   * enough to judge a shape by, and judging the shape is the entire job. The
-   * roguelike has had this hook for months and it is the reason its arc got
-   * tuned at all; this view drew a fixed stick for months and nobody could see
-   * that either. Same two lines, same argument.
+   * enough to judge a shape by, and judging the shape is the entire job. This view
+   * drew a fixed stick for months because nobody could see the arc.
    */
   (window as unknown as Record<string, unknown>)['__swingGhosts'] = (on = true) => {
     swingGhosts = !!on;
@@ -3342,8 +3340,7 @@ const PLATE_X = 210;
  * Zane's call, 09-20: the zone moves. Everything hung off it comes with for
  * free, because all of it already reads this rect — the reticle, spotXY, the
  * call grid, the ball's whole flight path. The bottom edge now lands ON the
- * plate line, which is where the roguelike has always had it and the reason the
- * roguelike never had this problem.
+ * plate line.
  *
  * DERIVED, NOT COPIED. A second rectangle written out in canvas numbers here is
  * precisely what cost this project thirty pixels.
@@ -3363,8 +3360,7 @@ const ZONE = {
  * bar, and nothing else: a correct game of baseball with nobody in it. Every
  * line of the 09-12 playtest file — "does not play like baseball", "scripted,
  * not fluid", "takes away immersion" — is that, and the engine was right all
- * along. The picture had gone to the roguelike, which has had a batter, a
- * sprite layer and a real swing arc for a month.
+ * along. The picture was what was missing.
  *
  * ⚠️ EVERY FIGURE IS ASSEMBLED FROM `look.ts` RATHER THAN DRAWN. Building them
  * as one drawing and retrofitting customization later costs the same today and
@@ -3756,7 +3752,7 @@ function drawArm(now: number): void {
  * THE MAN AT THE PLATE, and the man crouched behind him.
  *
  * ⚠️ THE BODY TURNS OFF THE SAME POSE TABLE THE BAT DOES. `poseAt()` is
- * swing.ts's, it is what the roguelike's batter has always used, and reusing it
+ * swing.ts's, and reusing it
  * means the body cannot drift out of step with the barrel — there is one swing
  * in this codebase and now two things read it.
  *
@@ -3854,7 +3850,7 @@ function drawHitter(now: number): void {
   // move the barrel off the graded pose.
   //
   // ponytail: the barrel lands where the pose puts it, not on this pitch's
-  // crossing point — same stance the roguelike takes. Aiming the bat is a
+  // crossing point. Aiming the bat is a
   // different game; this one only has to make the timing legible.
   const anchor = { x: PLATE_X, y: PLATE_Y, flip: lefty, build: man.build };
   if (import.meta.env.DEV && swingGhosts) {

@@ -154,7 +154,7 @@ export const IDENTITIES = {
 export type IdentityKey = keyof typeof IDENTITIES;
 
 /**
- * The neutral one, for anything that has no club — the roguelike's lineups, a
+ * The neutral one, for anything that has no club — a
  * test that only cares about the count, a Team loaded from a save written
  * before identities existed.
  *

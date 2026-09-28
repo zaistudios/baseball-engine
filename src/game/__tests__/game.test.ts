@@ -1,6 +1,6 @@
 /**
  * The two-sided game: half-innings, the batting order, and the four ways a
- * game can end. These are the rules the roguelike's MatchState never had.
+ * game can end.
  */
 
 import { describe, expect, it } from 'vitest';

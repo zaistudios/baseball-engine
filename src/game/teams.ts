@@ -12,12 +12,6 @@
  * Nothing below it in the engine cares what these values are — the lineups are
  * plain arrays and the stats are plain numbers.
  *
- * ⚠️ THE LEAGUE OWNS ITS OWN PLAYERS. It does not borrow from POOL in
- * roster.ts, and that is deliberate: POOL is the ROGUELIKE's draft pool and is
- * balanced for a three-man lineup that grows. The first cut of this file did
- * borrow, and balancing a club then meant editing a player the other game
- * drafts. Two games, two rosters, no shared state to break.
- *
  * HOW THE EIGHT STAY BALANCED, because this is the thing not to break:
  *
  *  1. THEY WERE BALANCED BY MEASUREMENT, NOT BY A FORMULA. The first cut
@@ -1554,7 +1548,7 @@ export const parkSize = (p: Park): number => 0.3 * p.left + 0.4 * p.center + 0.3
  * re-derive — `node scripts/parks.ts` prints it.
  *
  * ⚠️ AND IT IS NOT 400, WHICH IS WHAT plot.ts's WALL_FT STILL IS. That constant
- * is the fallback fence for anything with no park — the roguelike, an
+ * is the fallback fence for anything with no park — an
  * exhibition between two clubs nobody gave a building to, every test written
  * before this existed. A park-less game is played in a 400-foot bowl, exactly
  * as it always was.
@@ -2170,9 +2164,7 @@ export const AWAY: Team = defaultClub('DET', 1);
 /**
  * A player's batting stats, with no chemistry applied.
  *
- * The roguelike's resolveLineup() folds in chemistry, items and power-ups. A
- * plain exhibition game has none of those, and reaching into that machinery to
- * get three numbers out would drag the whole shop layer along with it.
+ * The ratings straight off the card; nothing is folded in.
  */
 export const statsOf = (p: Player): BatterStats => ({
   power: p.power,

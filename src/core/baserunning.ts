@@ -52,8 +52,7 @@ export function stealChance(speed: number, toBase: number, catcherArm = 1): numb
  * Roll it. Caught stealing is an out, which the inning layer applies.
  *
  * `catcherArm` defaults to 1, which is exactly the old behaviour — the
- * roguelike has no catcher to be worse or better than average. The two-sided
- * game does; see game/defense.ts.
+ * caller with no catcher gets an average one. The real game has one; see game/defense.ts.
  */
 export function attemptSteal(
   speed: number,

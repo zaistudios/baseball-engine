@@ -3,20 +3,18 @@
   "version": "1.15.1",
   "private": true,
   "type": "module",
-  "description": "Basedball — an interactive, customizable baseball sim. Personal project.",
-  "//": "dev and build are BASEDBALL (game.html). The roguelike in src/web is frozen: excluded from tsconfig and vitest, and no script builds index.html. See the note in tsconfig.json.",
+  "description": "Basedball — a baseball game in one html file.",
   "scripts": {
-    "play": "node src/cli/play.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage --coverage.reporter=text --coverage.include=src/**/*.ts --coverage.exclude=src/**/__tests__/**",
     "check": "npm run typecheck && npm run test",
     "dev": "vite --open /game.html",
-    "build": "vite build --config vite.game.config.ts",
+    "build": "vite build",
     "game": "vite --open /game.html",
     "sim": "node scripts/balance.ts",
-    "export": "npm run check && vite build --config vite.game.config.ts && node scripts/bundle.mjs game",
+    "export": "npm run check && vite build && node scripts/bundle.mjs",
     "release": "npm run export && node scripts/release.mjs"
   },
   "devDependencies": {

@@ -229,9 +229,8 @@ describe('the bench changes how you play and nothing else', () => {
 });
 
 /**
- * localStorage does not exist in the test environment — the same stub
- * src/web/__tests__/save.test.ts installs, for the same reason. franchise.ts
- * only ever calls these three.
+ * localStorage does not exist in the test environment. franchise.ts only
+ * ever calls these three.
  */
 function fakeStorage() {
   const map = new Map<string, string>();

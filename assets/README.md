@@ -3,7 +3,7 @@
 **Drop a PNG in a folder. That is the whole install step.**
 
 No manifest to edit, no import to add, no id to register. The folders are read
-at build time by `import.meta.glob` in `src/web/sprites.ts`, so a file that
+at build time by `import.meta.glob` in `src/game/sprites.ts`, so a file that
 exists is a file the game uses, and a file that does not exist means the game
 draws the coloured rectangle it drew before.
 
@@ -111,7 +111,7 @@ a decode warning.
 
 ## The one-file demo
 
-`npm run demo` inlines every asset into the single html file as a `data:` URI,
+`npm run export` inlines every asset into the single html file as a `data:` URI,
 because that file is opened by double-click from a `file://` origin where there
 is no server to fetch a sibling PNG from. Base64 costs about 4/3 the size on
 disk, and the build prints the total, so keep an eye on it if you ever add

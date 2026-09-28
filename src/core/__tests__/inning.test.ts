@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  newMatch,
   applyAtBat,
-  recordAtBat,
   occupied,
   runnerMoves,
   scorersFrom,
@@ -13,8 +11,8 @@ import {
   EXTRA_BASE_SPEED,
   type Bases,
   type Runner,
-  type MatchState,
 } from '../inning.ts';
+import { newMatch, recordAtBat, type MatchState } from './match.ts';
 import type { AtBatResult } from '../atBat.ts';
 import type { Outcome } from '../hitTables.ts';
 import type { ForceBag } from '../fielding.ts';
@@ -580,7 +578,7 @@ describe('gunning down the extra base', () => {
   });
 
   it('is unchanged when nobody hands it a throw', () => {
-    // Every caller that does not roll one — the roguelike, every old test —
+    // Every caller that does not roll one —
     // keeps the free extra base it always had.
     const p = applyAtBat(withRunnerOnFirst(FAST), single(), { name: 'batter', speed: 1 });
     expect(p.outs).toBe(0);

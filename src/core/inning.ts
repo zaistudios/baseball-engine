@@ -145,47 +145,6 @@ export function scorersFrom(prev: Bases, next: Bases, scored: number): RunnerMov
   return gone.slice(0, scored);
 }
 
-export interface MatchState {
-  /** 1-based, counts up. */
-  inning: number;
-  /** How many innings this encounter lasts. */
-  innings: number;
-  outs: number;
-  bases: Bases;
-  runs: number;
-  over: boolean;
-  /** Their runs, one per inning, rolled before the game. See opponent.ts. */
-  opponentByInning: readonly number[];
-  /** Yours, one per inning, filled in as innings close. The line score. */
-  byInning: readonly number[];
-}
-
-export const opponentRuns = (m: MatchState): number =>
-  m.opponentByInning.reduce((a, b) => a + b, 0);
-
-/** A tie is not a win — you have to beat them. */
-export const playerWon = (m: MatchState): boolean => m.runs > opponentRuns(m);
-
-/**
- * ponytail: three innings is a guess, not a design decision. Nine encounters
- * of nine innings is a very long roguelike run. Zane's call, same shelf as
- * the home run rate and the timing windows.
- */
-export function newMatch(innings = 3, opponentByInning: readonly number[] = []): MatchState {
-  return {
-    inning: 1,
-    innings,
-    outs: 0,
-    bases: EMPTY_BASES,
-    runs: 0,
-    over: false,
-    // Default to a shutout so a caller that does not care about the opposing
-    // team still gets a coherent match.
-    opponentByInning: opponentByInning.length ? opponentByInning : Array(innings).fill(0),
-    byInning: [],
-  };
-}
-
 /**
  * How many bags the HIT is worth. 0 for anything that is not one.
  *
@@ -587,8 +546,7 @@ export function isDeepFly(
   outs: number,
   /**
    * Off the bat, in degrees. Omitted passes — which is exactly the old
-   * behaviour, and what the CLI and the roguelike get: neither carries an angle
-   * this far and neither has ever had a line drive to tell apart from a fly.
+   * behaviour, for a caller with no angle to tell a line drive from a fly.
    */
   launchAngle: number = SAC_FLY_MIN_ANGLE,
 ): boolean {
@@ -899,71 +857,6 @@ function fieldersChoice(
   return { bases: next, runs: g.runs };
 }
 
-/**
- * Fold one finished at-bat into the match. Rolls the inning on the third out
- * and ends the match after the last one.
- *
- * `fielding` is what the defence did with a ball already ruled an out — see
- * fielding.ts, which rolls it. Default is a clean play, so every existing
- * caller and test keeps its old behaviour exactly.
- *
- * ⚠️ ponytail, RESOLVED 2026-08-16 — the pair is closed.
- *
- * The history, because the balance depends on it. The original note said an out
- * never scores a runner (no sacrifice fly, no productive ground out) and never
- * costs two, and that "the two omissions pull in opposite directions, which is
- * the only reason it is safe to leave both out." 2026-08-14 added the DOUBLE
- * PLAY, removing one half of that pair and pushing run scoring down.
- *
- * 2026-08-16 adds the SACRIFICE FLY, which is the paired lever that puts the
- * runs back, plus the EXTRA BASE in advance(). Both push scoring up, so the
- * three changes are meant to be judged together and not one at a time:
- *
- *   double play    −runs, and it lands on slow hitters with a man on first
- *   sacrifice fly  +runs, and only with a man on THIRD and under two outs
- *   extra base     +runs, and only for the fast third of the roster
- *
- * All three read the same `speed` stat that stealing already read, which is
- * the point — legs now matter on a ball you hit, not only on a ball you steal.
- *
- * ✅ The productive ground out — "still absent and the obvious next one" here
- * for nine days — landed 2026-08-25. See groundOut() above: forced men always
- * go, everyone else rolls GROUND_SEND_HOME / GROUND_SEND_UP. It is a fourth
- * +runs lever and it belongs in the list to be judged with the other three.
- *
- * If scoring comes out too high, cut in this order: EXTRA_BASE_SPEED up first
- * (it is the broadest of the three), then SAC_FLY_MIN_EV up. Do not touch
- * DOUBLE_PLAY_RATE, which was tuned against play.
- */
-export function recordAtBat(
-  state: MatchState,
-  result: AtBatResult,
-  batter: Runner = ANON,
-  fielding: FieldingResult = CLEAN,
-  defense: { infieldIn?: boolean } = {},
-): MatchState {
-  if (state.over) throw new Error('match already over');
-
-  const play = applyAtBat(state, result, batter, fielding, defense);
-  const outs = play.outs;
-  const bases = play.bases;
-  const runs = state.runs + play.runs;
-
-  if (outs < 3) return { ...state, outs, runs, bases };
-
-  // Third out: close the inning and post your half to the line score.
-  const scoredThisInning = runs - state.byInning.reduce((a, b) => a + b, 0);
-  const inning = state.inning + 1;
-  return {
-    ...state,
-    inning,
-    outs: 0,
-    bases: EMPTY_BASES,
-    runs,
-    byInning: [...state.byInning, scoredThisInning],
-    over: inning > state.innings,
-  };
-}
 
 /** Outs and bases, with no scoreboard attached. */
 export interface PlayState {

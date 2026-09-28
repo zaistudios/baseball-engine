@@ -641,7 +641,7 @@ describe('pitchToSpot', () => {
  * Everything here is about the PICTURE — movementOf cannot reach an outcome,
  * because grade() reads a time and applyLocation() reads a word. What it can do
  * is draw the ball somewhere the strike zone disagrees with, which is what the
- * old private copy in the roguelike screen was doing, and that is what these
+ * old private copy in an old at-bat screen was doing, and that is what these
  * tests exist to stop happening again.
  */
 describe('movementOf', () => {

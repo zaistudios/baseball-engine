@@ -19,7 +19,7 @@
  *
  * ---------------------------------------------------- two hard constraints
  *
- * 1. THE OFFLINE FILE HAS NO SECOND FILE TO LOAD. `npm run demo` folds the
+ * 1. THE OFFLINE FILE HAS NO SECOND FILE TO LOAD. `npm run export` folds the
  *    game into one html opened by double-click from a file:// origin, and
  *    scripts/bundle.mjs THROWS if the build emitted more than one asset. So
  *    vite.config.ts forces `assetsInlineLimit` to inline everything as a

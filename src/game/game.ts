@@ -1,12 +1,6 @@
 /**
  * A whole baseball game. Two teams, nine innings, both halves actually played.
  *
- * ⚠️ WHY THIS FILE EXISTS AT ALL. The roguelike's MatchState models exactly
- * one half of an inning: "you are only ever the batter, so there is no top and
- * bottom here", and the other team's runs were ROLLED rather than played
- * (see core/opponent.ts). That is a fine shape for a batting game and the
- * wrong shape for baseball. This is the two-sided replacement.
- *
  * What it does NOT do is re-implement the rules of an at-bat. Walks that force
  * only what they have to, the sacrifice fly, the double play, the extra base —
  * all of that lives in core/inning.ts's applyAtBat(), and both halves call it.

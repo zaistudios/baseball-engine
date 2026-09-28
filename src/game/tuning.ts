@@ -1,6 +1,5 @@
 /**
- * The handful of numbers that make the two-sided game feel like baseball
- * rather than like the roguelike it grew out of.
+ * The handful of numbers that make the two-sided game feel like baseball.
  *
  * They live in one file because they are the knobs somebody will actually want
  * to turn, and because every one of them is shared by BOTH halves — the sim and

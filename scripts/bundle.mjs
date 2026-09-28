@@ -9,7 +9,7 @@
  *
  * ponytail: a replace over one <script> tag, not vite-plugin-singlefile. The
  * build emits exactly one JS chunk and no CSS file — the stylesheet already
- * lives inline in index.html — so there is nothing else to inline. Both
+ * lives inline in game.html — so there is nothing else to inline. Both
  * assumptions throw below rather than silently shipping half a game.
  */
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -17,32 +17,10 @@ import { transformSync } from 'esbuild';
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
-/**
- * WHICH PAGE WAS BUILT. 'game' is Basedball. 'index' is the frozen roguelike.
- *
- * Passed as argv rather than inferred, because guessing wrong would ship a
- * confident, working, entirely different game.
- *
- * ⚠️ THE DEFAULT IS 'game' AND IT USED TO BE 'index'. Nothing builds index.html
- * any more — src/web is excluded from the build, see tsconfig.json — so the old
- * default sent a bare run looking for a directory that is never written, which
- * reads as a broken script rather than as a retired page.
- */
-const page = process.argv[2] ?? 'game';
-const NAMES = { index: 'basedball-roguelike', game: 'basedball' };
-const TITLES = { index: 'Basedball Roguelike', game: 'Basedball' };
-if (!NAMES[page]) {
-  throw new Error(`unknown page ${page}`);
-}
+/** Where vite put the build. See outDir in vite.config.ts. */
+const build = 'dist/build-game';
 
-/**
- * Where vite put THIS page's build. Each page has its own directory because
- * vite empties its outDir every build — see the note in vite.config.ts. The
- * deliverables below still go up in `dist/`, which nothing empties.
- */
-const build = `dist/build-${page}`;
-
-const html = readFileSync(`${build}/${page}.html`, "utf8");
+const html = readFileSync(`${build}/game.html`, 'utf8');
 
 const assets = readdirSync(`${build}/assets`);
 if (assets.length !== 1) {
@@ -86,7 +64,7 @@ if (stripped === html) throw new Error('found no external <script> tag to inline
 const out = stripped.replace(/(\s*)<\/body>/, () => `\n<script>\n${js}\n</script>\n  </body>`);
 if (out === stripped) throw new Error('found no </body> to put the bundle before');
 
-const file = `dist/${NAMES[page]}-v${version}.html`;
+const file = `dist/basedball-v${version}.html`;
 writeFileSync(file, out);
 console.log(`${file} — ${(out.length / 1024).toFixed(0)} kB, one file, plays offline`);
 
@@ -115,5 +93,5 @@ if (/<(!doctype|html|head|body)\b/i.test(fragment)) {
   throw new Error('document tags survived the strip — the artifact would nest documents');
 }
 
-writeFileSync(`dist/artifact-${page}.html`, `<title>${TITLES[page]}</title>\n${fragment}`);
-console.log(`dist/artifact-${page}.html — same game, shell stripped, ready to publish`);
+writeFileSync('dist/artifact-game.html', `<title>Basedball</title>\n${fragment}`);
+console.log('dist/artifact-game.html — same game, shell stripped, ready to publish');

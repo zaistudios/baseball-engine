@@ -24,7 +24,7 @@ import {
   SPRITE_SPECS,
   type SpriteKind,
 } from '../sprites.ts';
-import { POOL } from '../../core/roster.ts';
+import { POOL } from '../../core/__tests__/pool.ts';
 import { PITCHERS } from '../../core/pitcher.ts';
 
 describe('naming — the filename a human would actually write', () => {

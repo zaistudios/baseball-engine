@@ -187,8 +187,7 @@ function drawMan(
    * ⚠️ THE TWO ASSET SYSTEMS ARE NOT PEERS AND THIS IS WHERE THAT GETS SAID.
    * `art.ts` is the part library: runtime, IndexedDB, imported from CUSTOMIZE,
    * removable one part at a time, and tinted per club. `sprites.ts` is the
-   * roguelike's whole-figure loader, fixed at build time and reachable from no
-   * screen. A player's look is DATA, not an asset — that is rule one of the
+   * old whole-figure loader, fixed at build time. A player's look is DATA, not an asset — that is rule one of the
    * customization engine — and a pre-composited man contradicts it outright:
    * he cannot be tinted to a club, cannot carry a build, and cannot be edited.
    *

@@ -46,9 +46,6 @@
 import type { Rng } from './rng.ts';
 import { ALL_PITCH_TYPES, type PitchType } from './hitTables.ts';
 import { ALL_LOCATIONS, type Hand, type PitchLocation } from './hit.ts';
-// ⚠️ TYPE-ONLY, AND IT HAS TO STAY THAT WAY. roster.ts reaches run.ts and
-// inning.ts; a value import here would close a cycle that ES modules tolerate
-// right up until somebody calls one at module scope. Erased at compile time.
 import type { Build, Look } from './roster.ts';
 
 /**
@@ -264,8 +261,8 @@ export interface ThrownPitch {
    * a strike, growing outward. See MISS_DISTANCE_MIN/MAX for the range and
    * chaseContact() in hit.ts for the one thing allowed to read it.
    *
-   * Optional so every caller that predates it — the CLI, the roguelike, a few
-   * hundred tests — still compiles, and absent still means "costs nothing".
+   * Optional so every caller that predates it — a few hundred tests — still
+   * compiles, and absent still means "costs nothing".
    */
   missDistance?: number;
   /**
@@ -833,7 +830,7 @@ export function stuffFactor(
  * ⚠️ WHY THIS IS IN core AND NOT IN A RENDERER. It was in a renderer — both of
  * them, differently. The engine screen drew every pitch as a STRAIGHT LINE from
  * the mound to the spot, so the curveball did not curve and six pitch types
- * were one pitch type wearing six colours. The roguelike screen had a private
+ * were one pitch type wearing six colours. An old at-bat screen had a private
  * `breakOffset()` that moved three of the six, ignored the pitcher's ratings,
  * and left the ball short of the plate at t=1. Two answers to one question is
  * exactly what locationOffset() exists to prevent, so this is the one answer.
@@ -854,7 +851,7 @@ export function stuffFactor(
  *             already scored it at — applyLocation() reads the word, not the
  *             pixels. A break that left the ball short of its own spot would
  *             put the picture and the verdict in different places, which is
- *             FAULT 5 wearing a new hat, and it is what the roguelike's version
+ *             FAULT 5 wearing a new hat, and it is what the old version
  *             was quietly doing.
  *
  * The sign is inverted (`-move`) because a pitch that finishes DOWN spends the
@@ -1079,7 +1076,7 @@ const OFF_MIDDLE = ALL_LOCATIONS.filter((l) => l !== 'middle');
  * take instructions.
  *
  * ponytail: derived from the signature rather than a new `command?: number` on
- * every arm. Twenty-six staff arms and nine roguelike ones would all default to
+ * every arm. Every staff arm and every test arm would default to
  * 1.0 and differentiate nothing until somebody hand-tuned thirty-five numbers.
  * Add the field when scripts/sensitivity.ts can say what a point of it buys —
  * the shape of this function does not change when you do.
@@ -1183,7 +1180,7 @@ export function pitchToSpot(
  *
  * Control and Velo are the fields that were already here under working names —
  * see zoneRate and speedBonus. Naming them here rather than renaming the fields
- * keeps eight staffs, nine roguelike arms and every balance script compiling.
+ * keeps every staff, every test arm and every balance script compiling.
  */
 export function ratingsOf(p: Pitcher): Record<string, number> {
   return {

@@ -217,7 +217,7 @@ export interface SwingInput {
   divisionRules?: Partial<Record<Outcome, number>>;
   /**
    * Multiplier on the foul-ball share. 1 (the default) is the ported tables
-   * exactly, which is what the roguelike wants. See applyFoul().
+   * exactly. See applyFoul().
    */
   foulBoost?: number;
   /**
@@ -538,7 +538,7 @@ export const SPRAY_DEG = 12;
  *
  * Fixed 2026-08-20. `direction` was `offsetMs * DIRECTION_DEG_PER_MS` with no
  * reference to the batter at all, and negative degrees is left field (see
- * web/plot.ts). That is right for a RIGHT-handed hitter — early, out in front,
+ * game/plot.ts). That is right for a RIGHT-handed hitter — early, out in front,
  * pulled to left — and exactly backwards for a left-handed one, who pulls to
  * RIGHT field. Six of the fifteen in POOL bat left, so a third of the roster
  * was spraying every mistimed ball to the wrong side of the diamond.
@@ -556,7 +556,7 @@ export function directionFor(
   sprayDeg = 0,
 ): number {
   const [, side] = AXES[location];
-  // ⚠️ PULLED IS NEGATIVE HERE. Negative degrees is left field (see web/plot.ts)
+  // ⚠️ PULLED IS NEGATIVE HERE. Negative degrees is left field (see game/plot.ts)
   // and a right-handed hitter pulls to left, which is why the timing term reads
   // the way it does: early is a negative offset and early is pulled. So an
   // INSIDE pitch subtracts. Writing this the intuitive way round — "inside, so
@@ -573,8 +573,8 @@ export function directionFor(
 /**
  * How much more often a swing is fouled off than the ported tables say.
  *
- * 1 is the prototype's own numbers, which is what the roguelike still passes
- * (by passing nothing). The two-sided game passes a real value — see
+ * 1 is the prototype's own numbers, which is what a caller that passes
+ * nothing gets. The two-sided game passes a real value — see
  * game/sim.ts — because those tables produce far too few foul balls for a
  * nine-inning game: at-bats end too quickly and the pitch count lands near 240
  * against a real ~290.
@@ -738,8 +738,8 @@ const AXES: Record<PitchLocation, readonly [Vertical, Horizontal]> = {
 /**
  * The cell as unit offsets: dx is -1 inside / +1 outside, dy is -1 high /
  * +1 low. Exported because BOTH renderers need to place the ball and there
- * must be exactly one answer to where a spot is — the engine renderer and
- * the roguelike renderer drifting apart on that is a bug you can see.
+ * must be exactly one answer to where a spot is — two renderers drifting
+ * apart on that is a bug you can see.
  */
 export const locationOffset = (l: PitchLocation): { dx: number; dy: number } => {
   const [v, h] = AXES[l];

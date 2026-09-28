@@ -3,7 +3,7 @@
  *
  * ⚠️ WHY THIS FILE EXISTS. Batting is a physical act with a duration behind it:
  * the press starts the bat, the barrel arrives `swingTravel` later, and the
- * ARRIVAL is what gets graded — see web/swing.ts and core/timing.ts. Pitching
+ * ARRIVAL is what gets graded — see game/swing.ts and core/timing.ts. Pitching
  * was a menu. You picked a type, picked a spot, pressed a key, and the arm
  * rolled pitchToSpot() against its own command with nothing of yours in it.
  * Half the game was a dropdown, and no pitch you threw could be thrown well or
