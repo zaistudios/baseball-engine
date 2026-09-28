@@ -1538,8 +1538,8 @@ down (`plot.hangMs`, the moment the replay draws it in the glove):
   no `CARRY`. The answer goes to `rollFielding()` as `doubleOff`, after the
   error roll.
 
-Who goes has not changed: the man on third always goes on `isDeepFly()`, and
-the man on second rolls `TAG_UP_RATE`. The dice stay for callers without a
+Who goes: the man on third always goes on `isDeepFly()`. The man on second
+reads it since ZAIS-27 (next section). The dice stay for callers without a
 placement (the CLI and `src/web`).
 
 The replay draws the same numbers (`Replay.airClock`). A man tagging waits on
@@ -1557,6 +1557,34 @@ DP 0.93 → 0.93, force outs 2.15 → 2.13, doubled off 0.06 → 0.06, sac flies
 qualifying liners are caught in the outfield. With `CARRY` on the throw to
 first, no `LINER_BREAK` got double-offs past 0.03 a team. So a throw from
 centre crosses the field faster when it goes to first than when it goes home.
+
+### Tag-up and grounder sends are reads — 2026-09-27 (ZAIS-27)
+
+The last two sends that were dice (`TAG_UP_RATE`, `GROUND_SEND_HOME`,
+`GROUND_SEND_UP`) now make the same read a runner makes on a hit. He compares
+his own clock with a rough guess at the throw and goes when `goesOn()` says so:
+his time plus the send bar beats the guess. The bar is `sendBar()`, which is
+`SEND_MARGIN_MS` with the two-outs, behind-late and big-lead offsets. The guess
+is spread by `READ_SPREAD`. Both are shared with the hit read, and the roll is the
+`advanceRolls` die already drawn, so nothing new is rolled.
+
+- **Tagging from second.** On a caught deep fly he leaves at the catch, a full
+  `runToFirstMs()` to third, and reads the throw to third (`longThrowMs()`).
+  The throw goes where it gets an out, home first. With nobody tagging from
+  third it goes to third. Whoever it doesn't go to is safe (`tagThrow`).
+- **Grounders.** On a fielded ground ball, a man on second or third who isn't
+  forced breaks on contact at `runnerMs()` and reads the fielder's throw to
+  the bag in front of him (`groundReads()`). The infield-in hold on the man on
+  third still wins. The fielder still takes the out `groundRace()` chose, so a
+  man who reads "go" is never thrown at on a grounder. That's a known
+  simplification, marked `ponytail:` in `groundOut()`.
+
+The replay draws a tag-up throw to third, and the man cut down there, from the
+same `Replay.airClock`. At 3000 games, before → after: runs 4.41 → 4.36, tag
+second-to-third 51% → 70% of the chances (37 thrown out, about 3% of sends),
+grounder second-to-third 36% → 30%, grounder third-to-home 35% → 25%. Hit
+rates didn't move (60% from second, 26% first to third). `node scripts/balance.ts`
+prints all three lines.
 
 ### ⚠️ The third trap: a search that overfits
 
