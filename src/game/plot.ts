@@ -735,8 +735,18 @@ export const RUNNING_START = 0.86;
  *    0.78      51%       26%        6%
  *    0.76      52%       27%        7%
  *    0.74      56%       30%        6%  ← first value in both bands
+ *
+ * ⚠️ RE-SWEPT WHEN THE CUT-OFF MAN WENT IN (ZAIS-26). Two short legs skip most
+ * of CARRY, so a relayed throw is quicker than the one long throw above, and
+ * 0.74 fell to 43% / 16% / 13%. 400 games each:
+ *
+ *   start  score 2nd  1st→3rd  out/send  runs/tm
+ *    0.74      43%       16%       13%     4.16
+ *    0.68      55%       22%        9%     4.30
+ *    0.64      62%       28%        8%     4.39  ← middle of both bands
+ *    0.60      68%       35%        8%     4.41
  */
-export const CLEAN_HIT_RUNNING_START = 0.74;
+export const CLEAN_HIT_RUNNING_START = 0.64;
 
 /**
  * A RUNNER'S CLOCK — ms from contact for a man of `speed` to get from bag

@@ -2943,8 +2943,16 @@ and the double play used to read — so legs finally matter on a ball you hit.
   against his clean-hit arrival clock — first to third, and second scores from
   second. Runners are processed **lead-first** so nobody runs into the back of
   the man in front. The hit-only running start is tuned separately from
-  `RUNNING_START`, so the grounder and tag-up races do not drift; the first
-  value in both target bands is `CLEAN_HIT_RUNNING_START = 0.74`.
+  `RUNNING_START`, so the grounder and tag-up races do not drift.
+- **The cut-off man (ZAIS-26).** When an outfielder picks up a hit, every
+  throw goes in two legs: out to the shortstop (left and centre) or the second
+  baseman (right), his catch-and-turn, and on to the bag on his own arm. The
+  engine times all three bags through him, so he relays to whichever runner the
+  throw can get — the trailing man's bag as readily as the plate. When it can
+  get nobody he cuts it off and holds it, and the overhead shows the ball stop
+  in his glove. Two short legs are quicker than one long throw, so the hit
+  running start was re-swept to `CLEAN_HIT_RUNNING_START = 0.64`: 62% score
+  from second, 28% go first to third, 8% of sends thrown out.
 
 **These close the balance pair the double play opened.** `inning.ts` carried a
 standing note that an out never scores a runner and never costs two, and that
