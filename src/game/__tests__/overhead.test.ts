@@ -538,6 +538,58 @@ describe('a runner has one clock', () => {
   });
 });
 
+describe('a deep hit is drawn through the engine cut-off man (ZAIS-26)', () => {
+  const relay = { num: 6, x: -60, y: 190, ms: 1500 };
+  const deep = (thrownOut: boolean) =>
+    newReplay({
+      now: 0, outcome: 'single', exitVelocity: 98, launchAngle: 14, direction: -20,
+      speed: 1, safe: true, chaserNum: 7,
+      hitClock: { barMs: -100, throwMs: [1800, 1900, 2100], runners: [{ from: 1, at: 4, runnerMs: 2000, guessMs: 2300 }], relay },
+      throwClock: { from: 1, at: 4, runnerSpeed: 1, runnerMs: 2000, throwMs: 2100 },
+      ...(thrownOut ? { thrownOut: { at: 4, speed: 1 } } : {}),
+    });
+  const cam = makeCam(420, 340);
+  const cutPx = { x: cam.home.x + relay.x * cam.pxPerFt, y: cam.home.y - relay.y * cam.pxPerFt };
+  /** The ball's position — the 3.5px arc — and where the shortstop is drawn. */
+  const at = (r: Replay, now: number) => {
+    const balls: { x: number; y: number }[] = [];
+    let ss = { x: 0, y: 0 };
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k: string) => {
+        if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+        if (k === 'createLinearGradient') return () => ({ addColorStop: () => undefined });
+        if (k === 'arc') return (x: number, y: number, rad: number) => void (rad === 3.5 && balls.push({ x, y }));
+        return () => undefined;
+      },
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D;
+    drawOverhead(ctx, cam, r, now, {
+      field: '#2d3b2c', dirt: '#5c4030',
+      figure: (_c, o) => { if (o.seed === 'F6') ss = { x: o.x, y: o.y }; },
+    });
+    return { balls, ss };
+  };
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y) < 1;
+
+  it('the cut-off man stands where the engine timed the throw through', () => {
+    // The figure is anchored a few pixels below the point it stands on.
+    const { ss } = at(deep(true), 1400);
+    expect(ss.x).toBeCloseTo(cutPx.x, 3);
+    expect(Math.abs(ss.y - cutPx.y)).toBeLessThan(8);
+  });
+
+  it('the ball is in his glove at relay.ms and goes on only when it gets somebody', () => {
+    // Turning: both legs have started drawing, the ball on the first is at the cut.
+    expect(at(deep(true), relay.ms + 50).balls.some((b) => near(b, cutPx))).toBe(true);
+    // Thrown out: by the end of the play the ball has left him.
+    expect(at(deep(true), 2100).balls.some((b) => !near(b, cutPx) && b.y > cutPx.y)).toBe(true);
+    // Nobody to get: he cuts it off and every ball drawn is at the cut.
+    const held = at(deep(false), 2100).balls;
+    expect(held.length).toBeGreaterThan(0);
+    expect(held.every((b) => near(b, cutPx))).toBe(true);
+  });
+});
+
 describe('a ball in the air is drawn the way the engine caught it', () => {
   const stub = () => {
     const calls: string[] = [];

@@ -37,6 +37,7 @@ import {
   SHADE,
   groundEase,
   REPLAY_CUT_MS,
+  MIN_THROW_MS,
   type Plot,
   type Fielder,
   type Race,
@@ -670,8 +671,11 @@ const needsRelay = (r: Replay, chaser: Fielder): boolean =>
   chaser.num >= 7 && (r.thrownOut !== undefined || r.throwClock !== undefined);
 
 /**
- * Where the cut-off man stands. Derived rather than stored so the fielder who
- * runs there and the ball that passes through him cannot end up in two places.
+ * Where the cut-off man stands. One function for the fielder who runs there and
+ * the ball that passes through him, so they cannot end up in two places.
+ *
+ * On a clean hit it is the engine's spot — the one its throw clocks were timed
+ * through (ZAIS-26). Everything else derives it from the fielder's post.
  */
 function relaySpot(
   cam: Cam,
@@ -679,6 +683,8 @@ function relaySpot(
   chaser: Fielder,
   landing: { x: number; y: number },
 ): { x: number; y: number } {
+  const timed = r.hitClock?.relay;
+  if (timed) return { x: cam.home.x + timed.x * cam.pxPerFt, y: cam.home.y - timed.y * cam.pxPerFt };
   const num = relayFor(chaser);
   const f = r.fielders.find((x) => x.num === num);
   if (!f) return landing;
@@ -1617,7 +1623,15 @@ function drawRace(
   if (gunnedThrow) {
     const bag = bagAt(cam, gunnedThrow.at - 1);
     const land = gunnedThrow.ms;
-    if (relaying) {
+    const timed = r.hitClock?.relay;
+    if (relaying && timed) {
+      // THE ENGINE'S TWO LEGS: in his glove at `timed.ms`, the catch-and-turn,
+      // and on to the bag. With nobody to get he CUTS IT OFF and holds it —
+      // the throw home that would have let the trailing men move up.
+      const cut = relaySpot(cam, r, race.chaser, landing);
+      throwLeg(landing, cut, fieldedAt, timed.ms);
+      if (r.thrownOut) throwLeg(cut, bag, timed.ms + MIN_THROW_MS, land);
+    } else if (relaying) {
       const cut = relaySpot(cam, r, race.chaser, landing);
       const cutAt = fieldedAt + (land - fieldedAt) * 0.45;
       throwLeg(landing, cut, fieldedAt, cutAt);
