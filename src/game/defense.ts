@@ -52,6 +52,9 @@ import {
   bagFeet,
   throwArrivalMs,
   longThrowMs,
+  throwBetweenMs,
+  relayFor,
+  RELAY_OUT,
   runToFirstMs,
   runnerMs,
   CLEAN_HIT_RUNNING_START,
@@ -310,6 +313,8 @@ export function hitRace(o: {
   runDiff: number;
   batterSpeed: number;
   arm: number;
+  /** The glove at a scorer's number: the cut-off man's arm throws the second leg. */
+  armAt: (num: number) => number;
   advanceRolls: readonly [number, number, number];
   stretch?: { roll: number };
 }): HitClock | undefined {
@@ -323,11 +328,27 @@ export function hitRace(o: {
       ? p.cutOff.ms
       : plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs);
   const spot = feetXY(p.distFt, p.dirDeg);
-  const throwMs: [number, number, number] = [
-    pickupMs + longThrowMs(spot, 2, o.arm),
-    pickupMs + longThrowMs(spot, 3, o.arm),
-    pickupMs + longThrowMs(spot, 4, o.arm),
-  ];
+  // ⚠️ AN OUTFIELDER HITS THE CUT-OFF MAN, HE DOES NOT THROW TO THE BAG. The
+  // throw is two legs and the catch-and-turn between them is the second leg's
+  // MIN_THROW_MS. Every bag goes through him, so a throw he cuts off to the
+  // trailing runner's bag is the same clock as one he relays on.
+  //
+  // ponytail: standard-depth post, like pivotReadyMs() — fieldBall() is not
+  // handed the shift.
+  let relay: HitClock['relay'];
+  const legTo = (bag: number): number => {
+    if (!relay) return pickupMs + longThrowMs(spot, bag, o.arm);
+    return relay.ms + longThrowMs(relay, bag, o.armAt(relay.num));
+  };
+  if (p.fielderNum >= 7) {
+    const num = relayFor({ num: p.fielderNum });
+    const f = FIELDERS.find((x) => x.num === num)!;
+    const post = feetXY(f.distFt, f.dirDeg);
+    const x = post.x + (spot.x - post.x) * RELAY_OUT;
+    const y = post.y + (spot.y - post.y) * RELAY_OUT;
+    relay = { num, x, y, ms: pickupMs + throwBetweenMs(spot, { x, y }, o.arm) };
+  }
+  const throwMs: [number, number, number] = [legTo(2), legTo(3), legTo(4)];
   let barMs = SEND_MARGIN_MS;
   if (o.outs === 2) barMs += SEND_TWO_OUTS_MS;
   if (o.runDiff < 0 && o.inning >= 7) barMs += SEND_LATE_DEFICIT_MS;
@@ -361,7 +382,7 @@ export function hitRace(o: {
       from: -1,
     });
   }
-  return { barMs, throwMs, runners };
+  return { barMs, throwMs, runners, ...(relay ? { relay } : {}) };
 }
 
 /**
@@ -749,6 +770,7 @@ export function fieldBall(
           runDiff: opts.runDiff,
           batterSpeed: opts.batterSpeed,
           arm: glove,
+          armAt: reachOf(alignment),
           advanceRolls: result.advanceRolls,
           stretch,
         })

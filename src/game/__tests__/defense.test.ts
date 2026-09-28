@@ -35,7 +35,7 @@ import { newRead } from '../ai.ts';
 import { fatigue } from '../bullpen.ts';
 import { makeRng } from '../../core/rng.ts';
 import type { HitResult } from '../../core/hit.ts';
-import { runToFirstMs } from '../plot.ts';
+import { runToFirstMs, longThrowMs, throwBetweenMs, feetXY } from '../plot.ts';
 import type { Player } from '../../core/roster.ts';
 
 const hit = (over: Partial<HitResult> = {}): HitResult => ({
@@ -440,10 +440,46 @@ describe('a clean hit is read against the send bar', () => {
       runDiff: 0,
       batterSpeed: 1,
       arm: 1,
+      armAt: () => 1,
       advanceRolls: [0.5, 0.5, 0.5] as const,
     };
     expect(hitRace({ ...common, outs: 0 })!.barMs).toBe(-100);
     expect(hitRace({ ...common, outs: 2 })!.barMs).toBeGreaterThan(0);
+  });
+});
+
+describe('a deep hit goes through the cut-off man (ZAIS-26)', () => {
+  const single = hit({ outcome: 'single', isHit: true, isOut: false, launchAngle: 12 });
+  const base = withPlacement({ kind: 'in_play', hit: single }).placement!;
+  const race = (p: Placement, armAt = (_: number) => 1) =>
+    hitRace({
+      hit: single,
+      placement: p,
+      bases: [null, null, null],
+      outs: 0,
+      inning: 1,
+      runDiff: 0,
+      batterSpeed: 1,
+      arm: 1,
+      armAt,
+      advanceRolls: [0.5, 0.5, 0.5],
+    })!;
+
+  it('every throw is his catch-and-turn plus the second leg, in his arm', () => {
+    const deep = race({ ...base, fielderNum: 7, distFt: 300, dirDeg: -30 }, (n) => (n === 6 ? 1.2 : 1));
+    expect(deep.relay?.num).toBe(6);
+    for (const bag of [2, 3, 4] as const) {
+      expect(deep.throwMs[bag - 2]).toBeCloseTo(deep.relay!.ms + longThrowMs(deep.relay!, bag, 1.2));
+    }
+    // Two shorter legs beat one long carry home from the same pickup.
+    const spot = feetXY(300, -30);
+    const pickup = deep.relay!.ms - throwBetweenMs(spot, deep.relay!, 1);
+    expect(deep.throwMs[2]).toBeLessThan(pickup + longThrowMs(spot, 4, 1));
+  });
+
+  it('the second baseman takes it from right, and nobody goes out on an infield hit', () => {
+    expect(race({ ...base, fielderNum: 9, distFt: 290, dirDeg: 30 }).relay?.num).toBe(4);
+    expect(race({ ...base, fielderNum: 6, distFt: 120, dirDeg: -15 }).relay).toBeUndefined();
   });
 });
 

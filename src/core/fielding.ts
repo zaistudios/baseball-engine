@@ -538,6 +538,12 @@ export interface HitClock {
   /** Throw landing at bags 2, 3 and 4, respectively. */
   throwMs: readonly [number, number, number];
   runners: readonly HitClockRunner[];
+  /**
+   * THE CUT-OFF MAN, when an outfielder has the ball. Every `throwMs` above
+   * already goes through him: out to his spot, his catch-and-turn, and on.
+   * `x`/`y` are feet in plot.ts's feetXY() frame; `ms` is the ball in his glove.
+   */
+  relay?: { num: number; x: number; y: number; ms: number };
 }
 
 export const CLEAN: FieldingResult = { error: false, doublePlay: false };

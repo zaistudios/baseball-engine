@@ -638,7 +638,7 @@ export type Role = 'chase' | 'cover-first' | 'cover-second' | 'relay' | 'shade';
  * right. That is where they line up and it is the only positioning a dot at
  * this scale can express.
  */
-export const relayFor = (chaser: Fielder): number => (chaser.num === 9 ? 4 : 6);
+export const relayFor = (chaser: { num: number }): number => (chaser.num === 9 ? 4 : 6);
 
 /**
  * Where the cut-off man stands: out toward the ball, but not on it.
@@ -903,9 +903,14 @@ export const CARRY = 5.5;
 
 /** throwArrivalMs(), with CARRY on every foot past the infield. For throws after a catch. */
 export function longThrowMs(from: { x: number; y: number }, toBag: number, arm: number): number {
-  const to = bagFeet(toBag);
-  const past = Math.max(0, Math.hypot(to.x - from.x, to.y - from.y) - BASE_FT * Math.SQRT2);
-  return throwArrivalMs(from, toBag, arm) + (past * CARRY) / (THROW_SPEED * Math.max(0.1, arm));
+  return throwBetweenMs(from, bagFeet(toBag), arm);
+}
+
+/** longThrowMs() to any point, not only a bag: the leg out to the cut-off man. */
+export function throwBetweenMs(from: { x: number; y: number }, to: { x: number; y: number }, arm: number): number {
+  const ft = Math.hypot(to.x - from.x, to.y - from.y);
+  const past = Math.max(0, ft - BASE_FT * Math.SQRT2);
+  return MIN_THROW_MS + (ft + past * CARRY) / (THROW_SPEED * Math.max(0.1, arm));
 }
 /** The closest "he beat him" is allowed to look before it reads as a tie. */
 const MIN_GAP_MS = 60;
