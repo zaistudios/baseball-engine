@@ -8,7 +8,7 @@
  * it describes a mismatch rather than the league. Run scripts/league.ts for who
  * WINS and this for what a game LOOKS like.
  */
-import { simulateGame, boxLine, type ExtraBase } from '../src/game/sim.ts';
+import { simulateGame, boxLine, type ExtraBase, type OutSend } from '../src/game/sim.ts';
 import { LEAGUE } from '../src/game/teams.ts';
 
 /** Every ordered pair, so each club hosts and travels equally. */
@@ -20,6 +20,7 @@ let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0
 let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0, hrs = 0, inPlay = 0;
 const caught: { how: string | null; glove: number }[] = [];
 const bags: ExtraBase[] = [];
+const outBags: OutSend[] = [];
 const scores: number[] = [];
 
 for (let i = 0; i < N; i++) {
@@ -30,7 +31,7 @@ for (let i = 0; i < N; i++) {
   const {
     game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls, extraBases,
+    stretchSafe, stretchOut, homeRuns, airBalls, extraBases, outSends,
   } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
@@ -61,6 +62,7 @@ for (let i = 0; i < N; i++) {
   inPlay += outcomes.in_play;
   caught.push(...airBalls.filter((b) => b.how));
   bags.push(...extraBases);
+  outBags.push(...outSends);
   pas += outcomes.walk + outcomes.hit_by_pitch + outcomes.strikeout + outcomes.in_play;
   if (game.inning > 9) extras++;
   if (game.ending === 'walk_off') walkoffs++;
@@ -99,6 +101,12 @@ const gunned = sends.filter((b) => b.out).length;
 console.log(`scored from 2nd  ${rate(onSingle(1))}%   of men on second on a single (MLB ~60%)`);
 console.log(`1st to 3rd       ${rate(onSingle(0))}%   of men on first on a single (MLB ~28%)`);
 console.log(`thrown out/team  ${(gunned / played / 2).toFixed(2)}   (${((gunned / Math.max(1, sends.length)) * 100).toFixed(0)}% of ${(sends.length / played / 2).toFixed(2)} sends on hits)`);
+// THE SENDS ON AN OUT (ZAIS-27): tagging from second, and the man not forced on a grounder.
+for (const [label, kind, from] of [['tag 2nd→3rd', 'tag', 1], ['gb 2nd→3rd', 'ground', 1], ['gb 3rd→home', 'ground', 2]] as const) {
+  const xs = outBags.filter((b) => b.kind === kind && b.from === from);
+  const went = xs.filter((b) => b.went);
+  console.log(`${label.padEnd(16)} ${((went.length / Math.max(1, xs.length)) * 100).toFixed(0)}% went of ${(xs.length / played / 2).toFixed(2)}/team, ${went.filter((b) => b.out).length} thrown out`);
+}
 // ⚠️ BALLS IN PLAY INCLUDES FOUL OUTS AND BUNTS, so this runs a little under
 // a scorer's BABIP. It is for before-and-after, not for the back of a card.
 console.log(`BABIP            ${((hits - hrs) / Math.max(1, inPlay - hrs)).toFixed(3)}   (MLB ~.290)`);

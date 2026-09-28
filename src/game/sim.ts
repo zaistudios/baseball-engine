@@ -51,7 +51,7 @@ import { fieldBall, reachOf } from './defense.ts';
 import type { ForceBag } from '../core/fielding.ts';
 
 import { isHit } from '../core/hitTables.ts';
-import { BASES_GAINED, forcedRunners, isSacrificeFly, type Bases } from '../core/inning.ts';
+import { BASES_GAINED, forcedRunners, isDeepFly, isSacrificeFly, type Bases } from '../core/inning.ts';
 import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
 import { withPlacement, beatenOut, type CatchHow } from './placement.ts';
 import { pickShift } from './shift.ts';
@@ -114,6 +114,13 @@ export interface AtBatLog {
    * (ZAIS-25), and nothing else can see it.
    */
   extraBase?: ExtraBase[];
+  /**
+   * EVERY MAN WHO COULD HAVE RUN ON AN OUT — tagging from second on a deep fly,
+   * or not forced on a ground out with an out to spare. Counted because those
+   * sends are reads now (ZAIS-27) and a balance run is the only thing that can
+   * say how often the read goes.
+   */
+  outSends?: OutSend[];
   /**
    * WHAT THE DEFENCE TURNED ON THE BALL, all four of the multi-out plays, and
    * counted for exactly the reason `forceAt` is: each one is a rule with a knob
@@ -373,6 +380,19 @@ export function playAiAtBat(
       (result.hit.outcome === 'single' || result.hit.outcome === 'double')
         ? { extraBase: extraBags(g.bases, BASES_GAINED[result.hit.outcome], played.log) }
         : {}),
+      ...(result.kind === 'in_play' && !fielding?.error && g.outs < 2
+        ? {
+            outSends: outSends(
+              g.bases,
+              isDeepFly(result.hit.outcome, result.hit.exitVelocity, g.outs, result.hit.launchAngle)
+                ? 'tag'
+                : result.hit.outcome === 'ground_out' && !fielding?.doublePlay && !fielding?.triplePlay
+                  ? 'ground'
+                  : null,
+              played.log,
+            ),
+          }
+        : {}),
       bunt: bunted,
     },
   };
@@ -407,6 +427,28 @@ function extraBags(before: Bases, n: number, log: PlayLog): ExtraBase[] {
   });
   if (log.thrownOut?.batter || log.batterTo > n) {
     rows.push({ n, from: -1, went: true, out: !!log.thrownOut?.batter });
+  }
+  return rows;
+}
+
+export interface OutSend {
+  kind: 'tag' | 'ground';
+  /** 1 second, 2 third. */
+  from: 1 | 2;
+  went: boolean;
+  out: boolean;
+}
+
+/** Who could have run on an out, and what became of him. See AtBatLog.outSends. */
+function outSends(before: Bases, kind: OutSend['kind'] | null, log: PlayLog): OutSend[] {
+  if (!kind || log.halfEnded) return [];
+  const rows: OutSend[] = [];
+  for (const from of [1, 2] as const) {
+    const who = before[from];
+    // The man on third always tags; a forced man always runs. Neither is a read.
+    if (!who || (kind === 'tag' && from === 2) || (kind === 'ground' && forcedRunners(before) > from)) continue;
+    const out = log.thrownOut?.runner === who;
+    rows.push({ kind, from, went: out || log.after.indexOf(who) !== from, out });
   }
   return rows;
 }
@@ -544,6 +586,8 @@ export interface SimResult {
   stretchOut: number;
   /** Every extra bag there was to take on a clean single or double. See AtBatLog.extraBase. */
   extraBases: ExtraBase[];
+  /** Every man who could have run on an out. See AtBatLog.outSends. */
+  outSends: OutSend[];
   /** Home runs, so balance.ts can take them out of BABIP. */
   homeRuns: number;
   /** Every fair ball in the air but a home run. See AtBatLog.air. */
@@ -611,6 +655,7 @@ export function simulateGame(
   let homeRuns = 0;
   const airBalls: AirBall[] = [];
   const extraBases: ExtraBase[] = [];
+  const outSendRows: OutSend[] = [];
   let lastHalf = `${g.inning}${g.half}`;
 
   while (!g.over && halves < 60) {
@@ -656,6 +701,7 @@ export function simulateGame(
     if (out.atBat.outcome === 'home_run') homeRuns++;
     if (out.atBat.air) airBalls.push(out.atBat.air);
     if (out.atBat.extraBase) extraBases.push(...out.atBat.extraBase);
+    if (out.atBat.outSends) outSendRows.push(...out.atBat.outSends);
     pitches += out.atBat.pitches;
     if (pitches === before) pitches++; // paranoia: never spin without progress
 
@@ -669,7 +715,7 @@ export function simulateGame(
   return {
     game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls, extraBases,
+    stretchSafe, stretchOut, homeRuns, airBalls, extraBases, outSends: outSendRows,
   };
 }
 
