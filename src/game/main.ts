@@ -3146,6 +3146,11 @@ if (import.meta.env.DEV) {
     sceneMs,
     hasReplay: !!replay,
     phase,
+    // The engine's cut-off man on this replay, and whether it threw somebody
+    // out — so a script can wait for a relay rather than guess at one.
+    relay: replay?.hitClock?.relay ?? null,
+    throwClock: replay?.throwClock ?? null,
+    thrownOut: !!replay?.thrownOut,
   });
   /**
    * THE THROW BAR, on demand — the one piece of UI in this game that only
