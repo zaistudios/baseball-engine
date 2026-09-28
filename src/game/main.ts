@@ -49,6 +49,23 @@ import {
   totals,
   winPct,
 } from './career.ts';
+import {
+  wakeAudio,
+  startMenuMusic,
+  stopMenuMusic,
+  sfxContact,
+  sfxWhiff,
+  sfxMitt,
+  sfxCall,
+  sfxOnBase,
+  sfxOut,
+  sfxCrowd,
+  organCharge,
+  organTwoStrikes,
+  organStrikeout,
+  organHomeRun,
+  overheadSfx,
+} from './audio.ts';
 import { clubValue, showScale, strengthLabel, strengthRank } from './value.ts';
 import {
   COMMAND,
@@ -222,12 +239,10 @@ import { restedStamina } from './rotation.ts';
 import type { StarterPick } from './game.ts';
 import { aiShouldSend, sendRunner, stealOpportunity, chanceFor } from './running.ts';
 import {
-  LEVELS,
   MIN_SAMPLES,
   PITCH_SPEEDS,
   SANE_SAMPLE_MS,
   calibrationLabel,
-  levelOf,
   loadSettings,
   observe as observeTiming,
   pitchSpeedOf,
@@ -507,13 +522,10 @@ let streak: Streak = loadStreak();
 let settings = loadSettings();
 
 /**
- * The timing-window multiplier for a swing YOU are taking.
- *
- * ⚠️ ONE IN AUTO MODE, ALWAYS. Watch mode is the computer playing your half,
- * and a difficulty setting that made the CPU a better hitter while you were
- * away is not a difficulty setting. Same rule as the calibration below.
+ * Timing-window multiplier: pure 1.0 authentic baseball. No difficulty sliders or
+ * assist crutches; championship glory is earned on skill and timing.
  */
-const assist = (): number => (auto ? 1 : levelOf(settings.level).assist);
+const assist = (): number => 1;
 
 /**
  * Ball arrival as the PLAYER experienced it, which is the clock a swing has to
@@ -583,12 +595,15 @@ function markContact(): void {
   // A BUNT HAS NO SWING TO READ. The bat is already out over the plate and
   // there was never a press, so the ball is struck where it crossed.
   const bunted = swing.bunted === true || swingStartedAt === null;
+  const curBat = currentBatter(game);
+  const curArm = currentPitcher(game);
+  const isLefty = curBat.bats === 'L' || (curBat.bats === 'S' && curArm.throws === 'R');
   const barrel = bunted
     ? spotX - PLATE_X
     : // Mirrored for a left-hander exactly the way drawBat() mirrors him, so
       // the ball leaves from the bat a person can see rather than from its
       // reflection.
-      (currentBatter(game).bats === 'L' ? -1 : 1) * barrelOf(poseAt(swingTravel, swingTravel)).x;
+      (isLefty ? -1 : 1) * barrelOf(poseAt(swingTravel, swingTravel)).x;
 
   batted = { at: performance.now(), from: { x: barrel, y: spotY - PLATE_Y }, hit: swing };
 }
@@ -1153,6 +1168,12 @@ function deliver(): void {
   previous.push(pitch.type);
   game = countPitch(game);
 
+  if (atBat.balls === 3 && atBat.strikes === 2) {
+    organTwoStrikes();
+  } else if ((game.bases[1] !== null || game.bases[2] !== null) && game.outs === 2 && atBat.balls === 0 && atBat.strikes === 0) {
+    organCharge();
+  }
+
   launchAt = performance.now();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
   // readScale() is 1 on every path but your own at-bat, so this is the same
@@ -1431,8 +1452,9 @@ function resolvePitch(): void {
       atBat = takePitch(atBat, false, pitch.hitBatter);
       lastGrade = 'BUNT — TOOK IT';
       flash = pitch.hitBatter ? 'HIT BY PITCH' : 'BALL';
+      sfxMitt();
+      sfxCall(false);
     } else {
-
       atBat = swingAt(
         atBat,
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
@@ -1440,13 +1462,22 @@ function resolvePitch(): void {
       );
       markContact();
       lastGrade = 'BUNT';
+      sfxContact(65);
       // ⚠️ READ OFF THE SWING, NOT THE COUNT. This asked whether the count moved,
       // and a bunt foul ALWAYS moves it — swingAt() has no free-foul branch for a
       // bunt — so 'BUNT FOUL' was unreachable long before lastSwing existed.
       flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'BUNT';
       // Two strikes and he fouled it off: the count already rang him up, and
       // the banner should say so rather than reading like a live at-bat.
-      if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
+      if (atBat.result?.kind === 'strikeout') {
+        flash = 'FOUL BUNT — STRIKE THREE';
+        organStrikeout();
+        sfxOut();
+      } else if (atBat.lastSwing?.outcome === 'foul') {
+        sfxCrowd(0.2);
+      } else {
+        sfxCrowd(0.4);
+      }
     }
     bunting = false;
     // A bunt is not a swing at a window and has no offset to read out. See
@@ -1465,46 +1496,29 @@ function resolvePitch(): void {
     // reason the check swing needed no new rule. `inZone` decides it either
     // way; an umpire ruling the check a strike is simply what a called strike
     // already is.
-    //
-    // ponytail: the book is told this was a take, not an offer. Recording a
-    // check as a swing-and-no-contact would push the computer to feed you more
-    // junk out of the zone, which is a real and defensible read — it is just a
-    // difficulty change nobody asked for yet. One argument to observePitch()
-    // if that turns out to be the better game.
     observePitch(book, pitch, false);
     atBat = takePitch(atBat, pitch.inZone, pitch.hitBatter);
     const call = pitch.inZone ? 'STRIKE' : 'BALL';
     lastGrade = checkedAt !== null ? `CHECKED — ${call}` : call;
     flash = pitch.hitBatter ? 'HIT BY PITCH' : lastGrade;
-    // ⚠️ swingRead IS DELIBERATELY LEFT ALONE HERE. A take is not a swing, and
-    // the last swing of this at-bat is still the last swing of this at-bat —
-    // it is also the reference a hitter most wants in front of him while he
-    // watches the next one come in. The two are kept apart by being labelled
-    // apart: `last pitch` is this, `last swing` is that. See SwingRead.
+    sfxMitt();
+    sfxCall(pitch.inZone);
+    if (atBat.result?.kind === 'strikeout') {
+      organStrikeout();
+      sfxOut();
+    } else if (atBat.result?.kind === 'walk' || pitch.hitBatter) {
+      sfxOnBase();
+    } else if (pitch.inZone && atBat.strikes === 2) {
+      organTwoStrikes();
+    }
   } else {
     // ⚠️ TWO OFFSETS, AND THE DIFFERENCE BETWEEN THEM IS THE WHOLE FEATURE.
-    // `raw` is measured against the ball's real arrival and is the only thing
-    // the calibration may ever learn from — medianOffset() says so in its own
-    // signature, and feeding it corrected samples makes the correction chase
-    // itself to zero. `offset` is measured against arrival as the player saw
-    // it, and is what the at-bat is actually graded on.
     const raw = computeOffsetMs(contact, arriveAt);
     const offset = computeOffsetMs(contact, gradedArrival());
-    // ⚠️ AND IT STOPS WHEN THE PLAYER SAYS STOP. Without holdCalibration this
-    // folds a sample in on every swing for ever, so the shift somebody has just
-    // learned to hit against goes on walking — see the note on LOCK in
-    // difficulty.ts. Holding it changes nothing else: the samples already taken
-    // stay, and the shift they produced goes on being applied.
     if (!auto && !settings.holdCalibration) {
       settings = { ...settings, calibration: observeTiming(settings.calibration, raw) };
       saveSettings(settings);
     }
-    // Graded with the SAME multipliers resolveSwing() will use, the assist
-    // and the chase included, or the word on screen and the outcome in the
-    // book come from different at-bats. ⚠️ chaseContact() IS THE NEWEST WAY
-    // TO GET THAT WRONG: leave it off here and a swing at a ball off the plate
-    // is graded one way for the flash and the bar and another way for the
-    // play log. Every factor below belongs on both sides of this pair.
     const scale = stats.contact * stuff * assist() * chaseContact(pitch.missDistance);
     const g = grade(offset, scale, stats.vision);
     lastGrade = g.toUpperCase();
@@ -1519,48 +1533,45 @@ function resolvePitch(): void {
       twoStrikes: atBat.strikes >= 2,
       runnersInScoringPosition: risp,
       stuff,
-      // How far off the plate he put it. The other half of `scale` above.
       missDistance: pitch.missDistance,
       foulBoost: FOUL_BOOST,
-      // The building both clubs are hitting in. See parkFoulAngle() in teams.ts.
       foulPopAngle: parkFoulAngle(game.home.park),
       assist: assist(),
     };
     const before = atBat;
     atBat = swingAt(atBat, input, rng);
     markContact();
-    // A whiff for the book's purposes is a swing that produced no contact.
     const whiffed = g === 'miss';
     observePitch(book, pitch, true, offset, whiffed);
     flash = g === 'miss' ? 'SWING AND MISS' : `${g.toUpperCase()}`;
-    // ⚠️ showFoul() IS A DRAW CALL THAT ALSO ANSWERS A QUESTION, so it still
-    // runs on every swing whatever the flash says. Both tests are taken into
-    // locals rather than asked twice: the read-out below needs the same two
-    // answers, and a second showFoul() would build a second replay.
     const freeFoul = wasFreeFoul(before, atBat);
     const drewFoul = showFoul(batter.speed);
     if (freeFoul) flash = 'FOUL';
     if (drewFoul) flash = 'FOUL';
 
-    // ⚠️ THE GRADE AND THE OUTCOME ARE TWO DIFFERENT FACTS, and the screen used
-    // to carry only the first. Three straight 0-2 fouls read `last swing: LATE`
-    // three times over a count that never moved and a play log that never got
-    // a line — from the batter's box, a frozen game. LATE is how the swing was
-    // TIMED; FOUL is what it CAME TO, and the second one is the one that
-    // explains why nothing happened.
-    //
-    // Read off the swing rather than off the flash: `flash` carries the streak
-    // decoration by the time anything else looks at it.
     const outcome = swingWord(freeFoul, drewFoul);
 
-    // ⚠️ NOT IN WATCH MODE, same rule as the streak below. That offset belongs
-    // to aiSwing(), and a bar drawn from the computer's timing would teach a
-    // watching player nothing about his own.
-    //
-    // ⚠️ AND THE CLOCK IS HELD TO THE SAME BAR THE CALIBRATION IS. `raw` is the
-    // uncorrected measurement, which is what SANE_SAMPLE_MS is stated against —
-    // asking it of the corrected `offset` would move the bar by the shift. See
-    // SwingRead.offsetMs for the ten-second swing that made this necessary.
+    if (whiffed) {
+      sfxWhiff();
+      sfxMitt();
+      if (atBat.result?.kind === 'strikeout') {
+        organStrikeout();
+        sfxOut();
+      } else if (atBat.strikes === 2) {
+        organTwoStrikes();
+      }
+    } else {
+      sfxContact(atBat.lastSwing?.exitVelocity ?? 85);
+      if (atBat.lastSwing?.outcome === 'home_run') {
+        organHomeRun();
+        sfxCrowd(1.0);
+      } else if (outcome === 'FOUL') {
+        sfxCrowd(0.2);
+      } else {
+        sfxCrowd(0.5);
+      }
+    }
+
     const timed = Math.abs(raw) <= SANE_SAMPLE_MS;
     swingRead = auto
       ? null
@@ -1573,25 +1584,15 @@ function resolvePitch(): void {
         };
     if (outcome === 'FOUL') say(`${batter.name} fouls one off.`, 'out');
 
-    // The streak, and the loud version of it. Only a SWING moves this — a take
-    // is left alone deliberately, see streak.ts.
-    //
-    // ⚠️ NOT IN WATCH MODE. aiSwing() takes this swing when auto is on, and a
-    // record the computer set at 8x while you were in a meeting would empty the
-    // number of everything it means. The whole point is that YOU squared it up.
     if (!auto) {
       const run = extend(streak, g);
       streak = run.streak;
-      // A record is only worth announcing once there is something to beat.
-      // Without the floor, the first swing on a fresh install is a "new best".
       if (run.record && streak.current >= 3) {
         flash = `${streak.current} IN A ROW — NEW BEST`;
         say(`New best: ${streak.current} squared up in a row.`, 'big');
       } else if (streak.current >= 3) {
         flash = `${flash} — ${streak.current} IN A ROW`;
       }
-      // Saved on every record, loud or quiet — the number on disk must be the
-      // real one even when nobody was told about it.
       if (run.record) saveStreak(streak);
     }
   }
@@ -1828,6 +1829,12 @@ function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): v
   previous.push(callType);
   game = countPitch(game);
 
+  if (atBat.balls === 3 && atBat.strikes === 2) {
+    organTwoStrikes();
+  } else if ((game.bases[1] !== null || game.bases[2] !== null) && game.outs === 2 && atBat.balls === 0 && atBat.strikes === 0) {
+    organCharge();
+  }
+
   launchAt = performance.now();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
   // readScale() is 1 on every path but your own at-bat, so this is the same
@@ -1908,36 +1915,47 @@ function resolveTheirSwing(): void {
       atBat = takePitch(atBat, false, false);
       flash = 'BALL — he had it squared';
       scored = 'ball';
+      sfxMitt();
+      sfxCall(false);
     } else {
-
       atBat = swingAt(
         atBat,
         { offsetMs: 0, pitchType: pitch.type, location: pitch.location, stats, isBunt: true },
         rng,
       );
       markContact();
+      sfxContact(65);
       // Same unreachable test as the human bunt above — see the note there.
       flash = atBat.lastSwing?.outcome === 'foul' ? 'BUNT FOUL' : 'HE BUNTS';
       scored = atBat.lastSwing?.outcome === 'foul' ? 'bunt foul' : 'bunted';
-      if (atBat.result?.kind === 'strikeout') flash = 'FOUL BUNT — STRIKE THREE';
+      if (atBat.result?.kind === 'strikeout') {
+        flash = 'FOUL BUNT — STRIKE THREE';
+        organStrikeout();
+        sfxOut();
+      } else if (atBat.lastSwing?.outcome === 'foul') {
+        sfxCrowd(0.2);
+      } else {
+        sfxCrowd(0.4);
+      }
     }
   } else {
     const contact = contactAt();
     lastWasSwing = contact !== null;
     if (contact === null) {
       atBat = takePitch(atBat, pitch.inZone, pitch.hitBatter);
-      // ⚠️ THE PLUNKING USED TO READ 'BALL'. takePitch() has taken hitBatter
-      // since interactive pitching shipped and this line only ever asked about
-      // the zone, so the one pitch that ENDS the at-bat and puts a man on first
-      // announced itself as ball three. The batting half has said HIT BY PITCH
-      // all along — see resolvePitch() — so this was the two halves of the same
-      // event disagreeing, which is the defect and not a wording preference.
       flash = pitch.hitBatter ? 'HIT BY PITCH' : pitch.inZone ? 'CALLED STRIKE' : 'BALL';
       scored = pitch.hitBatter ? 'hit batter' : pitch.inZone ? 'called strike' : 'ball';
+      sfxMitt();
+      sfxCall(pitch.inZone);
+      if (atBat.result?.kind === 'strikeout') {
+        organStrikeout();
+        sfxOut();
+      } else if (atBat.result?.kind === 'walk' || pitch.hitBatter) {
+        sfxOnBase();
+      } else if (pitch.inZone && atBat.strikes === 2) {
+        organTwoStrikes();
+      }
     } else {
-      // Graded off where the barrel ACTUALLY arrived, not off the offset he
-      // asked for. The frame the bat is drawn crossing the plate is the frame
-      // that decides it — the same rule your swing is held to.
       const offset = computeOffsetMs(contact, arriveAt);
       const input: SwingInput = {
         offsetMs: offset,
@@ -1949,47 +1967,44 @@ function resolveTheirSwing(): void {
         twoStrikes,
         runnersInScoringPosition: risp,
         stuff,
-        // Your command, charged to his swing. A pitch you missed the spot with
-        // is the same pitch to him as one the computer missed a spot with —
-        // see the note on missDistance in pitchToSpot().
         missDistance: pitch.missDistance,
         foulBoost: FOUL_BOOST,
-        // The building both clubs are hitting in. Same park for the computer's
-        // swings as for yours — see parkFoulAngle() in teams.ts.
         foulPopAngle: parkFoulAngle(game.home.park),
       };
       const before = atBat;
       atBat = swingAt(atBat, input, rng);
       markContact();
-      // ⚠️ THE SAME MULTIPLIERS, ON THIS HALF TOO. This site grades the swing
-      // a second time for the flash and the chart line, which is the pair the
-      // note in resolvePitch() describes — so it carries the chase factor for
-      // the same reason: SWING AND MISS on the screen and a ball in play in
-      // the log would be two different at-bats.
       const g = grade(
         offset,
         stats.contact * stuff * chaseContact(pitch.missDistance),
         stats.vision,
       );
       scored = g === 'miss' ? 'swinging strike' : 'in play';
-      // ⚠️ THE COUNT, NOT THE OBJECT — see wasFreeFoul(). This site said
-      // `atBat === before` and so started calling every two-strike foul the
-      // computer hit "IN PLAY".
       const freeFoul = wasFreeFoul(before, atBat);
-      // Their fouls are drawn too. Same event, same picture.
       const drewFoul = showFoul(batter.speed);
-      // ⚠️ THE SAME WORD YOUR HALF GETS, off the same function. See swingWord().
       flash = g === 'miss' ? 'SWING AND MISS' : swingWord(freeFoul, drewFoul);
-      // ⚠️ ASKED OF THE SWING, NOT OF THE TWO LINES ABOVE. Both of those are
-      // conditions on DRAWING a foul — one is the free two-strike case and the
-      // other is whether there was a replay to build — and a foul that is
-      // neither still has to reach the chart as a foul.
-      // ⚠️ AND IT REACHES THE LOG, on this half as on yours. A foul is the one
-      // pitch that changes nothing a reader can see — the count sits still, no
-      // runner moves, the at-bat goes on — so a play log that skips it is a log
-      // with a hole in it exactly where somebody is asking "what just
-      // happened?". The pitch chart beside it already carried the word; the
-      // running account of the game did not.
+
+      if (g === 'miss') {
+        sfxWhiff();
+        sfxMitt();
+        if (atBat.result?.kind === 'strikeout') {
+          organStrikeout();
+          sfxOut();
+        } else if (atBat.strikes === 2) {
+          organTwoStrikes();
+        }
+      } else {
+        sfxContact(atBat.lastSwing?.exitVelocity ?? 85);
+        if (atBat.lastSwing?.outcome === 'home_run') {
+          organHomeRun();
+          sfxCrowd(1.0);
+        } else if (atBat.lastSwing?.outcome === 'foul') {
+          sfxCrowd(0.2);
+        } else {
+          sfxCrowd(0.5);
+        }
+      }
+
       if (atBat.lastSwing?.outcome === 'foul') {
         scored = 'foul';
         say(`${batter.name} fouls one off.`, 'out');
@@ -2389,9 +2404,30 @@ function completePlay(
       : `${runner.name} tagged out at ${bag}`;
     say(`   ${how}` + (num === undefined ? '' : `, ${throwNotation(num, at)}`), 'out');
   }
+
+  if (result.kind === 'strikeout') {
+    sfxOut();
+  } else if (result.kind === 'walk' || result.kind === 'hit_by_pitch') {
+    sfxOnBase();
+  } else if (result.kind === 'in_play') {
+    if (result.hit.isHit) {
+      if (result.hit.outcome === 'home_run') {
+        organHomeRun();
+        sfxCrowd(1.0);
+      } else {
+        sfxOnBase();
+        sfxCrowd(0.7);
+      }
+    } else {
+      sfxOut();
+      sfxCrowd(0.3);
+    }
+  }
+
   if (log.runs > 0) {
     const who = wasBatting === YOU ? 'YOU SCORE' : 'THEY SCORE';
     say(`   ${who} ${log.runs}`, 'big');
+    sfxCrowd(0.9);
   }
   if (log.halfEnded && !game.over) {
     say(`— end ${half} —  ${game.away.abbr} ${game.awayState.runs}, ${game.home.abbr} ${game.homeState.runs}`, 'half');
@@ -2742,16 +2778,6 @@ function press(key: string): void {
     speedIdx = (speedIdx + 1) % SPEEDS.length;
     return;
   }
-  // Live in every phase, same as the two above — this is the control a player
-  // reaches for at the exact moment he decides the window is wrong.
-  if (key === 'g') {
-    const at = LEVELS.findIndex((l) => l.key === settings.level);
-    const next = LEVELS[(at + 1) % LEVELS.length]!;
-    settings = { ...settings, level: next.key };
-    saveSettings(settings);
-    say(`${next.name} — ${next.blurb}`, 'half');
-    return;
-  }
   // Same rule as the three above, and for a stronger reason than any of them:
   // the moment a player decides the ball is coming too fast to read is the
   // moment he is standing in the box, not the moment he is on a menu.
@@ -2879,7 +2905,12 @@ function press(key: string): void {
   if (key === ' ' || key === 'enter') startDelivery();
 }
 
+addEventListener('pointerdown', () => {
+  wakeAudio();
+}, { passive: true });
+
 addEventListener('keydown', (e) => {
+  wakeAudio();
   // ⚠️ A BOX IS FOR TYPING IN. This listener preventDefaults every key it
   // knows and it knows most of the alphabet, so with the league screen's
   // textarea focused, typing `{"abbr":"OKC"}` put `{"":"O"}` in the box and
@@ -3388,16 +3419,145 @@ const MITT_XY = { x: CATCHER_XY.x + CATCHER_XY.h * 0.23, y: CATCHER_XY.y - CATCH
 /** How long the ball takes to settle into it, once it is past the plate. */
 const MITT_MS = 140;
 
+/**
+ * THE BALLPARK AT DUSK — Retro arcade presentation for the at-bat view.
+ *
+ * Gives depth to the view behind the plate:
+ * twilight sky, stadium floodlight towers with warm halogen glow, grandstand silhouette,
+ * outfield wall with yardage markers, centerfield batter's eye, concentric mowing patterns,
+ * clay mound with rubber, and chalk batter's boxes.
+ */
+function drawBallparkScenery(c: CanvasRenderingContext2D): void {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // 1. Twilight sky gradient
+  const skyGrad = c.createLinearGradient(0, 0, 0, 44);
+  skyGrad.addColorStop(0, '#090d18');
+  skyGrad.addColorStop(0.7, '#131b2c');
+  skyGrad.addColorStop(1, '#1a2436');
+  c.fillStyle = skyGrad;
+  c.fillRect(0, 0, w, 44);
+
+  // Distant grandstand & crowd silhouette
+  c.fillStyle = '#101720';
+  c.fillRect(0, 24, w, 18);
+  c.fillStyle = '#2d3d4d';
+  for (let x = 6; x < w - 6; x += 8) {
+    c.fillRect(x, 26 + ((x * 13) % 7), 2, 2);
+    c.fillRect(x + 4, 30 + ((x * 7) % 6), 2, 2);
+  }
+
+  // Floodlight stanchions with warm halogen glow
+  const drawLightTower = (tx: number) => {
+    c.strokeStyle = '#32414c';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(tx - 6, 26);
+    c.lineTo(tx, 6);
+    c.lineTo(tx + 6, 26);
+    c.moveTo(tx - 6, 26);
+    c.lineTo(tx + 6, 26);
+    c.stroke();
+
+    c.fillStyle = '#1b252e';
+    c.fillRect(tx - 11, 4, 22, 8);
+
+    c.fillStyle = '#fff9e6';
+    for (let bx = -9; bx <= 6; bx += 5) {
+      c.fillRect(tx + bx, 6, 3, 4);
+    }
+
+    const glow = c.createRadialGradient(tx, 8, 2, tx, 8, 22);
+    glow.addColorStop(0, 'rgba(255, 245, 200, 0.28)');
+    glow.addColorStop(1, 'rgba(255, 245, 200, 0)');
+    c.fillStyle = glow;
+    c.beginPath();
+    c.arc(tx, 8, 22, 0, Math.PI * 2);
+    c.fill();
+  };
+  drawLightTower(32);
+  drawLightTower(w - 32);
+
+  // 2. Outfield wall with retro green padding and top yellow trim
+  c.fillStyle = '#15241b';
+  c.fillRect(0, 38, w, 12);
+  c.fillStyle = '#d4a230';
+  c.fillRect(0, 37, w, 2);
+
+  // Centerfield Batter's Eye screen behind the pitcher
+  c.fillStyle = '#0a120c';
+  c.fillRect(144, 20, 132, 28);
+  c.strokeStyle = '#182b1d';
+  c.lineWidth = 1;
+  c.strokeRect(144, 20, 132, 28);
+
+  // Distance markers on the wall (LF 330, CF 395, RF 335)
+  c.fillStyle = '#8ea194';
+  c.font = '7px ui-monospace, monospace';
+  c.textAlign = 'center';
+  c.fillText('330', 50, 47);
+  c.fillText('395', 210, 47);
+  c.fillText('335', 370, 47);
+  c.textAlign = 'left';
+
+  // 3. Outfield & Infield turf with alternating mowing stripes
+  c.fillStyle = '#182b1e';
+  c.fillRect(0, 49, w, h - 49);
+
+  c.fillStyle = '#1d3324';
+  for (let y = 54; y < h; y += 18) {
+    c.fillRect(0, y, w, 9);
+  }
+
+  // 4. Pitching mound clay
+  c.fillStyle = '#3a2417';
+  c.beginPath();
+  c.ellipse(210, 68, 76, 26, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#482e1e';
+  c.beginPath();
+  c.ellipse(210, 66, 60, 18, 0, 0, Math.PI * 2);
+  c.fill();
+
+  // Pitching rubber
+  c.fillStyle = '#1e140d';
+  c.fillRect(202, 58, 16, 4);
+  c.fillStyle = '#e5e8e0';
+  c.fillRect(202, 57, 16, 3);
+
+  // Home plate clay cutout
+  c.fillStyle = '#3a2417';
+  c.beginPath();
+  c.ellipse(210, 262, 74, 30, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#442b1b';
+  c.beginPath();
+  c.ellipse(210, 260, 58, 22, 0, 0, Math.PI * 2);
+  c.fill();
+
+  // Chalk foul lines
+  c.strokeStyle = 'rgba(224, 232, 220, 0.35)';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(180, PLATE_Y);
+  c.lineTo(0, 80);
+  c.moveTo(240, PLATE_Y);
+  c.lineTo(w, 80);
+  c.stroke();
+
+  // Chalk Batter's Boxes
+  c.strokeStyle = 'rgba(224, 232, 220, 0.40)';
+  c.lineWidth = 1;
+  c.strokeRect(124, 232, 38, 56);
+  c.strokeRect(258, 232, 38, 56);
+}
+
 function drawField(now: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Backstop dirt and the mound sightline.
-  ctx.fillStyle = '#101a12';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#16211a';
-  ctx.beginPath();
-  ctx.ellipse(210, 60, 92, 34, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // Ballpark at dusk — retro arcade presentation
+  drawBallparkScenery(ctx);
 
   // Strike zone.
   ctx.strokeStyle = '#3d4a38';
@@ -3467,6 +3627,7 @@ function drawField(now: number): void {
         ...OH_PALETTE,
         wall: (d) => wallAt(d, game.home.park),
         figure: overheadFigure,
+        sfx: overheadSfx,
       });
       // The caption rides the same alpha as the picture under it, so the two
       // cut in and out as one thing rather than the words outliving the field.
@@ -3741,7 +3902,8 @@ function drawHitter(now: number): void {
         : (checkedAt - swingStartedAt) * Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS);
   const swinging = isSwinging(since, swingTravel);
   const pose = swinging ? poseAt(since, swingTravel) : REST_POSE;
-  const lefty = man.bats === 'L';
+  const arm = currentPitcher(game);
+  const lefty = man.bats === 'L' || (man.bats === 'S' && arm.throws === 'R');
 
   /**
    * ⚠️ ONE SINE, TWO MEN, NO SYSTEM. Between pitches this screen drew two
@@ -3800,7 +3962,7 @@ function drawHitter(now: number): void {
   // ponytail: the barrel lands where the pose puts it, not on this pitch's
   // crossing point — same stance the roguelike takes. Aiming the bat is a
   // different game; this one only has to make the timing legible.
-  const anchor = { x: PLATE_X, y: PLATE_Y, flip: lefty };
+  const anchor = { x: PLATE_X, y: PLATE_Y, flip: lefty, build: man.build };
   if (import.meta.env.DEV && swingGhosts) {
     ctx.save();
     ctx.globalAlpha = 0.28;
@@ -3884,7 +4046,8 @@ function drawBall(now: number): void {
   // OFF THE BAT. Nothing below applies: the pitch is over, and where this ball
   // goes was decided by swingAt() before a pixel was drawn. See flight.ts.
   if (batted) {
-    const p = battedAt(batted.hit, batted.from, now - batted.at);
+    const elapsed = now - batted.at;
+    const p = battedAt(batted.hit, batted.from, elapsed);
     if (!p) return;
     const bx = PLATE_X + p.x;
     const by = PLATE_Y + p.y;
@@ -3895,6 +4058,29 @@ function drawBall(now: number): void {
     ctx.beginPath();
     ctx.arc(bx, by, p.r, 0, Math.PI * 2);
     ctx.fill();
+
+    // 8-bit contact spark / impact burst at the point of contact for the first ~70ms
+    if (elapsed < 70) {
+      const cx = PLATE_X + batted.from.x;
+      const cy = PLATE_Y + batted.from.y;
+      const sparkLen = Math.floor(4 + (batted.hit.exitVelocity / 110) * 8);
+      ctx.strokeStyle = '#fff875';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - sparkLen, cy);
+      ctx.lineTo(cx + sparkLen, cy);
+      ctx.moveTo(cx, cy - sparkLen);
+      ctx.lineTo(cx, cy + sparkLen);
+      const d = Math.round(sparkLen * 0.7);
+      ctx.moveTo(cx - d, cy - d);
+      ctx.lineTo(cx + d, cy + d);
+      ctx.moveTo(cx + d, cy - d);
+      ctx.lineTo(cx - d, cy + d);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(cx - 1, cy - 1, 3, 3);
+    }
     return;
   }
 
@@ -4294,13 +4480,32 @@ function drawBases(): void {
 
 function drawFlash(now: number): void {
   if (!flash || phase !== 'resolve' || now > flashUntil) return;
-  ctx.fillStyle = 'rgba(13,18,16,0.72)';
-  ctx.fillRect(0, 140, canvas.width, 60);
-  ctx.fillStyle = '#d8b44a';
-  ctx.font = '18px ui-monospace, monospace';
+  const isHR = flash.includes('HOME RUN');
+  const isK = flash.includes('STRIKE') || flash.includes('MISS');
+  const isHit = flash.includes('HIT') || flash.includes('IN A ROW');
+  const isFoul = flash.includes('FOUL');
+  const borderColor = isHR ? '#ffd700' : isK ? '#e63946' : isHit ? '#2ec4b6' : isFoul ? '#ff9f1c' : '#d8b44a';
+  const textColor = isHR ? '#fff59d' : isK ? '#ffb4a2' : isHit ? '#cbf3f0' : isFoul ? '#ffe5b4' : '#fff8db';
+
+  const w = canvas.width;
+  ctx.save();
+  ctx.fillStyle = 'rgba(10, 15, 12, 0.90)';
+  ctx.fillRect(20, 142, w - 40, 48);
+
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, 142, w - 40, 48);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(23, 145, w - 46, 42);
+
+  ctx.fillStyle = textColor;
+  ctx.font = '13px "Press Start 2P", ui-monospace, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(flash, canvas.width / 2, 176);
-  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(flash, w / 2, 166);
+  ctx.restore();
 }
 
 // ------------------------------------------------------------ dom render
@@ -4366,7 +4571,6 @@ function renderMeta(): void {
   // The calibration reads out beside it for the same reason: it moves the
   // grading of every swing, so it says so out loud. A silent correction and a
   // timing bug look identical from the batter's box.
-  const level = levelOf(settings.level);
   // ⚠️ TWO SPEEDS ON ONE STRIP, AND THEY ARE OPPOSITE CONTROLS. `speed 4×` cuts
   // the parts nobody is playing; `pitch SLOW` stretches the one part somebody
   // is. They are labelled as different words on purpose — see readScale().
@@ -4390,9 +4594,6 @@ function renderMeta(): void {
     '&times; <kbd>F</kbd>' +
     (auto ? '' : ' <span class="dim">(AUTO only)</span>') +
     '</button>' +
-    '<button data-diff="1" style="margin-left:8px">' +
-    level.name +
-    ' <kbd>G</kbd></button>' +
     '<button data-pitch="1" style="margin-left:8px" class="' +
     (settings.pitchSpeed < 1 ? 'on' : '') +
     '">pitch ' +
@@ -4413,8 +4614,6 @@ function renderMeta(): void {
   if (autoBtn) autoBtn.onclick = () => press('t');
   const speedBtn = elMeta.querySelector<HTMLButtonElement>('[data-speed]');
   if (speedBtn) speedBtn.onclick = () => press('f');
-  const diffBtn = elMeta.querySelector<HTMLButtonElement>('[data-diff]');
-  if (diffBtn) diffBtn.onclick = () => press('g');
   const pitchBtn = elMeta.querySelector<HTMLButtonElement>('[data-pitch]');
   if (pitchBtn) pitchBtn.onclick = () => press('p');
   const holdBtn = elMeta.querySelector<HTMLButtonElement>('[data-hold]');
@@ -4513,7 +4712,7 @@ function renderSituation(): void {
     // The bat speed is shown because the check swing is what makes it matter:
     // a heavy bat arrives late AND gives you longer to change your mind, and a
     // trade you cannot see is not a trade.
-    `<span>${b.name} <span class="dim">(${b.bats}, ${batSpeedLabel(statsOf(b).power)})</span></span>`,
+    `<span>${b.pos ? `<span class="dim">[${b.pos}]</span> ` : ''}${b.name} <span class="dim">(${b.bats}, ${batSpeedLabel(statsOf(b).power)})</span></span>`,
     `<span class="dim">on deck ${onDeck(g).name}</span>`,
     `<span class="dim">|</span>`,
     `<span>${currentPitcher(g).name}` +
@@ -4560,9 +4759,13 @@ function renderSituation(): void {
  * bat has no platoon edge to sell and never did.
  */
 export function benchRole(p: Player, lineup: readonly Player[]): string {
+  if (p.trait === 'utility') return 'utility';
+  if (p.trait === 'speedster') return 'legs';
+  if (p.trait === 'cannon') return 'arm';
   const s = statsOf(p);
   if (s.power >= 1.3) return 'bat';
   if (s.speed >= 1.25) return 'legs';
+  if (p.bats === 'S') return 'switch';
   const lefties = lineup.filter((x) => x.bats === 'L').length;
   const majority = lefties * 2 > lineup.length ? 'L' : 'R';
   return p.bats === majority ? 'utility' : 'platoon';
@@ -4587,8 +4790,8 @@ function benchPanel(): string {
       `<div class="benchrow${on ? ' picked' : ''}"${attr}>` +
       `<div class="benchname"><b>${on ? '▸ ' : ''}${p.name}</b>` +
       `<span class="dim">${tag}</span></div>` +
-      `<div class="dim">${p.bats}H · POW ${showScale(s.power)} · CON ${showScale(s.contact)}` +
-      ` · SPD ${showScale(s.speed)}</div></div>`
+      `<div class="dim">${p.pos ? `${p.pos} · ` : ''}${p.bats}H · POW ${showScale(s.power)} · CON ${showScale(s.contact)}` +
+      ` · SPD ${showScale(s.speed)}${p.trait ? ` · ${p.trait.toUpperCase()}` : ''}</div></div>`
     );
   };
 
@@ -4956,9 +5159,11 @@ function renderControls(): void {
       `${SHIFT_WORDS[sh]}</button>`,
   ).join('');
   const advice =
-    pull >= SHIFT_ON * 100
-      ? `<b>${up.name}</b> pulls — ${up.bats === 'L' ? 'shift right' : 'shift left'}`
-      : `<b>${up.name}</b> sprays it — play him honest`;
+    up.bats === 'S'
+      ? `<b>${up.name}</b> switches — adjusts to matchup`
+      : pull >= SHIFT_ON * 100
+        ? `<b>${up.name}</b> pulls — ${up.bats === 'L' ? 'shift right' : 'shift left'}`
+        : `<b>${up.name}</b> sprays it — play him honest`;
   const defPanel =
     `<div class="pen"><div class="dim penhead">DEFENCE <kbd>V</kbd></div>` +
     `<div class="keys">${shiftBtns}</div>` +
@@ -5560,9 +5765,9 @@ function lineupPanel(s: Season): string {
         '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + i + '" tabindex="0" style="cursor:pointer">' +
         '<span>' + (on ? '&#9656; moving' : String(i + 1)) + '</span>' +
         '<b>' + p.name + formTag(s, p.name) + '</b>' +
-        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(p.power) +
+        '<span class="dim">' + (p.pos ? p.pos + ' &middot; ' : '') + p.bats + 'H &middot; POW ' + showScale(p.power) +
         ' &middot; CON ' + showScale(p.contact) + ' &middot; VIS ' + showScale(p.vision) +
-        ' &middot; SPD ' + showScale(p.speed) + '</span>' +
+        ' &middot; SPD ' + showScale(p.speed) + (p.trait ? ' &middot; ' + p.trait.toUpperCase() : '') + '</span>' +
         '<span class="dim">' + so_far + '</span></div>'
       );
     })
@@ -5594,9 +5799,9 @@ function lineupPanel(s: Season): string {
         '<div class="penrow' + (on ? ' picked' : '') + '" data-lu="' + at + '" tabindex="0" style="cursor:pointer">' +
         '<span class="dim">' + (on ? '&#9656; moving' : benchRole(p, you.lineup)) + '</span>' +
         '<b>' + p.name + formTag(s, p.name) + '</b>' +
-        '<span class="dim">' + p.bats + 'H &middot; POW ' + showScale(bat.power) +
+        '<span class="dim">' + (p.pos ? p.pos + ' &middot; ' : '') + p.bats + 'H &middot; POW ' + showScale(bat.power) +
         ' &middot; CON ' + showScale(bat.contact) + ' &middot; VIS ' + showScale(bat.vision) +
-        ' &middot; SPD ' + showScale(bat.speed) + '</span>' +
+        ' &middot; SPD ' + showScale(bat.speed) + (p.trait ? ' &middot; ' + p.trait.toUpperCase() : '') + '</span>' +
         '<span class="dim">' + so_far + '</span></div>'
       );
     })
@@ -6697,12 +6902,10 @@ function showSettings(back: () => void): void {
     `<span class="dim" style="font-size:11px">${blurb}</span></button>`;
 
   function paint(): void {
-    const level = levelOf(settings.level);
     const cage = pitchSpeedOf(settings.pitchSpeed);
     el!.innerHTML =
       `<div class="wrap"><h1>BASEDBALL</h1><h2>SETTINGS</h2>` +
       `<div class="panel"><div class="dim penhead">KEPT BETWEEN GAMES</div>` +
-      row('g', 'HOW HARD IS THE SWING', level.name, level.blurb) +
       row('p', 'HOW FAST THE BALL COMES', cage.name, cage.blurb) +
       `</div>` +
       `<div class="panel"><div class="dim penhead">THIS SESSION ONLY</div>` +
@@ -7071,7 +7274,6 @@ function pregame(): void {
   const el = document.getElementById('start')!;
   const prompt = el.querySelector('h2')!;
   const grid = el.querySelector('.keys')!;
-  const levels = el.querySelector('.levels');
   const saved = loadSeason();
 
   let mode: 'exhibition' | 'franchise' | 'league' | null = null;
@@ -7791,25 +7993,6 @@ function pregame(): void {
       `<button data-ed-go="back"><b>BACK</b><br>drops every change</button></div>`;
   };
 
-  // ⚠️ THE DIFFICULTY SITS ON THE FIRST SCREEN, BEFORE THE MODE, because it is
-  // the only setting on it that decides whether the game is playable at all for
-  // the person reading — and pillar one is that it be reachable. It is drawn on
-  // the mode screen only: once you are picking clubs the question has been
-  // answered, and it stays answerable all game from the meta strip anyway.
-  const drawLevels = (): void => {
-    if (!levels) return;
-    levels.innerHTML = mode
-      ? ''
-      : dial(
-          'level',
-          'HOW HARD IS THE SWING',
-          LEVELS.map((l) => ({ name: l.name, blurb: l.blurb })),
-          Math.max(
-            0,
-            LEVELS.findIndex((l) => l.key === settings.level),
-          ),
-        );
-  };
 
   /**
    * A CLUB'S COLOUR, out of its three letters.
@@ -7875,7 +8058,6 @@ function pregame(): void {
   };
 
   const draw = (): void => {
-    drawLevels();
     if (!mode) {
       prompt.textContent = 'PICK A MODE';
       const resume =
@@ -7969,24 +8151,11 @@ function pregame(): void {
   };
 
   const start = (): void => {
+    stopMenuMusic();
     el.remove();
     nextGame();
   };
 
-  // ⚠️ THE DIFFICULTY DIAL LIVES IN ITS OWN CONTAINER, so its arrows never
-  // reach the grid's handler. It walks LEVELS rather than a Rules row, but by
-  // the same rule and with the same wrap — one implementation, called from the
-  // two places the two containers make necessary.
-  levels?.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest('button');
-    if (btn?.dataset['step'] !== 'level') return;
-    const by = Number(btn.dataset['by']);
-    const at = Math.max(0, LEVELS.findIndex((l) => l.key === settings.level));
-    const next = LEVELS[((at + by) % LEVELS.length + LEVELS.length) % LEVELS.length]!;
-    settings = { ...settings, level: next.key };
-    saveSettings(settings);
-    drawLevels();
-  });
 
   /**
    * TYPING IN THE EDITOR. Every control on that screen lands here.
@@ -8437,6 +8606,7 @@ function pregame(): void {
       return;
     }
     // Exhibition: you are the home club, so you bat last.
+    stopMenuMusic();
     el.remove();
     kickOff(mine, picked, 'home');
   });
@@ -8444,6 +8614,7 @@ function pregame(): void {
   // The title screen owns the whole keyboard while it is up. See installDpad.
   installDpad(el, { swallow: 'all' });
 
+  startMenuMusic();
   drawn();
 }
 

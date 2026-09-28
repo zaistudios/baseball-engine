@@ -13,6 +13,7 @@
  * assumptions throw below rather than silently shipping half a game.
  */
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { transformSync } from 'esbuild';
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
@@ -72,7 +73,13 @@ if (js.includes('</script>')) {
 // End of body: a classic script runs where it sits, and main.ts reads the DOM
 // at module scope. Vite puts its tag in <head>, where a module's implicit
 // defer saved it. Nothing defers this one, so it has to come after the markup.
-const stripped = html.replace(/\s*<script\b[^>]*\bsrc="[^"]*"[^>]*><\/script>/, '');
+let minHtml = html.replace(/<style>([\s\S]*?)<\/style>/, (_, css) => {
+  const min = transformSync(css, { loader: 'css', minify: true }).code.trim();
+  return `<style>${min}</style>`;
+});
+minHtml = minHtml.replace(/<!--[\s\S]*?-->/g, '');
+
+const stripped = minHtml.replace(/\s*<script\b[^>]*\bsrc="[^"]*"[^>]*><\/script>/, '');
 if (stripped === html) throw new Error('found no external <script> tag to inline');
 
 // Function replacement, so $& and friends inside the bundle stay literal.

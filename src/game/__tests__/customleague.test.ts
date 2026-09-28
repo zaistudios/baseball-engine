@@ -237,8 +237,17 @@ describe('the report', () => {
 
   it('names the club the problem is in', () => {
     const clubs = copy();
-    clubs[3]!.lineup[0]!.bats = 'S' as 'L';
+    clubs[3]!.lineup[0]!.bats = 'X' as 'L';
     expect(said(clubs)).toContain(clubs[3]!.abbr);
+  });
+
+  it('accepts switch hitters, primary positions, and traits', () => {
+    const clubs = copy();
+    clubs[0]!.lineup[0]!.bats = 'S';
+    clubs[0]!.lineup[0]!.pos = 'SS';
+    clubs[0]!.lineup[0]!.secondaryPos = ['2B', '3B'];
+    clubs[0]!.lineup[0]!.trait = 'cannon';
+    expect(problemsOf(clubs)).toEqual([]);
   });
 });
 

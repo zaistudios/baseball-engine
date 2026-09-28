@@ -144,3 +144,22 @@ describe('everyone has a hand', () => {
     }
   });
 });
+
+describe('switch hitters always hold the platoon advantage', () => {
+  it('takes the opposite side of any pitcher', () => {
+    for (const pitch of ALL_PITCH_TYPES) {
+      if (pitch === 'knuckleball') continue;
+      expect(platoonContact('S', 'L', pitch)).toBe(platoonContact('R', 'L', pitch));
+      expect(platoonContact('S', 'R', pitch)).toBe(platoonContact('L', 'R', pitch));
+      expect(platoonContact('S', 'L', pitch)).toBeGreaterThan(1);
+      expect(platoonContact('S', 'R', pitch)).toBeGreaterThan(1);
+    }
+  });
+
+  it('reaches swing resolution with the platoon advantage against righties and lefties', () => {
+    const vsRight = resolveSwing({ offsetMs: 30, pitchType: 'slider', batterHand: 'S', pitcherHand: 'R' }, makeRng(1));
+    const vsLeft = resolveSwing({ offsetMs: 30, pitchType: 'slider', batterHand: 'S', pitcherHand: 'L' }, makeRng(1));
+    expect(vsRight.platoon).toBe(platoonContact('L', 'R', 'slider'));
+    expect(vsLeft.platoon).toBe(platoonContact('R', 'L', 'slider'));
+  });
+});

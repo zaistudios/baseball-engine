@@ -55,6 +55,52 @@ import type { Uniform } from './look.ts';
 import { loadCustomLeague } from './league.ts';
 import { TALENT_SPREAD } from './tuning.ts';
 import { fillRoster } from './depth.ts';
+import type { Position } from '../core/roster.ts';
+import type { BatSide, Hand } from '../core/hit.ts';
+import type { Signature, TellTiming } from '../core/pitcher.ts';
+import type { PitchType } from '../core/hitTables.ts';
+
+
+// ------------------------------------------------------------- compact builders
+// Compact player & pitcher builders: eliminates ~45kB of repeated property keys
+const h = (
+  id: string,
+  name: string,
+  build: Player['build'],
+  trait: Player['trait'],
+  power: number,
+  contact: number,
+  vision: number,
+  clutch: number,
+  bunt: number,
+  speed: number,
+  bats: BatSide,
+  pos: Position,
+  bio: string,
+  secondaryPos?: readonly Position[],
+): Player => ({
+  id, name, build, trait, power, contact, vision, clutch, bunt, speed, bats, pos, bio,
+  ...(secondaryPos ? { secondaryPos } : {}),
+});
+
+const a = (
+  name: string,
+  throws: Hand,
+  signature: Signature,
+  tellTiming: TellTiming,
+  zoneRate: number,
+  blurb: string,
+  arsenal: Partial<Record<PitchType, number>>,
+  putaway: PitchType,
+  brk: number,
+  clutch: number,
+  stamina: number,
+  speedBonus?: number,
+): Pitcher => ({
+  name, throws, signature, tellTiming, zoneRate, blurb, arsenal, putaway, break: brk, clutch, stamina,
+  ...(speedBonus !== undefined ? { speedBonus } : {}),
+});
+
 
 // ------------------------------------------------------------- the hitters
 
@@ -69,24 +115,15 @@ import { fillRoster } from './depth.ts';
  * single you to death and steal the base they need.
  */
 const MNE: readonly Player[] = [
-  { id: 'mne1', name: 'Chowder Pelletier', build: 'human', trait: 'grit', power: 0.729, contact: 1.35, vision: 1.32, clutch: 1.269, bunt: 1.34, speed: 1.4, bats: 'L',
-    bio: 'Eats before every game and tells you about it during.' },
-  { id: 'mne2', name: 'Buoy Callahan', build: 'human', trait: 'reader', power: 0.835, contact: 1.3, vision: 1.27, clutch: 1.321, bunt: 1.07, speed: 1.2, bats: 'R',
-    bio: 'Bobs around out there all night. Has never once gone under.' },
-  { id: 'mne3', name: 'Claw Robichaud', build: 'machine', trait: 'slugger', power: 1.839, contact: 1.0, vision: 0.88, clutch: 1.269, bunt: 0.15, speed: 0.7, bats: 'R',
-    bio: 'Pincer grip rated for shellfish. Goes through two bats a week.' },
-  { id: 'mne4', name: 'Hardshell Ouellette', build: 'machine', trait: 'slugger', power: 1.734, contact: 0.85, vision: 0.81, clutch: 1.216, bunt: 0.2, speed: 0.6, bats: 'R',
-    bio: 'Nothing gets through him. Nothing gets out of him either.' },
-  { id: 'mne5', name: 'Bib Thibodeau', build: 'human', trait: 'showman', power: 1.152, contact: 1.2, vision: 1.05, clutch: 1.427, bunt: 0.81, speed: 1.0, bats: 'L',
-    bio: 'Tucks a napkin into his jersey for big at-bats. It works, so nobody brings it up.' },
-  { id: 'mne6', name: 'Steamer Doucette', build: 'augmented', trait: 'precision', power: 1.152, contact: 1.1, vision: 1.12, clutch: 1.11, bunt: 0.85, speed: 1.05, bats: 'L',
-    bio: 'Runs hot. Vents between innings and apologises for the smell.' },
-  { id: 'mne7', name: 'Trap Levesque', build: 'human', trait: 'reader', power: 0.941, contact: 1.25, vision: 1.26, clutch: 1.216, bunt: 0.95, speed: 0.95, bats: 'R',
-    bio: 'Sets it early, waits all night, hauls it in full.' },
-  { id: 'mne8', name: 'Knuckles Pomerleau', build: 'human', trait: 'grit', power: 0.888, contact: 1.2, vision: 1.19, clutch: 1.374, bunt: 1.06, speed: 0.85, bats: 'R',
-    bio: 'Broke both hands twice. Hits .300 in a mitten, which he has had to prove.' },
-  { id: 'mne9', name: 'Butter Gagnon', build: 'augmented', trait: 'showman', power: 1.417, contact: 1.0, vision: 1.01, clutch: 1.427, bunt: 0.71, speed: 0.9, bats: 'L',
-    bio: 'Everything goes down easier with him up.' },
+  h("mne1", "Chowder Pelletier", "human", "grit", 0.729, 1.35, 1.32, 1.269, 1.34, 1.4, "S", "LF", "Eats before every game and tells you about it during."),
+  h("mne2", "Buoy Callahan", "human", "reader", 0.835, 1.3, 1.27, 1.321, 1.07, 1.2, "S", "CF", "Bobs around out there all night. Has never once gone under."),
+  h("mne3", "Claw Robichaud", "machine", "slugger", 1.839, 1, 0.88, 1.269, 0.15, 0.7, "R", "RF", "Pincer grip rated for shellfish. Goes through two bats a week."),
+  h("mne4", "Hardshell Ouellette", "machine", "slugger", 1.734, 0.85, 0.81, 1.216, 0.2, 0.6, "R", "1B", "Nothing gets through him. Nothing gets out of him either."),
+  h("mne5", "Bib Thibodeau", "human", "utility", 1.152, 1.2, 1.05, 1.427, 0.81, 1, "L", "3B", "Tucks a napkin into his jersey for big at-bats. It works, so nobody brings it up.", ["2B","SS"]),
+  h("mne6", "Steamer Doucette", "augmented", "utility", 1.152, 1.1, 1.12, 1.11, 0.85, 1.05, "L", "2B", "Runs hot. Vents between innings and apologises for the smell.", ["3B","SS"]),
+  h("mne7", "Trap Levesque", "human", "cannon", 0.941, 1.25, 1.26, 1.216, 0.95, 0.95, "R", "C", "Sets it early, waits all night, hauls it in full."),
+  h("mne8", "Knuckles Pomerleau", "human", "grit", 0.888, 1.2, 1.19, 1.374, 1.06, 0.85, "R", "SS", "Broke both hands twice. Hits .300 in a mitten, which he has had to prove."),
+  h("mne9", "Butter Gagnon", "augmented", "showman", 1.417, 1, 1.01, 1.427, 0.71, 0.9, "L", "DH", "Everything goes down easier with him up."),
 ];
 
 /**
@@ -94,24 +131,15 @@ const MNE: readonly Player[] = [
  * league, and the one that most enjoys being watched.
  */
 const NYE: readonly Player[] = [
-  { id: 'nye1', name: 'Sonny Vitale', build: 'human', trait: 'showman', power: 1.049, contact: 1.45, vision: 1.14, clutch: 1.231, bunt: 0.94, speed: 1.2, bats: 'L',
-    bio: 'Signs autographs from the on-deck circle. Has never declined a curtain call.' },
-  { id: 'nye2', name: 'Duke Ferraro', build: 'augmented', trait: 'reader', power: 1.097, contact: 1.4, vision: 1.28, clutch: 1.182, bunt: 1.03, speed: 1.15, bats: 'R',
-    bio: 'Reads the pitcher, the catcher, and the room.' },
-  { id: 'nye3', name: 'Cash Delacroix', build: 'machine', trait: 'slugger', power: 1.725, contact: 1.1, vision: 0.89, clutch: 1.134, bunt: 0.21, speed: 0.75, bats: 'R',
-    bio: 'Paid by the foot. Collects.' },
-  { id: 'nye4', name: 'Broadway Lombardi', build: 'human', trait: 'slugger', power: 1.58, contact: 1.15, vision: 1, clutch: 1.182, bunt: 0.28, speed: 0.8, bats: 'L',
-    bio: 'Two hits and a standing ovation, or an 0-for-4 and a statement to the press.' },
-  { id: 'nye5', name: 'Vinny Two-Strikes', build: 'human', trait: 'grit', power: 0.953, contact: 1.35, vision: 1.23, clutch: 1.375, bunt: 1.24, speed: 0.95, bats: 'R',
-    bio: 'Will not swing until he has to. Nobody has explained why it keeps working.' },
-  { id: 'nye6', name: 'Marquee Malone', build: 'augmented', trait: 'precision', power: 1.242, contact: 1.25, vision: 1.09, clutch: 1.134, bunt: 0.75, speed: 1.0, bats: 'L',
-    bio: 'Name in lights, swing on rails.' },
-  { id: 'nye7', name: 'The Comptroller', build: 'machine', trait: 'precision', power: 1.291, contact: 1.2, vision: 1.07, clutch: 1.037, bunt: 0.71, speed: 0.9, bats: 'R',
-    bio: 'Files a written report on every at-bat. Will read it to you.' },
-  { id: 'nye8', name: 'Turnstile Ng', build: 'human', trait: 'grit', power: 0.904, contact: 1.3, vision: 1.24, clutch: 1.182, bunt: 1.25, speed: 1.1, bats: 'R',
-    bio: 'In and out all night. You barely see him do it.' },
-  { id: 'nye9', name: 'Penthouse Pinsky', build: 'augmented', trait: 'slugger', power: 1.629, contact: 1, vision: 0.91, clutch: 1.086, bunt: 0.34, speed: 0.8, bats: 'R',
-    bio: 'Only interested in the top floor.' },
+  h("nye1", "Sonny Vitale", "human", "showman", 1.049, 1.45, 1.14, 1.231, 0.94, 1.2, "L", "LF", "Signs autographs from the on-deck circle. Has never declined a curtain call."),
+  h("nye2", "Duke Ferraro", "augmented", "reader", 1.097, 1.4, 1.28, 1.182, 1.03, 1.15, "R", "3B", "Reads the pitcher, the catcher, and the room."),
+  h("nye3", "Cash Delacroix", "machine", "slugger", 1.725, 1.1, 0.89, 1.134, 0.21, 0.75, "R", "1B", "Paid by the foot. Collects."),
+  h("nye4", "Broadway Lombardi", "human", "slugger", 1.58, 1.15, 1, 1.182, 0.28, 0.8, "L", "DH", "Two hits and a standing ovation, or an 0-for-4 and a statement to the press."),
+  h("nye5", "Vinny Two-Strikes", "human", "ironman", 0.953, 1.35, 1.23, 1.375, 1.24, 0.95, "R", "RF", "Will not swing until he has to. Nobody has explained why it keeps working."),
+  h("nye6", "Marquee Malone", "augmented", "precision", 1.242, 1.25, 1.09, 1.134, 0.75, 1, "L", "2B", "Name in lights, swing on rails."),
+  h("nye7", "The Comptroller", "machine", "precision", 1.291, 1.2, 1.07, 1.037, 0.71, 0.9, "R", "C", "Files a written report on every at-bat. Will read it to you."),
+  h("nye8", "Turnstile Ng", "human", "grit", 0.904, 1.3, 1.24, 1.182, 1.25, 1.1, "R", "CF", "In and out all night. You barely see him do it."),
+  h("nye9", "Penthouse Pinsky", "augmented", "slugger", 1.629, 1, 0.91, 1.086, 0.34, 0.8, "R", "SS", "Only interested in the top floor."),
 ];
 
 /**
@@ -120,24 +148,15 @@ const NYE: readonly Player[] = [
  * enjoyed a close game.
  */
 const DET: readonly Player[] = [
-  { id: 'det1', name: 'Rustbelt Rhonda', build: 'machine', trait: 'grit', power: 0.828, contact: 1.25, vision: 1.18, clutch: 0.966, bunt: 1.05, speed: 0.85, bats: 'L',
-    bio: 'Forty years on the line. Oxidised, recertified, still here.' },
-  { id: 'det2', name: 'Coney Dog Kovacs', build: 'machine', trait: 'grit', power: 0.874, contact: 1.2, vision: 1.23, clutch: 1.012, bunt: 1.08, speed: 0.95, bats: 'R',
-    bio: 'Built for the concession stand. Reassigned after an incident with the chili.' },
-  { id: 'det3', name: 'CRANKSHAFT', build: 'machine', trait: 'slugger', power: 1.38, contact: 0.95, vision: 0.84, clutch: 0.92, bunt: 0.15, speed: 0.6, bats: 'R',
-    bio: 'Converts everything to rotation. Has no other setting.' },
-  { id: 'det4', name: 'Boxcar', build: 'machine', trait: 'slugger', power: 1.426, contact: 0.85, vision: 0.88, clutch: 0.92, bunt: 0.18, speed: 0.55, bats: 'R',
-    bio: 'Freight-loading chassis with a bat bolted on. Two speeds: nothing, and the parking lot.' },
-  { id: 'det5', name: 'FORGE-9 "Doris"', build: 'machine', trait: 'slugger', power: 1.38, contact: 0.85, vision: 0.86, clutch: 0.828, bunt: 0.25, speed: 0.65, bats: 'R',
-    bio: 'Pours at two thousand degrees. Has been asked not to celebrate indoors.' },
-  { id: 'det6', name: 'CRANE-4', build: 'machine', trait: 'slugger', power: 1.288, contact: 0.9, vision: 0.84, clutch: 0.874, bunt: 0.22, speed: 0.6, bats: 'R',
-    bio: 'Lifts the ball because lifting is the only verb it has.' },
-  { id: 'det7', name: 'PISTON-8 "Petey"', build: 'machine', trait: 'precision', power: 1.058, contact: 1.1, vision: 1.12, clutch: 0.874, bunt: 0.66, speed: 0.8, bats: 'R',
-    bio: 'Up, down, up, down. Two hundred games a year, the same swing every time.' },
-  { id: 'det8', name: 'UNIT 313', build: 'machine', trait: 'reader', power: 1.012, contact: 1.1, vision: 1.14, clutch: 0.92, bunt: 0.87, speed: 0.85, bats: 'R',
-    bio: 'Knows what is coming. Has never once told a teammate.' },
-  { id: 'det9', name: 'Assembly Ann', build: 'machine', trait: 'precision', power: 0.92, contact: 1.2, vision: 1.11, clutch: 0.966, bunt: 0.67, speed: 0.9, bats: 'L',
-    bio: 'Same swing, ninety times an hour, for as long as you keep the line moving.' },
+  h("det1", "Rustbelt Rhonda", "machine", "grit", 0.828, 1.25, 1.18, 0.966, 1.05, 0.85, "L", "LF", "Forty years on the line. Oxidised, recertified, still here."),
+  h("det2", "Coney Dog Kovacs", "machine", "grit", 0.874, 1.2, 1.23, 1.012, 1.08, 0.95, "R", "3B", "Built for the concession stand. Reassigned after an incident with the chili."),
+  h("det3", "CRANKSHAFT", "machine", "slugger", 1.38, 0.95, 0.84, 0.92, 0.15, 0.6, "R", "1B", "Converts everything to rotation. Has no other setting."),
+  h("det4", "Boxcar", "machine", "slugger", 1.426, 0.85, 0.88, 0.92, 0.18, 0.55, "R", "DH", "Freight-loading chassis with a bat bolted on. Two speeds: nothing, and the parking lot."),
+  h("det5", "FORGE-9 \"Doris\"", "machine", "ironman", 1.38, 0.85, 0.86, 0.828, 0.25, 0.65, "R", "RF", "Pours at two thousand degrees. Has been asked not to celebrate indoors."),
+  h("det6", "CRANE-4", "machine", "slugger", 1.288, 0.9, 0.84, 0.874, 0.22, 0.6, "R", "2B", "Lifts the ball because lifting is the only verb it has."),
+  h("det7", "PISTON-8 \"Petey\"", "machine", "precision", 1.058, 1.1, 1.12, 0.874, 0.66, 0.8, "R", "C", "Up, down, up, down. Two hundred games a year, the same swing every time."),
+  h("det8", "UNIT 313", "machine", "reader", 1.012, 1.1, 1.14, 0.92, 0.87, 0.85, "R", "CF", "Knows what is coming. Has never once told a teammate."),
+  h("det9", "Assembly Ann", "machine", "precision", 0.92, 1.2, 1.11, 0.966, 0.67, 0.9, "L", "SS", "Same swing, ninety times an hour, for as long as you keep the line moving."),
 ];
 
 /**
@@ -152,24 +171,15 @@ const DET: readonly Player[] = [
  * will remember it.
  */
 const LAC: readonly Player[] = [
-  { id: 'lac1', name: 'Sunset Delgado', build: 'human', trait: 'showman', power: 0.801, contact: 1.3, vision: 1.13, clutch: 0.939, bunt: 1.12, speed: 1.35, bats: 'L',
-    bio: 'Plays the whole game like it is being filmed, which it usually is.' },
-  { id: 'lac2', name: 'Freeway Fujimoto', build: 'augmented', trait: 'reader', power: 0.85, contact: 1.25, vision: 1.22, clutch: 0.89, bunt: 1.09, speed: 1.3, bats: 'R',
-    bio: 'Merges without looking. Has never been thrown out doing it.' },
-  { id: 'lac3', name: 'Nova Trujillo', build: 'machine', trait: 'slugger', power: 1.69, contact: 0.9, vision: 0.84, clutch: 0.939, bunt: 0.2, speed: 0.8, bats: 'R',
-    bio: 'Brief, extremely bright, gone.' },
-  { id: 'lac4', name: 'Chad Aurelius', build: 'augmented', trait: 'slugger', power: 1.542, contact: 0.95, vision: 0.86, clutch: 0.84, bunt: 0.32, speed: 0.95, bats: 'R',
-    bio: 'Upgraded everything except the part that handles pressure.' },
-  { id: 'lac5', name: 'Zip Kanaloa', build: 'human', trait: 'grit', power: 0.652, contact: 1.25, vision: 1.24, clutch: 0.989, bunt: 1.36, speed: 1.3, bats: 'L',
-    bio: 'Beats out the throw, then asks the first baseman about his weekend.' },
-  { id: 'lac6', name: 'Stunt Double Silva', build: 'machine', trait: 'precision', power: 1.196, contact: 1.05, vision: 1.13, clutch: 0.89, bunt: 0.74, speed: 1.0, bats: 'L',
-    bio: 'Takes the hit-by-pitch nobody else wants. Union scale, plus the bruise.' },
-  { id: 'lac7', name: 'Valet Vasquez', build: 'human', trait: 'reader', power: 0.751, contact: 1.15, vision: 1.27, clutch: 1.038, bunt: 1.17, speed: 1.1, bats: 'R',
-    bio: 'Brings it around fast and leaves it running.' },
-  { id: 'lac8', name: 'Tanner Beachwood', build: 'human', trait: 'showman', power: 1.147, contact: 1.0, vision: 0.99, clutch: 1.087, bunt: 0.9, speed: 1.0, bats: 'R',
-    bio: 'Third generation. Insists he earned it, and honestly might have.' },
-  { id: 'lac9', name: 'Meteor Mendez', build: 'augmented', trait: 'slugger', power: 1.493, contact: 0.85, vision: 0.86, clutch: 0.89, bunt: 0.4, speed: 1.0, bats: 'L',
-    bio: 'Arrives without warning. Leaves a mark either way.' },
+  h("lac1", "Sunset Delgado", "human", "speedster", 0.801, 1.3, 1.13, 0.939, 1.12, 1.35, "S", "CF", "Plays the whole game like it is being filmed, which it usually is."),
+  h("lac2", "Freeway Fujimoto", "augmented", "speedster", 0.85, 1.25, 1.22, 0.89, 1.09, 1.3, "S", "SS", "Merges without looking. Has never been thrown out doing it."),
+  h("lac3", "Nova Trujillo", "machine", "slugger", 1.69, 0.9, 0.84, 0.939, 0.2, 0.8, "R", "2B", "Brief, extremely bright, gone."),
+  h("lac4", "Chad Aurelius", "augmented", "slugger", 1.542, 0.95, 0.86, 0.84, 0.32, 0.95, "R", "RF", "Upgraded everything except the part that handles pressure."),
+  h("lac5", "Zip Kanaloa", "human", "grit", 0.652, 1.25, 1.24, 0.989, 1.36, 1.3, "L", "3B", "Beats out the throw, then asks the first baseman about his weekend."),
+  h("lac6", "Stunt Double Silva", "machine", "precision", 1.196, 1.05, 1.13, 0.89, 0.74, 1, "L", "LF", "Takes the hit-by-pitch nobody else wants. Union scale, plus the bruise."),
+  h("lac7", "Valet Vasquez", "human", "reader", 0.751, 1.15, 1.27, 1.038, 1.17, 1.1, "R", "1B", "Brings it around fast and leaves it running."),
+  h("lac8", "Tanner Beachwood", "human", "showman", 1.147, 1, 0.99, 1.087, 0.9, 1, "R", "C", "Third generation. Insists he earned it, and honestly might have."),
+  h("lac9", "Meteor Mendez", "augmented", "slugger", 1.493, 0.85, 0.86, 0.89, 0.4, 1, "L", "DH", "Arrives without warning. Leaves a mark either way."),
 ];
 
 /**
@@ -177,24 +187,15 @@ const LAC: readonly Player[] = [
  * outs. They foul off eleven pitches and then beat you with a single.
  */
 const NEM: readonly Player[] = [
-  { id: 'nem1', name: 'Bunt Sheehan', build: 'human', trait: 'grit', power: 0.668, contact: 1.35, vision: 1.23, clutch: 1.163, bunt: 1.34, speed: 1.25, bats: 'L',
-    bio: 'Named for the thing he does. Does it anyway, every time, and it works.' },
-  { id: 'nem2', name: 'Dunkin Muldoon', build: 'human', trait: 'grit', power: 0.87, contact: 1.3, vision: 1.24, clutch: 1.214, bunt: 1.3, speed: 1.15, bats: 'R',
-    bio: 'Large regular between innings. Has been asked to stop and has not.' },
-  { id: 'nem3', name: "Nor'easter Nolan", build: 'human', trait: 'slugger', power: 1.628, contact: 0.95, vision: 0.9, clutch: 1.264, bunt: 0.29, speed: 0.75, bats: 'R',
-    bio: 'Quiet for six innings. Then the whole thing arrives at once.' },
-  { id: 'nem4', name: 'BUNKER HILL-6 "Sully"', build: 'machine', trait: 'slugger', power: 1.628, contact: 0.9, vision: 0.82, clutch: 1.163, bunt: 0.19, speed: 0.7, bats: 'R',
-    bio: 'Built as a monument. Repurposed when the monument budget was cut.' },
-  { id: 'nem5', name: 'Flats Kelleher', build: 'human', trait: 'showman', power: 1.123, contact: 1.1, vision: 1.02, clutch: 1.264, bunt: 0.77, speed: 0.9, bats: 'L',
-    bio: 'Digs in like the tide is coming and he has one more bucket to fill.' },
-  { id: 'nem6', name: "Rotary O'Doul", build: 'human', trait: 'reader', power: 0.971, contact: 1.2, vision: 1.23, clutch: 1.113, bunt: 0.99, speed: 0.95, bats: 'R',
-    bio: 'Enters without yielding. Somehow it always works out.' },
-  { id: 'nem7', name: 'Third-Shift Dziedzic', build: 'augmented', trait: 'precision', power: 1.224, contact: 1.05, vision: 1.13, clutch: 1.011, bunt: 0.72, speed: 0.95, bats: 'L',
-    bio: 'Better after midnight, which in a night game is most of it.' },
-  { id: 'nem8', name: 'Wicked Fahey', build: 'human', trait: 'grit', power: 0.92, contact: 1.15, vision: 1.2, clutch: 1.315, bunt: 1.16, speed: 0.9, bats: 'R',
-    bio: 'The adverb is the whole scouting report.' },
-  { id: 'nem9', name: 'Musket Brolin', build: 'augmented', trait: 'slugger', power: 1.527, contact: 0.9, vision: 0.85, clutch: 1.011, bunt: 0.29, speed: 0.85, bats: 'R',
-    bio: 'One shot, long reload, and you hear about it for a week.' },
+  h("nem1", "Bunt Sheehan", "human", "reader", 0.668, 1.35, 1.23, 1.163, 1.34, 1.25, "L", "CF", "Named for the thing he does. Does it anyway, every time, and it works."),
+  h("nem2", "Dunkin Muldoon", "human", "reader", 0.87, 1.3, 1.24, 1.214, 1.3, 1.15, "R", "2B", "Large regular between innings. Has been asked to stop and has not."),
+  h("nem3", "Nor'easter Nolan", "human", "slugger", 1.628, 0.95, 0.9, 1.264, 0.29, 0.75, "R", "3B", "Quiet for six innings. Then the whole thing arrives at once."),
+  h("nem4", "BUNKER HILL-6 \"Sully\"", "machine", "ironman", 1.628, 0.9, 0.82, 1.163, 0.19, 0.7, "R", "1B", "Built as a monument. Repurposed when the monument budget was cut."),
+  h("nem5", "Flats Kelleher", "human", "grit", 1.123, 1.1, 1.02, 1.264, 0.77, 0.9, "L", "LF", "Digs in like the tide is coming and he has one more bucket to fill."),
+  h("nem6", "Rotary O'Doul", "human", "reader", 0.971, 1.2, 1.23, 1.113, 0.99, 0.95, "R", "RF", "Enters without yielding. Somehow it always works out."),
+  h("nem7", "Third-Shift Dziedzic", "augmented", "grit", 1.224, 1.05, 1.13, 1.011, 0.72, 0.95, "L", "C", "Better after midnight, which in a night game is most of it."),
+  h("nem8", "Wicked Fahey", "human", "grit", 0.92, 1.15, 1.2, 1.315, 1.16, 0.9, "R", "SS", "The adverb is the whole scouting report."),
+  h("nem9", "Musket Brolin", "augmented", "slugger", 1.527, 0.9, 0.85, 1.011, 0.29, 0.85, "R", "DH", "One shot, long reload, and you hear about it for a week."),
 ];
 
 /**
@@ -202,24 +203,15 @@ const NEM: readonly Player[] = [
  * will say by whom. Fast, strange, and up for anything.
  */
 const FLA: readonly Player[] = [
-  { id: 'fla1', name: 'Early Bird Klimczak', build: 'augmented', trait: 'grit', power: 0.889, contact: 1.35, vision: 1.27, clutch: 1.138, bunt: 1.32, speed: 1.2, bats: 'L',
-    bio: 'First to the park, first to the buffet, first out of the parking lot.' },
-  { id: 'fla2', name: 'Humidity Hodges', build: 'augmented', trait: 'reader', power: 1.096, contact: 1.25, vision: 1.24, clutch: 1.086, bunt: 0.96, speed: 1.1, bats: 'R',
-    bio: 'Wears you down by the fourth. Nobody can prove he is doing it on purpose.' },
-  { id: 'fla3', name: 'Airboat Boudreaux', build: 'augmented', trait: 'slugger', power: 1.562, contact: 0.85, vision: 0.86, clutch: 1.086, bunt: 0.34, speed: 1.0, bats: 'R',
-    bio: 'Loud, flat out, and impossible to sneak up on.' },
-  { id: 'fla4', name: 'Snowbird Vasseur', build: 'augmented', trait: 'slugger', power: 1.51, contact: 0.9, vision: 0.79, clutch: 1.034, bunt: 0.34, speed: 0.95, bats: 'L',
-    bio: 'Here from November to April. Nobody has asked where he goes.' },
-  { id: 'fla5', name: 'Gator Bait Bellamy', build: 'augmented', trait: 'showman', power: 1.303, contact: 1.2, vision: 1.08, clutch: 1.138, bunt: 0.85, speed: 1.05, bats: 'R',
-    bio: 'Dives into every bag headfirst. Has been warned about the canal.' },
-  { id: 'fla6', name: 'Nadia Frost', build: 'augmented', trait: 'precision', power: 1.251, contact: 1.1, vision: 1.08, clutch: 0.983, bunt: 0.84, speed: 0.9, bats: 'R',
-    bio: 'Calibrated wrists, unmodified nerve. Insists the second half is what counts.' },
-  { id: 'fla7', name: 'Sinkhole Sorrentino', build: 'augmented', trait: 'grit', power: 0.993, contact: 1.2, vision: 1.25, clutch: 1.189, bunt: 1.22, speed: 1.1, bats: 'R',
-    bio: 'Everything around him goes under eventually. He is always fine.' },
-  { id: 'fla8', name: 'Cousin Wade Pritchett', build: 'augmented', trait: 'reader', power: 1.148, contact: 1.15, vision: 1.28, clutch: 1.034, bunt: 0.91, speed: 1.05, bats: 'L',
-    bio: 'Somebody on every club claims to be related to him. Nobody has checked.' },
-  { id: 'fla9', name: 'Sunblock Ramirez', build: 'augmented', trait: 'showman', power: 1.045, contact: 1.1, vision: 1.07, clutch: 1.086, bunt: 1.02, speed: 1.15, bats: 'R',
-    bio: 'Reapplies between innings. Has outlasted four managers doing it.' },
+  h("fla1", "Early Bird Klimczak", "augmented", "speedster", 0.889, 1.35, 1.27, 1.138, 1.32, 1.2, "S", "CF", "First to the park, first to the buffet, first out of the parking lot."),
+  h("fla2", "Humidity Hodges", "augmented", "speedster", 1.096, 1.25, 1.24, 1.086, 0.96, 1.1, "S", "SS", "Wears you down by the fourth. Nobody can prove he is doing it on purpose."),
+  h("fla3", "Airboat Boudreaux", "augmented", "slugger", 1.562, 0.85, 0.86, 1.086, 0.34, 1, "R", "2B", "Loud, flat out, and impossible to sneak up on."),
+  h("fla4", "Snowbird Vasseur", "augmented", "slugger", 1.51, 0.9, 0.79, 1.034, 0.34, 0.95, "L", "RF", "Here from November to April. Nobody has asked where he goes."),
+  h("fla5", "Gator Bait Bellamy", "augmented", "showman", 1.303, 1.2, 1.08, 1.138, 0.85, 1.05, "R", "3B", "Dives into every bag headfirst. Has been warned about the canal."),
+  h("fla6", "Nadia Frost", "augmented", "precision", 1.251, 1.1, 1.08, 0.983, 0.84, 0.9, "R", "LF", "Calibrated wrists, unmodified nerve. Insists the second half is what counts."),
+  h("fla7", "Sinkhole Sorrentino", "augmented", "grit", 0.993, 1.2, 1.25, 1.189, 1.22, 1.1, "R", "1B", "Everything around him goes under eventually. He is always fine."),
+  h("fla8", "Cousin Wade Pritchett", "augmented", "reader", 1.148, 1.15, 1.28, 1.034, 0.91, 1.05, "L", "C", "Somebody on every club claims to be related to him. Nobody has checked."),
+  h("fla9", "Sunblock Ramirez", "augmented", "showman", 1.045, 1.1, 1.07, 1.086, 1.02, 1.15, "R", "DH", "Reapplies between innings. Has outlasted four managers doing it."),
 ];
 
 /**
@@ -227,24 +219,15 @@ const FLA: readonly Player[] = [
  * it. When they connect it leaves the county. Late and close, they are done.
  */
 const TEX: readonly Player[] = [
-  { id: 'tex1', name: 'Panhandle Pruitt', build: 'human', trait: 'grit', power: 0.783, contact: 1.35, vision: 1.25, clutch: 0.849, bunt: 1.21, speed: 1.2, bats: 'L',
-    bio: 'Flat, dry and goes on forever. Wears an arm out by the third time through.' },
-  { id: 'tex2', name: 'Barbed Wire Barrera', build: 'human', trait: 'reader', power: 0.877, contact: 1.3, vision: 1.32, clutch: 0.896, bunt: 1.08, speed: 1.1, bats: 'R',
-    bio: 'Crowds the plate. You may have the inside corner if you can pay for it.' },
-  { id: 'tex3', name: 'Two-Ton Tolliver', build: 'machine', trait: 'slugger', power: 1.537, contact: 0.85, vision: 0.8, clutch: 0.849, bunt: 0.18, speed: 0.6, bats: 'R',
-    bio: 'Weighed at the gate. Charged as freight.' },
-  { id: 'tex4', name: 'Gusher Gonzalez', build: 'human', trait: 'slugger', power: 1.443, contact: 0.95, vision: 0.9, clutch: 0.943, bunt: 0.25, speed: 0.85, bats: 'L',
-    bio: 'Nothing for a month, then everything at once and all over the outfield.' },
-  { id: 'tex5', name: 'Derrick Boone', build: 'human', trait: 'slugger', power: 1.348, contact: 1, vision: 0.94, clutch: 0.849, bunt: 0.4, speed: 0.85, bats: 'R',
-    bio: 'Same swing every time, straight down. Sooner or later it hits something.' },
-  { id: 'tex6', name: 'Crude Hensley', build: 'machine', trait: 'precision', power: 1.207, contact: 1.05, vision: 1.11, clutch: 0.801, bunt: 0.68, speed: 0.8, bats: 'R',
-    bio: 'Unrefined, and the club has decided that is a style.' },
-  { id: 'tex7', name: 'Brisket Mahoney', build: 'augmented', trait: 'showman', power: 1.065, contact: 1.1, vision: 1.05, clutch: 0.99, bunt: 0.78, speed: 0.9, bats: 'L',
-    bio: 'Fourteen hours, low and slow, worth the wait. Talks the same way.' },
-  { id: 'tex8', name: 'Roughneck Ruttledge', build: 'augmented', trait: 'slugger', power: 1.301, contact: 0.9, vision: 0.83, clutch: 0.849, bunt: 0.33, speed: 0.9, bats: 'R',
-    bio: 'Came up off a rig and swings like the shift is ending.' },
-  { id: 'tex9', name: 'Wildcat Yarborough', build: 'human', trait: 'grit', power: 0.83, contact: 1.2, vision: 1.21, clutch: 1.037, bunt: 1.24, speed: 1.0, bats: 'R',
-    bio: 'Drills where nobody said there was anything. Hits often enough to keep drilling.' },
+  h("tex1", "Panhandle Pruitt", "human", "grit", 0.783, 1.35, 1.25, 0.849, 1.21, 1.2, "L", "RF", "Flat, dry and goes on forever. Wears an arm out by the third time through."),
+  h("tex2", "Barbed Wire Barrera", "human", "reader", 0.877, 1.3, 1.32, 0.896, 1.08, 1.1, "R", "LF", "Crowds the plate. You may have the inside corner if you can pay for it."),
+  h("tex3", "Two-Ton Tolliver", "machine", "showman", 1.537, 0.85, 0.8, 0.849, 0.18, 0.6, "R", "3B", "Weighed at the gate. Charged as freight."),
+  h("tex4", "Gusher Gonzalez", "human", "slugger", 1.443, 0.95, 0.9, 0.943, 0.25, 0.85, "L", "1B", "Nothing for a month, then everything at once and all over the outfield."),
+  h("tex5", "Derrick Boone", "human", "showman", 1.348, 1, 0.94, 0.849, 0.4, 0.85, "R", "DH", "Same swing every time, straight down. Sooner or later it hits something."),
+  h("tex6", "Crude Hensley", "machine", "precision", 1.207, 1.05, 1.11, 0.801, 0.68, 0.8, "R", "CF", "Unrefined, and the club has decided that is a style."),
+  h("tex7", "Brisket Mahoney", "augmented", "showman", 1.065, 1.1, 1.05, 0.99, 0.78, 0.9, "L", "2B", "Fourteen hours, low and slow, worth the wait. Talks the same way."),
+  h("tex8", "Roughneck Ruttledge", "augmented", "slugger", 1.301, 0.9, 0.83, 0.849, 0.33, 0.9, "R", "C", "Came up off a rig and swings like the shift is ending."),
+  h("tex9", "Wildcat Yarborough", "human", "grit", 0.83, 1.2, 1.21, 1.037, 1.24, 1, "R", "SS", "Drills where nobody said there was anything. Hits often enough to keep drilling."),
 ];
 
 /**
@@ -252,24 +235,15 @@ const TEX: readonly Player[] = [
  * anywhere in the order and the best late innings in the league.
  */
 const ALB: readonly Player[] = [
-  { id: 'alb1', name: 'Nipper Krause', build: 'human', trait: 'reader', power: 0.832, contact: 1.3, vision: 1.32, clutch: 1.404, bunt: 1.11, speed: 1.15, bats: 'R',
-    bio: 'Stands at the plate with his head tipped, listening for something.' },
-  { id: 'alb2', name: 'Pothole Petrosky', build: 'human', trait: 'grit', power: 0.886, contact: 1.25, vision: 1.18, clutch: 1.35, bunt: 1.23, speed: 1.1, bats: 'L',
-    bio: 'Been there for years. Everyone has agreed to steer around him.' },
-  { id: 'alb3', name: 'Preacher Vandenburg', build: 'human', trait: 'slugger', power: 1.534, contact: 0.95, vision: 0.85, clutch: 1.458, bunt: 0.28, speed: 0.75, bats: 'R',
-    bio: 'Calls his shots in the third person and has yet to apologise for it.' },
-  { id: 'alb4', name: 'Sal "The Mayor" Bevilacqua', build: 'human', trait: 'showman', power: 1.426, contact: 1.05, vision: 0.97, clutch: 1.566, bunt: 0.82, speed: 0.8, bats: 'R',
-    bio: 'Knows everyone in the park by name and expects the same in return.' },
-  { id: 'alb5', name: 'Early Kirkwood', build: 'human', trait: 'grit', power: 0.94, contact: 1.25, vision: 1.19, clutch: 1.404, bunt: 1.21, speed: 1.05, bats: 'L',
-    bio: 'Fouls off everything until the pitcher runs out of ideas. Has never been described as exciting.' },
-  { id: 'alb6', name: 'Tugboat Prendergast', build: 'human', trait: 'slugger', power: 1.48, contact: 0.95, vision: 0.87, clutch: 1.35, bunt: 0.33, speed: 0.7, bats: 'R',
-    bio: 'Slow, low in the water, and moves things far heavier than himself.' },
-  { id: 'alb7', name: 'Bea "Two Bags" Slocum', build: 'human', trait: 'reader', power: 0.994, contact: 1.25, vision: 1.29, clutch: 1.296, bunt: 1.06, speed: 1.15, bats: 'L',
-    bio: 'Never stops at first. Has been out at second more than anyone alive.' },
-  { id: 'alb8', name: 'Cropsey Dunham', build: 'human', trait: 'grit', power: 0.886, contact: 1.2, vision: 1.17, clutch: 1.35, bunt: 1.1, speed: 0.95, bats: 'R',
-    bio: 'The visiting clubs tell stories about him. He does nothing to correct them.' },
-  { id: 'alb9', name: 'Uncle Milt Gorczyca', build: 'human', trait: 'precision', power: 1.048, contact: 1.15, vision: 1.15, clutch: 1.242, bunt: 0.79, speed: 0.85, bats: 'R',
-    bio: 'Everyone calls him uncle. Nobody can establish whose uncle he is.' },
+  h("alb1", "Nipper Krause", "human", "reader", 0.832, 1.3, 1.32, 1.404, 1.11, 1.15, "R", "CF", "Stands at the plate with his head tipped, listening for something."),
+  h("alb2", "Pothole Petrosky", "human", "reader", 0.886, 1.25, 1.18, 1.35, 1.23, 1.1, "L", "2B", "Been there for years. Everyone has agreed to steer around him."),
+  h("alb3", "Preacher Vandenburg", "human", "slugger", 1.534, 0.95, 0.85, 1.458, 0.28, 0.75, "R", "3B", "Calls his shots in the third person and has yet to apologise for it."),
+  h("alb4", "Sal \"The Mayor\" Bevilacqua", "human", "ironman", 1.426, 1.05, 0.97, 1.566, 0.82, 0.8, "R", "1B", "Knows everyone in the park by name and expects the same in return."),
+  h("alb5", "Early Kirkwood", "human", "grit", 0.94, 1.25, 1.19, 1.404, 1.21, 1.05, "L", "LF", "Fouls off everything until the pitcher runs out of ideas. Has never been described as exciting."),
+  h("alb6", "Tugboat Prendergast", "human", "slugger", 1.48, 0.95, 0.87, 1.35, 0.33, 0.7, "R", "RF", "Slow, low in the water, and moves things far heavier than himself."),
+  h("alb7", "Bea \"Two Bags\" Slocum", "human", "grit", 0.994, 1.25, 1.29, 1.296, 1.06, 1.15, "L", "C", "Never stops at first. Has been out at second more than anyone alive."),
+  h("alb8", "Cropsey Dunham", "human", "grit", 0.886, 1.2, 1.17, 1.35, 1.1, 0.95, "R", "SS", "The visiting clubs tell stories about him. He does nothing to correct them."),
+  h("alb9", "Uncle Milt Gorczyca", "human", "precision", 1.048, 1.15, 1.15, 1.242, 0.79, 0.85, "R", "DH", "Everyone calls him uncle. Nobody can establish whose uncle he is."),
 ];
 
 // --------------------------------------------------------------- the arms
@@ -327,310 +301,114 @@ const ALB: readonly Player[] = [
 
 /** MAINE — junk, guile and nothing over 90. They pitch backwards all night. */
 const MNE_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Splash Bergeron', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.55,
-    blurb: 'Pitches like the tide. Same thing all night, and it gets you.',
-    arsenal: { fastball: 0.4, curveball: 0.35, changeup: 0.25 }, putaway: 'curveball', break: 0.97, clutch: 1.02, stamina: 1.29,
-  },
-  {
-    name: 'Sternman Doyle', throws: 'L', signature: 'none', tellTiming: 'release', zoneRate: 0.5, speedBonus: 2,
-    blurb: 'Hauls up whatever the starter left in the water.',
-    arsenal: { fastball: 0.25, slider: 0.75 }, putaway: 'slider', break: 1.002, clutch: 1.03, stamina: 1.06,
-  },
-  {
-    name: 'Trap Line Poulin', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'Four hundred of them and he can find every one in fog.',
-    arsenal: { sinker: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.987, clutch: 1.045, stamina: 1.08,
-  },
+  a("Splash Bergeron", "L", "junk", "release", 0.55, "Pitches like the tide. Same thing all night, and it gets you.", {"fastball":0.4,"curveball":0.35,"changeup":0.25}, "curveball", 0.97, 1.02, 1.29),
+  a("Sternman Doyle", "L", "none", "release", 0.5, "Hauls up whatever the starter left in the water.", {"fastball":0.25,"slider":0.75}, "slider", 1.002, 1.03, 1.06, 2),
+  a("Trap Line Poulin", "R", "none", "pre_pitch", 0.5, "Four hundred of them and he can find every one in fog.", {"sinker":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.987, 1.045, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const MNE_PEN: readonly Pitcher[] = [
-  {
-    name: 'The Lighthouse', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.45,
-    blurb: 'Stands out there blinking at you. You hit the rocks anyway.',
-    arsenal: { fastball: 0.35, slider: 0.35, changeup: 0.3 }, putaway: 'slider', break: 0.97, clutch: 1.15, stamina: 0.76,
-  },
-  {
-    name: 'Bait Barrel Michaud', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.49,
-    blurb: 'You smell him before the bullpen gate opens. It is a tactic.',
-    arsenal: { changeup: 0.6, slider: 0.4 }, putaway: 'changeup', break: 0.958, clutch: 1.024, stamina: 0.82,
-  },
-  {
-    name: 'Sternman Fortin', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.48,
-    blurb: 'Hauls the last forty traps of the day without saying a word.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 1.019, clutch: 1.088, stamina: 0.7,
-  },
+  a("The Lighthouse", "R", "painter", "none", 0.45, "Stands out there blinking at you. You hit the rocks anyway.", {"fastball":0.35,"slider":0.35,"changeup":0.3}, "slider", 0.97, 1.15, 0.76),
+  a("Bait Barrel Michaud", "L", "junk", "pre_pitch", 0.49, "You smell him before the bullpen gate opens. It is a tactic.", {"changeup":0.6,"slider":0.4}, "changeup", 0.958, 1.024, 0.82),
+  a("Sternman Fortin", "R", "none", "release", 0.48, "Hauls the last forty traps of the day without saying a word.", {"fastball":0.6,"sinker":0.4}, "sinker", 1.019, 1.088, 0.7),
 ];
 
 /** NEW YORK — bought an arm for every situation, and they all show up. */
 const NYE_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Whitey Pastore', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.55,
-    blurb: 'Fourteen years, four clubs, one suit.',
-    arsenal: { fastball: 0.45, slider: 0.3, curveball: 0.25 }, putaway: 'slider', break: 1.11, clutch: 1, stamina: 1.26,
-  },
-  {
-    name: 'Bridge Toll Bianchi', throws: 'L', signature: 'fireball', tellTiming: 'none', zoneRate: 0.5, speedBonus: 4,
-    blurb: 'You may come through. It will cost you.',
-    arsenal: { fastball: 0.25, curveball: 0.75 }, putaway: 'curveball', break: 1.147, clutch: 1.03, stamina: 1.1,
-  },
-  {
-    name: 'Contract Year Marchetti', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Has had one every year since he signed. Nobody has explained the mechanism.',
-    arsenal: { fastball: 0.45, slider: 0.32, changeup: 0.23 }, putaway: 'slider', break: 1.13, clutch: 1.071, stamina: 1.08,
-  },
+  a("Whitey Pastore", "R", "junk", "release", 0.55, "Fourteen years, four clubs, one suit.", {"fastball":0.45,"slider":0.3,"curveball":0.25}, "slider", 1.11, 1, 1.26),
+  a("Bridge Toll Bianchi", "L", "fireball", "none", 0.5, "You may come through. It will cost you.", {"fastball":0.25,"curveball":0.75}, "curveball", 1.147, 1.03, 1.1, 4),
+  a("Contract Year Marchetti", "R", "none", "pre_pitch", 0.52, "Has had one every year since he signed. Nobody has explained the mechanism.", {"fastball":0.45,"slider":0.32,"changeup":0.23}, "slider", 1.13, 1.071, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const NYE_PEN: readonly Pitcher[] = [
-  {
-    name: 'Last Call Ippolito', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.5,
-    blurb: 'Ninth inning, lights down, nobody leaves.',
-    arsenal: { fastball: 0.4, slider: 0.4, changeup: 0.2 }, putaway: 'slider', break: 1.11, clutch: 1.25, stamina: 0.9,
-  },
-  {
-    name: 'Bridge And Tunnel Sabatini', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Commutes in from the other side and is reminded of it nightly.',
-    arsenal: { sinker: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.095, clutch: 1.049, stamina: 0.82,
-  },
-  {
-    name: 'The Luxury Tax', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.5, speedBonus: 7,
-    blurb: 'Costs more than the rest of the pen together and closes the door anyway.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.166, clutch: 1.115, stamina: 0.7,
-  },
+  a("Last Call Ippolito", "R", "painter", "none", 0.5, "Ninth inning, lights down, nobody leaves.", {"fastball":0.4,"slider":0.4,"changeup":0.2}, "slider", 1.11, 1.25, 0.9),
+  a("Bridge And Tunnel Sabatini", "L", "none", "pre_pitch", 0.51, "Commutes in from the other side and is reminded of it nightly.", {"sinker":0.6,"slider":0.4}, "slider", 1.095, 1.049, 0.82),
+  a("The Luxury Tax", "R", "fireball", "release", 0.5, "Costs more than the rest of the pen together and closes the door anyway.", {"fastball":0.6,"slider":0.4}, "fastball", 1.166, 1.115, 0.7, 7),
 ];
 
 /** DETROIT — velocity, no tells, and perfectly happy to throw it over. */
 const DET_ARMS: readonly Pitcher[] = [
-  {
-    name: 'FURNACE-3', throws: 'R', signature: 'fireball', tellTiming: 'none', zoneRate: 0.55, speedBonus: 5,
-    blurb: 'Runs at temperature for six innings, then stops without warning.',
-    arsenal: { sinker: 0.45, slider: 0.3, fastball: 0.25 }, putaway: 'sinker', break: 0.97, clutch: 0.9, stamina: 1.16,
-  },
-  {
-    name: 'SECOND SHIFT', throws: 'L', signature: 'fireball', tellTiming: 'none', zoneRate: 0.55, speedBonus: 6,
-    blurb: 'Clocks in at the seventh. Does not converse.',
-    arsenal: { fastball: 0.25, slider: 0.75 }, putaway: 'slider', break: 1.002, clutch: 1.09, stamina: 1.06,
-  },
-  {
-    name: 'NIGHT SHIFT', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Runs from eleven to seven and has never seen the day crew.',
-    arsenal: { sinker: 0.45, slider: 0.32, fastball: 0.23 }, putaway: 'slider', break: 0.987, clutch: 1.009, stamina: 1.08,
-  },
+  a("FURNACE-3", "R", "fireball", "none", 0.55, "Runs at temperature for six innings, then stops without warning.", {"sinker":0.45,"slider":0.3,"fastball":0.25}, "sinker", 0.97, 0.9, 1.16, 5),
+  a("SECOND SHIFT", "L", "fireball", "none", 0.55, "Clocks in at the seventh. Does not converse.", {"fastball":0.25,"slider":0.75}, "slider", 1.002, 1.09, 1.06, 6),
+  a("NIGHT SHIFT", "R", "none", "pre_pitch", 0.53, "Runs from eleven to seven and has never seen the day crew.", {"sinker":0.45,"slider":0.32,"fastball":0.23}, "slider", 0.987, 1.009, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const DET_PEN: readonly Pitcher[] = [
-  {
-    name: 'Tool & Die Tarnowski', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.5,
-    blurb: 'Machines the corner to a thousandth and hands you the part.',
-    arsenal: { fastball: 0.3, slider: 0.35, curveball: 0.35 }, putaway: 'curveball', break: 0.97, clutch: 1.1, stamina: 0.76,
-  },
-  {
-    name: 'SLAG-6', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'What is left over, repurposed. Works better than it has any right to.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 0.958, clutch: 0.989, stamina: 0.82,
-  },
-  {
-    name: 'QUENCH TANK', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.51, speedBonus: 7,
-    blurb: 'Whatever comes out of the furnace goes in here and stops moving.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.019, clutch: 1.051, stamina: 0.7,
-  },
+  a("Tool & Die Tarnowski", "R", "painter", "none", 0.5, "Machines the corner to a thousandth and hands you the part.", {"fastball":0.3,"slider":0.35,"curveball":0.35}, "curveball", 0.97, 1.1, 0.76),
+  a("SLAG-6", "L", "junk", "pre_pitch", 0.52, "What is left over, repurposed. Works better than it has any right to.", {"changeup":0.6,"curveball":0.4}, "changeup", 0.958, 0.989, 0.82),
+  a("QUENCH TANK", "R", "fireball", "release", 0.51, "Whatever comes out of the furnace goes in here and stops moving.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.019, 1.051, 0.7, 7),
 ];
 
 /** LOS ANGELES COMETS — arms that were signed to be somebody else's bridge. */
 const LAC_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Rex Pomeroy', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.55, speedBonus: 3,
-    blurb: 'Has an agent, a podcast and a changeup.',
-    arsenal: { fastball: 0.45, changeup: 0.35, curveball: 0.2 }, putaway: 'changeup', break: 0.97, clutch: 0.9, stamina: 1.16,
-  },
-  {
-    name: 'Bel Air Bracco', throws: 'L', signature: 'fireball', tellTiming: 'release', zoneRate: 0.55, speedBonus: 7,
-    blurb: 'Throws very hard and is extremely pleased about it.',
-    arsenal: { fastball: 0.25, slider: 0.75 }, putaway: 'slider', break: 1.002, clutch: 0.96, stamina: 0.97,
-  },
-  {
-    name: 'Waiver Wire Pham', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Claimed on a Tuesday. Started on the Thursday. Still here.',
-    arsenal: { fastball: 0.45, changeup: 0.32, curveball: 0.23 }, putaway: 'changeup', break: 0.987, clutch: 0.951, stamina: 1.08,
-  },
+  a("Rex Pomeroy", "R", "junk", "release", 0.55, "Has an agent, a podcast and a changeup.", {"fastball":0.45,"changeup":0.35,"curveball":0.2}, "changeup", 0.97, 0.9, 1.16, 3),
+  a("Bel Air Bracco", "L", "fireball", "release", 0.55, "Throws very hard and is extremely pleased about it.", {"fastball":0.25,"slider":0.75}, "slider", 1.002, 0.96, 0.97, 7),
+  a("Waiver Wire Pham", "L", "none", "pre_pitch", 0.53, "Claimed on a Tuesday. Started on the Thursday. Still here.", {"fastball":0.45,"changeup":0.32,"curveball":0.23}, "changeup", 0.987, 0.951, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const LAC_PEN: readonly Pitcher[] = [
-  {
-    name: 'The Understudy', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.5, speedBonus: 5,
-    blurb: 'Waits in the pen for eight innings hoping something goes wrong.',
-    arsenal: { slider: 0.4, fastball: 0.35, changeup: 0.25 }, putaway: 'slider', break: 0.97, clutch: 1.05, stamina: 0.73,
-  },
-  {
-    name: 'Deferred Money Ruiz', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Gets paid in 2041 and pitches like it.',
-    arsenal: { slider: 0.6, changeup: 0.4 }, putaway: 'slider', break: 0.958, clutch: 0.931, stamina: 0.82,
-  },
-  {
-    name: 'The Last Holdout', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.51, speedBonus: 7,
-    blurb: 'Everybody else took the money. He took the ball.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.019, clutch: 0.99, stamina: 0.7,
-  },
+  a("The Understudy", "R", "painter", "none", 0.5, "Waits in the pen for eight innings hoping something goes wrong.", {"slider":0.4,"fastball":0.35,"changeup":0.25}, "slider", 0.97, 1.05, 0.73, 5),
+  a("Deferred Money Ruiz", "R", "junk", "pre_pitch", 0.52, "Gets paid in 2041 and pitches like it.", {"slider":0.6,"changeup":0.4}, "slider", 0.958, 0.931, 0.82),
+  a("The Last Holdout", "R", "fireball", "release", 0.51, "Everybody else took the money. He took the ball.", {"fastball":0.6,"slider":0.4}, "fastball", 1.019, 0.99, 0.7, 7),
 ];
 
 /** NEW ENGLAND — sinkers, strikes, and every one of them tips it. */
 const NEM_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Cobblestone Coyne', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.55,
-    blurb: 'Nothing about him is straight and none of it is an accident.',
-    arsenal: { sinker: 0.4, fastball: 0.35, curveball: 0.25 }, putaway: 'sinker', break: 0.97, clutch: 0.9, stamina: 1.16,
-  },
-  {
-    name: 'Plow Guy Kowalczyk', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.55,
-    blurb: 'Comes through at three in the morning whether you asked or not.',
-    arsenal: { fastball: 0.25, slider: 0.45, curveball: 0.3 }, putaway: 'slider', break: 1.002, clutch: 1.051, stamina: 1.04,
-  },
-  {
-    name: 'Powder Horn Whitcomb', throws: 'R', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Carries exactly enough and does not waste a grain of it.',
-    arsenal: { curveball: 0.45, slider: 0.32, changeup: 0.23 }, putaway: 'slider', break: 0.987, clutch: 1.036, stamina: 1.08,
-  },
+  a("Cobblestone Coyne", "R", "none", "pre_pitch", 0.55, "Nothing about him is straight and none of it is an accident.", {"sinker":0.4,"fastball":0.35,"curveball":0.25}, "sinker", 0.97, 0.9, 1.16),
+  a("Plow Guy Kowalczyk", "L", "none", "pre_pitch", 0.55, "Comes through at three in the morning whether you asked or not.", {"fastball":0.25,"slider":0.45,"curveball":0.3}, "slider", 1.002, 1.051, 1.04),
+  a("Powder Horn Whitcomb", "R", "painter", "pre_pitch", 0.52, "Carries exactly enough and does not waste a grain of it.", {"curveball":0.45,"slider":0.32,"changeup":0.23}, "slider", 0.987, 1.036, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const NEM_PEN: readonly Pitcher[] = [
-  {
-    name: 'Deacon Tremblay', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.45,
-    blurb: 'Paints the black, then looks at you until you accept it.',
-    arsenal: { fastball: 0.35, curveball: 0.35, changeup: 0.3 }, putaway: 'curveball', break: 0.97, clutch: 1.22, stamina: 0.81,
-  },
-  {
-    name: 'Stone Wall Amory', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Nobody mortared it and nobody has moved it in two hundred years.',
-    arsenal: { sinker: 0.6, curveball: 0.4 }, putaway: 'curveball', break: 0.958, clutch: 1.014, stamina: 0.82,
-  },
-  {
-    name: 'Old North Pike', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'Two lanterns and everybody in the county is already awake.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.019, clutch: 1.078, stamina: 0.7,
-  },
+  a("Deacon Tremblay", "R", "painter", "release", 0.45, "Paints the black, then looks at you until you accept it.", {"fastball":0.35,"curveball":0.35,"changeup":0.3}, "curveball", 0.97, 1.22, 0.81),
+  a("Stone Wall Amory", "L", "none", "pre_pitch", 0.51, "Nobody mortared it and nobody has moved it in two hundred years.", {"sinker":0.6,"curveball":0.4}, "curveball", 0.958, 1.014, 0.82),
+  a("Old North Pike", "R", "none", "release", 0.5, "Two lanterns and everybody in the county is already awake.", {"fastball":0.6,"slider":0.4}, "slider", 1.019, 1.078, 0.7),
 ];
 
 /** FLORIDA — nobody, Florida included, knows what is coming. */
 const FLA_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Mango Cruz', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'Sweet, unpredictable, occasionally hits somebody.',
-    arsenal: { fastball: 0.45, sinker: 0.3, changeup: 0.25 }, putaway: 'changeup', break: 0.97, clutch: 1.1, stamina: 1.29,
-  },
-  {
-    name: 'Category Four Ortiz', throws: 'L', signature: 'fireball', tellTiming: 'none', zoneRate: 0.4, speedBonus: 8,
-    blurb: 'Everything at once, from a direction you were not expecting.',
-    arsenal: { fastball: 0.25, curveball: 0.75 }, putaway: 'curveball', break: 1.002, clutch: 0.89, stamina: 1.1,
-  },
-  {
-    name: 'Barrier Island Sosa', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.48,
-    blurb: 'Takes the whole storm so the mainland does not have to.',
-    arsenal: { fastball: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.987, clutch: 1.013, stamina: 1.08,
-  },
+  a("Mango Cruz", "R", "junk", "release", 0.5, "Sweet, unpredictable, occasionally hits somebody.", {"fastball":0.45,"sinker":0.3,"changeup":0.25}, "changeup", 0.97, 1.1, 1.29),
+  a("Category Four Ortiz", "L", "fireball", "none", 0.4, "Everything at once, from a direction you were not expecting.", {"fastball":0.25,"curveball":0.75}, "curveball", 1.002, 0.89, 1.1, 8),
+  a("Barrier Island Sosa", "L", "none", "pre_pitch", 0.48, "Takes the whole storm so the mainland does not have to.", {"fastball":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.987, 1.013, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const FLA_PEN: readonly Pitcher[] = [
-  {
-    name: 'Retiree Delgado', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.55,
-    blurb: 'Came out of retirement for the ninth. Has now done this eleven times.',
-    arsenal: { slider: 0.4, fastball: 0.3, changeup: 0.3 }, putaway: 'slider', break: 0.97, clutch: 1.11, stamina: 0.73,
-  },
-  {
-    name: 'Red Tide Verano', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.47,
-    blurb: 'Arrives quietly, clears the beach, nobody can say when it will go.',
-    arsenal: { slider: 0.6, changeup: 0.4 }, putaway: 'slider', break: 0.958, clutch: 0.992, stamina: 0.82,
-  },
-  {
-    name: 'Storm Surge Okafor', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.46, speedBonus: 7,
-    blurb: 'It is never the wind that gets you. It is the water behind it.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.019, clutch: 1.054, stamina: 0.7,
-  },
+  a("Retiree Delgado", "R", "junk", "pre_pitch", 0.55, "Came out of retirement for the ninth. Has now done this eleven times.", {"slider":0.4,"fastball":0.3,"changeup":0.3}, "slider", 0.97, 1.11, 0.73),
+  a("Red Tide Verano", "R", "junk", "pre_pitch", 0.47, "Arrives quietly, clears the beach, nobody can say when it will go.", {"slider":0.6,"changeup":0.4}, "slider", 0.958, 0.992, 0.82),
+  a("Storm Surge Okafor", "R", "fireball", "release", 0.46, "It is never the wind that gets you. It is the water behind it.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.019, 1.054, 0.7, 7),
 ];
 
 /** TEXAS — hard, heavy, and generous with the free pass. */
 const TEX_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Buck Rowden', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.55, speedBonus: 2,
-    blurb: 'Throws it, spits, throws it again. Four hours of that.',
-    arsenal: { sinker: 0.45, slider: 0.3, fastball: 0.25 }, putaway: 'sinker', break: 0.97, clutch: 1.11, stamina: 1.27,
-  },
-  {
-    name: 'Flare Stack Fenn', throws: 'L', signature: 'fireball', tellTiming: 'release', zoneRate: 0.55, speedBonus: 6,
-    blurb: 'Burns off whatever is left of the seventh.',
-    arsenal: { slider: 0.75, fastball: 0.25 }, putaway: 'slider', break: 1.002, clutch: 0.94, stamina: 0.99,
-  },
-  {
-    name: 'Gusher Tolliver', throws: 'R', signature: 'fireball', tellTiming: 'pre_pitch', zoneRate: 0.55, speedBonus: 5,
-    blurb: 'Nothing for six innings and then it is in the next county.',
-    arsenal: { fastball: 0.45, slider: 0.32, sinker: 0.23 }, putaway: 'fastball', break: 0.987, clutch: 1.045, stamina: 1.08,
-  },
+  a("Buck Rowden", "R", "none", "release", 0.55, "Throws it, spits, throws it again. Four hours of that.", {"sinker":0.45,"slider":0.3,"fastball":0.25}, "sinker", 0.97, 1.11, 1.27, 2),
+  a("Flare Stack Fenn", "L", "fireball", "release", 0.55, "Burns off whatever is left of the seventh.", {"slider":0.75,"fastball":0.25}, "slider", 1.002, 0.94, 0.99, 6),
+  a("Gusher Tolliver", "R", "fireball", "pre_pitch", 0.55, "Nothing for six innings and then it is in the next county.", {"fastball":0.45,"slider":0.32,"sinker":0.23}, "fastball", 0.987, 1.045, 1.08, 5),
 ];
 
 /** ...and the three who finish it. */
 const TEX_PEN: readonly Pitcher[] = [
-  {
-    name: 'Sidewinder Sikes', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.55, speedBonus: 3,
-    blurb: 'Comes at you sideways and low, and does not rattle first.',
-    arsenal: { slider: 0.45, fastball: 0.3, curveball: 0.25 }, putaway: 'slider', break: 0.97, clutch: 1.15, stamina: 0.8,
-  },
-  {
-    name: 'Roughneck Cade', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'Two weeks on, two off, and he is unpleasant for all four.',
-    arsenal: { sinker: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.958, clutch: 1.024, stamina: 0.82,
-  },
-  {
-    name: 'Blowout Preventer Hobbs', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.53,
-    blurb: 'The only thing on the whole rig that has to work.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 1.019, clutch: 1.088, stamina: 0.7,
-  },
+  a("Sidewinder Sikes", "R", "painter", "none", 0.55, "Comes at you sideways and low, and does not rattle first.", {"slider":0.45,"fastball":0.3,"curveball":0.25}, "slider", 0.97, 1.15, 0.8, 3),
+  a("Roughneck Cade", "L", "none", "pre_pitch", 0.54, "Two weeks on, two off, and he is unpleasant for all four.", {"sinker":0.6,"slider":0.4}, "slider", 0.958, 1.024, 0.82),
+  a("Blowout Preventer Hobbs", "R", "none", "release", 0.53, "The only thing on the whole rig that has to work.", {"fastball":0.6,"sinker":0.4}, "sinker", 1.019, 1.088, 0.7),
 ];
 
 /** ALBANY — two old men who tip everything, and the last knuckleball alive. */
 const ALB_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Ed Mancuso', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.6,
-    blurb: 'Thirty-nine years old and gets by on knowing things.',
-    arsenal: { fastball: 0.45, curveball: 0.35, changeup: 0.2 }, putaway: 'curveball', break: 0.97, clutch: 0.91, stamina: 1.17,
-  },
-  {
-    name: 'Erie Canal Kowal', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'Slow to get going. Moves everything once he does, mostly sideways.',
-    // ⚠️ A QUARTER KNUCKLEBALLS, NOT A SIGNATURE. He carried `signature:
-    // 'knuckler'` for one measurement — 70% knucklers — and Albany allowed
-    // 3.61 runs a game in a 4.6 league and won 60% of everything. The pitch is
-    // the identity; the signature was a wall.
-    arsenal: { fastball: 0.25, curveball: 0.41, knuckleball: 0.34 }, putaway: 'knuckleball', break: 1.002, clutch: 1.021, stamina: 1.02,
-  },
-  {
-    name: 'Lock Seven Brennan', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Raises you up, lowers you down, and you are no further along.',
-    arsenal: { sinker: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.987, clutch: 0.98, stamina: 1.08,
-  },
+  a("Ed Mancuso", "R", "none", "pre_pitch", 0.6, "Thirty-nine years old and gets by on knowing things.", {"fastball":0.45,"curveball":0.35,"changeup":0.2}, "curveball", 0.97, 0.91, 1.17),
+  a("Erie Canal Kowal", "L", "junk", "pre_pitch", 0.5, "Slow to get going. Moves everything once he does, mostly sideways.", {"fastball":0.25,"curveball":0.41,"knuckleball":0.34}, "knuckleball", 1.002, 1.021, 1.02),
+  a("Lock Seven Brennan", "L", "none", "pre_pitch", 0.52, "Raises you up, lowers you down, and you are no further along.", {"sinker":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.987, 0.98, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const ALB_PEN: readonly Pitcher[] = [
-  {
-    name: 'Miss Ada Quill', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.45,
-    blurb: 'Corner, corner, corner. Ninety-one pitches and no walks.',
-    arsenal: { fastball: 0.35, slider: 0.35, changeup: 0.3 }, putaway: 'slider', break: 0.97, clutch: 1.07, stamina: 0.74,
-  },
-  {
-    name: 'Towpath Delaney', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Walks the same four miles every night at the same speed.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 0.958, clutch: 0.96, stamina: 0.82,
-  },
-  {
-    name: 'Capitol Dome Ferraro', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'Took eleven years and went wildly over budget. Worth it.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.019, clutch: 1.02, stamina: 0.7,
-  },
+  a("Miss Ada Quill", "R", "painter", "release", 0.45, "Corner, corner, corner. Ninety-one pitches and no walks.", {"fastball":0.35,"slider":0.35,"changeup":0.3}, "slider", 0.97, 1.07, 0.74),
+  a("Towpath Delaney", "R", "junk", "pre_pitch", 0.51, "Walks the same four miles every night at the same speed.", {"changeup":0.6,"curveball":0.4}, "changeup", 0.958, 0.96, 0.82),
+  a("Capitol Dome Ferraro", "R", "painter", "release", 0.5, "Took eleven years and went wildly over budget. Worth it.", {"fastball":0.6,"slider":0.4}, "slider", 1.019, 1.02, 0.7),
 ];
 
 
@@ -676,61 +454,28 @@ const ALB_PEN: readonly Pitcher[] = [
  * and the other eight are an opportunity.
  */
 const LAA: readonly Player[] = [
-  { id: 'laa1', name: 'Sluice Okonkwo', build: 'human', trait: 'reader', power: 0.9, contact: 1.16, vision: 1.14, clutch: 1.02, bunt: 1.22, speed: 1.24, bats: 'L',
-    bio: 'Reads a pitcher the way the district reads a water bill. Never pays it.' },
-  { id: 'laa2', name: 'Valencia Reyes', build: 'human', trait: 'grit', power: 0.94, contact: 1.14, vision: 1.12, clutch: 1.06, bunt: 1.18, speed: 1.12, bats: 'R',
-    bio: 'Grew up on the orchard the aqueduct dried out. Mentions it on camera.' },
-  { id: 'laa3', name: 'Mulholland', build: 'machine', trait: 'slugger', power: 1.88, contact: 1.22, vision: 1.24, clutch: 1.46, bunt: 0.16, speed: 1.18, bats: 'R',
-    bio: 'Named for the man who took the river. The best there is, on a club going nowhere.' },
-  { id: 'laa4', name: 'Kingsley Ash', build: 'machine', trait: 'slugger', power: 1.36, contact: 0.92, vision: 0.88, clutch: 0.98, bunt: 0.19, speed: 0.72, bats: 'L',
-    bio: 'Bought in the winter on the strength of one good August.' },
-  { id: 'laa5', name: 'Delta Fontaine', build: 'human', trait: 'showman', power: 1.12, contact: 1.02, vision: 0.96, clutch: 1.04, bunt: 0.78, speed: 0.98, bats: 'L',
-    bio: 'Arrives late, leaves early, and is photographed doing both.' },
-  { id: 'laa6', name: 'Standpipe Nakamura', build: 'machine', trait: 'precision', power: 1.04, contact: 1.06, vision: 1.02, clutch: 0.96, bunt: 0.88, speed: 0.9, bats: 'R',
-    bio: 'Pressure-rated, and it has never once come up.' },
-  { id: 'laa7', name: 'Owens Vale', build: 'human', trait: 'reader', power: 0.96, contact: 1.12, vision: 1.16, clutch: 1.0, bunt: 1.02, speed: 1.02, bats: 'R',
-    bio: 'Took the buyout, took the job, and is still waiting on the ring.' },
-  { id: 'laa8', name: 'Cement Channel Ruiz', build: 'machine', trait: 'grit', power: 1.0, contact: 1.08, vision: 1.06, clutch: 1.02, bunt: 1.05, speed: 0.85, bats: 'R',
-    bio: 'Straight, grey and going exactly where it went last year.' },
-  { id: 'laa9', name: 'Perpetual Flow', build: 'machine', trait: 'slugger', power: 1.3, contact: 0.9, vision: 0.86, clutch: 0.94, bunt: 0.22, speed: 0.78, bats: 'L',
-    bio: 'Does not stop. Was not manufactured with the part that improves, either.' },
+  h("laa1", "Sluice Okonkwo", "human", "reader", 0.9, 1.16, 1.14, 1.02, 1.22, 1.24, "S", "LF", "Reads a pitcher the way the district reads a water bill. Never pays it."),
+  h("laa2", "Valencia Reyes", "human", "grit", 0.94, 1.14, 1.12, 1.06, 1.18, 1.12, "S", "CF", "Grew up on the orchard the aqueduct dried out. Mentions it on camera."),
+  h("laa3", "Mulholland", "machine", "slugger", 1.88, 1.22, 1.24, 1.46, 0.16, 1.18, "R", "RF", "Named for the man who took the river. The best there is, on a club going nowhere."),
+  h("laa4", "Kingsley Ash", "machine", "slugger", 1.36, 0.92, 0.88, 0.98, 0.19, 0.72, "L", "1B", "Bought in the winter on the strength of one good August."),
+  h("laa5", "Delta Fontaine", "human", "utility", 1.12, 1.02, 0.96, 1.04, 0.78, 0.98, "L", "3B", "Arrives late, leaves early, and is photographed doing both.", ["2B","SS"]),
+  h("laa6", "Standpipe Nakamura", "machine", "utility", 1.04, 1.06, 1.02, 0.96, 0.88, 0.9, "R", "2B", "Pressure-rated, and it has never once come up.", ["3B","SS"]),
+  h("laa7", "Owens Vale", "human", "cannon", 0.96, 1.12, 1.16, 1, 1.02, 1.02, "R", "C", "Took the buyout, took the job, and is still waiting on the ring."),
+  h("laa8", "Cement Channel Ruiz", "machine", "grit", 1, 1.08, 1.06, 1.02, 1.05, 0.85, "R", "SS", "Straight, grey and going exactly where it went last year."),
+  h("laa9", "Perpetual Flow", "machine", "slugger", 1.3, 0.9, 0.86, 0.94, 0.22, 0.78, "L", "DH", "Does not stop. Was not manufactured with the part that improves, either."),
 ];
 
 const LAA_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Headgate Salcedo', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5, speedBonus: 3,
-    blurb: 'Opens it exactly as far as he means to, which is not far enough any more.',
-    arsenal: { fastball: 0.3, slider: 0.35, changeup: 0.2, curveball: 0.15 }, putaway: 'slider', break: 0.96, clutch: 0.94, stamina: 1.02,
-  },
-  {
-    name: 'The Siphon', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.53,
-    blurb: 'Takes what it wants and leaves the level looking untouched.',
-    arsenal: { curveball: 0.4, changeup: 0.35, slider: 0.25 }, putaway: 'curveball', break: 0.971, clutch: 0.96, stamina: 1.01,
-  },
-  {
-    name: 'Spillway Okonkwo', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Everything over the top eventually, and never in a hurry.',
-    arsenal: { sinker: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.936, clutch: 0.915, stamina: 1.08,
-  },
+  a("Headgate Salcedo", "R", "painter", "release", 0.5, "Opens it exactly as far as he means to, which is not far enough any more.", {"fastball":0.3,"slider":0.35,"changeup":0.2,"curveball":0.15}, "slider", 0.96, 0.94, 1.02, 3),
+  a("The Siphon", "L", "junk", "release", 0.53, "Takes what it wants and leaves the level looking untouched.", {"curveball":0.4,"changeup":0.35,"slider":0.25}, "curveball", 0.971, 0.96, 1.01),
+  a("Spillway Okonkwo", "R", "none", "pre_pitch", 0.53, "Everything over the top eventually, and never in a hurry.", {"sinker":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.936, 0.915, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const LAA_PEN: readonly Pitcher[] = [
-  {
-    name: 'Cistern Bly', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.56, speedBonus: 5,
-    blurb: 'Holds everything. Gives most of it back in the eighth.',
-    arsenal: { fastball: 0.55, sinker: 0.25, slider: 0.2 }, putaway: 'slider', break: 0.86, clutch: 0.9, stamina: 0.78,
-  },
-  {
-    name: 'Drip Line Vasquez', throws: 'L', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'A little at a time, exactly where it is needed.',
-    arsenal: { changeup: 0.6, slider: 0.4 }, putaway: 'changeup', break: 0.908, clutch: 0.896, stamina: 0.82,
-  },
-  {
-    name: 'Shutoff Valve Reyes', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'One turn and the whole thing stops.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 0.966, clutch: 0.952, stamina: 0.7,
-  },
+  a("Cistern Bly", "R", "none", "release", 0.56, "Holds everything. Gives most of it back in the eighth.", {"fastball":0.55,"sinker":0.25,"slider":0.2}, "slider", 0.86, 0.9, 0.78, 5),
+  a("Drip Line Vasquez", "L", "painter", "pre_pitch", 0.52, "A little at a time, exactly where it is needed.", {"changeup":0.6,"slider":0.4}, "changeup", 0.908, 0.896, 0.82),
+  a("Shutoff Valve Reyes", "R", "none", "release", 0.51, "One turn and the whole thing stops.", {"fastball":0.6,"sinker":0.4}, "sinker", 0.966, 0.952, 0.7),
 ];
 
 /**
@@ -740,61 +485,28 @@ const LAA_PEN: readonly Pitcher[] = [
  * that can genuinely shorten a game on you.
  */
 const CHF: readonly Player[] = [
-  { id: 'chf1', name: 'Hook And Ladder Nowak', build: 'machine', trait: 'grit', power: 0.99, contact: 1.22, vision: 1.22, clutch: 1.18, bunt: 1.12, speed: 1.08, bats: 'L',
-    bio: 'First one on the scene and the last one to leave it.' },
-  { id: 'chf2', name: 'Halsted Byrne', build: 'human', trait: 'reader', power: 1.03, contact: 1.24, vision: 1.26, clutch: 1.2, bunt: 1.14, speed: 1.16, bats: 'R',
-    bio: 'Counts pitches out loud from the box. Nobody has asked him to stop.' },
-  { id: 'chf3', name: 'BACKDRAFT', build: 'machine', trait: 'slugger', power: 1.75, contact: 0.92, vision: 0.88, clutch: 1.16, bunt: 0.12, speed: 0.7, bats: 'R',
-    bio: 'Quiet for eight innings and then the whole room goes up at once.' },
-  { id: 'chf4', name: 'The Water Tower', build: 'machine', trait: 'slugger', power: 1.63, contact: 0.92, vision: 0.9, clutch: 1.24, bunt: 0.15, speed: 0.72, bats: 'L',
-    bio: 'The one thing on this block the fire did not take. Still standing, still working.' },
-  { id: 'chf5', name: "Mrs. O'Leary", build: 'human', trait: 'showman', power: 1.43, contact: 1, vision: 0.98, clutch: 1.3, bunt: 0.3, speed: 0.85, bats: 'L',
-    bio: 'Blamed for the whole thing on no evidence and has stopped correcting people.' },
-  { id: 'chf6', name: 'Jackscrew Sobczak', build: 'human', trait: 'precision', power: 1.15, contact: 1.14, vision: 1.16, clutch: 1.12, bunt: 0.86, speed: 0.95, bats: 'L',
-    bio: 'They lifted the entire city out of the mud on screws. His people turned them.' },
-  { id: 'chf7', name: 'Ashland Vukovich', build: 'human', trait: 'grit', power: 1.09, contact: 1.18, vision: 1.2, clutch: 1.24, bunt: 1.08, speed: 1.02, bats: 'R',
-    bio: 'Third generation on the same block, which has burned twice.' },
-  { id: 'chf8', name: 'Standpipe Kowalik', build: 'augmented', trait: 'grit', power: 1.23, contact: 1.06, vision: 1.04, clutch: 1.2, bunt: 0.72, speed: 0.88, bats: 'R',
-    bio: 'Holds pressure all night whether or not anybody opens him.' },
-  { id: 'chf9', name: 'Third Alarm Prazak', build: 'machine', trait: 'showman', power: 1.41, contact: 1, vision: 0.96, clutch: 1.36, bunt: 0.28, speed: 0.92, bats: 'L',
-    bio: 'By the time they call for him it is already bad, which is when he is best.' },
+  h("chf1", "Hook And Ladder Nowak", "machine", "speedster", 0.99, 1.22, 1.22, 1.18, 1.12, 1.08, "L", "CF", "First one on the scene and the last one to leave it."),
+  h("chf2", "Halsted Byrne", "human", "utility", 1.03, 1.24, 1.26, 1.2, 1.14, 1.16, "R", "2B", "Counts pitches out loud from the box. Nobody has asked him to stop.", ["3B","SS"]),
+  h("chf3", "BACKDRAFT", "machine", "slugger", 1.75, 0.92, 0.88, 1.16, 0.12, 0.7, "R", "LF", "Quiet for eight innings and then the whole room goes up at once."),
+  h("chf4", "The Water Tower", "machine", "slugger", 1.63, 0.92, 0.9, 1.24, 0.15, 0.72, "L", "1B", "The one thing on this block the fire did not take. Still standing, still working."),
+  h("chf5", "Mrs. O'Leary", "human", "showman", 1.43, 1, 0.98, 1.3, 0.3, 0.85, "L", "3B", "Blamed for the whole thing on no evidence and has stopped correcting people."),
+  h("chf6", "Jackscrew Sobczak", "human", "precision", 1.15, 1.14, 1.16, 1.12, 0.86, 0.95, "L", "RF", "They lifted the entire city out of the mud on screws. His people turned them."),
+  h("chf7", "Ashland Vukovich", "human", "utility", 1.09, 1.18, 1.2, 1.24, 1.08, 1.02, "R", "SS", "Third generation on the same block, which has burned twice.", ["2B","3B"]),
+  h("chf8", "Standpipe Kowalik", "augmented", "grit", 1.23, 1.06, 1.04, 1.2, 0.72, 0.88, "R", "C", "Holds pressure all night whether or not anybody opens him."),
+  h("chf9", "Third Alarm Prazak", "machine", "showman", 1.41, 1, 0.96, 1.36, 0.28, 0.92, "L", "DH", "By the time they call for him it is already bad, which is when he is best."),
 ];
 
 const CHF_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Engine Company Janiak', throws: 'R', signature: 'junk', tellTiming: 'none', zoneRate: 0.56, speedBonus: 2,
-    blurb: 'Goes eight and hands over a building that is still standing.',
-    arsenal: { sinker: 0.4, slider: 0.3, changeup: 0.3 }, putaway: 'sinker', break: 1, clutch: 1, stamina: 1.18,
-  },
-  {
-    name: 'Smoke Eater Wilk', throws: 'L', signature: 'painter', tellTiming: 'none', zoneRate: 0.5,
-    blurb: 'Walks into the inning nobody else will take.',
-    arsenal: { slider: 0.45, curveball: 0.3, fastball: 0.25 }, putaway: 'slider', break: 1.053, clutch: 1.121, stamina: 1.08,
-  },
-  {
-    name: 'Second Alarm Duda', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'They only call him when the first crew is already inside.',
-    arsenal: { fastball: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.997, clutch: 1.091, stamina: 1.08,
-  },
+  a("Engine Company Janiak", "R", "junk", "none", 0.56, "Goes eight and hands over a building that is still standing.", {"sinker":0.4,"slider":0.3,"changeup":0.3}, "sinker", 1, 1, 1.18, 2),
+  a("Smoke Eater Wilk", "L", "painter", "none", 0.5, "Walks into the inning nobody else will take.", {"slider":0.45,"curveball":0.3,"fastball":0.25}, "slider", 1.053, 1.121, 1.08),
+  a("Second Alarm Duda", "L", "none", "pre_pitch", 0.54, "They only call him when the first crew is already inside.", {"fastball":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.997, 1.091, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const CHF_PEN: readonly Pitcher[] = [
-  {
-    name: 'THE EXTINGUISHER', throws: 'R', signature: 'fireball', tellTiming: 'none', zoneRate: 0.56, speedBonus: 9,
-    blurb: 'Bases loaded, nobody out, and it is over in eleven pitches.',
-    arsenal: { fastball: 0.7, slider: 0.3 }, putaway: 'fastball', break: 0.92, clutch: 1.22, stamina: 0.88,
-  },
-  {
-    name: 'Ladder Truck Novak', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Slow to arrive and then it is over very quickly.',
-    arsenal: { sinker: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.967, clutch: 1.069, stamina: 0.82,
-  },
-  {
-    name: 'THE HYDRANT', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.52, speedBonus: 7,
-    blurb: 'Squat, painted red, and there is no arguing with the pressure.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.029, clutch: 1.136, stamina: 0.7,
-  },
+  a("THE EXTINGUISHER", "R", "fireball", "none", 0.56, "Bases loaded, nobody out, and it is over in eleven pitches.", {"fastball":0.7,"slider":0.3}, "fastball", 0.92, 1.22, 0.88, 9),
+  a("Ladder Truck Novak", "R", "none", "pre_pitch", 0.53, "Slow to arrive and then it is over very quickly.", {"sinker":0.6,"slider":0.4}, "slider", 0.967, 1.069, 0.82),
+  a("THE HYDRANT", "R", "fireball", "release", 0.52, "Squat, painted red, and there is no arguing with the pressure.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.029, 1.136, 0.7, 7),
 ];
 
 /**
@@ -808,61 +520,28 @@ const CHF_PEN: readonly Pitcher[] = [
  * two of them meeting is the only fixture in the league with a grievance in it.
  */
 const CHI: readonly Player[] = [
-  { id: 'che1', name: 'Marquee Costanza', build: 'human', trait: 'showman', power: 1.028, contact: 1.227, vision: 1.165, clutch: 1.144, bunt: 1.26, speed: 1.38, bats: 'L',
-    bio: 'Up in lights on the corner since before the lights worked.' },
-  { id: 'che2', name: 'Addison Pruitt', build: 'human', trait: 'reader', power: 1.072, contact: 1.205, vision: 1.188, clutch: 1.111, bunt: 1.16, speed: 1.24, bats: 'R',
-    bio: 'Knows every stop on the line and every pitcher on the circuit.' },
-  { id: 'che3', name: 'Brick Wall Dombrowski', build: 'augmented', trait: 'slugger', power: 1.446, contact: 1.034, vision: 0.968, clutch: 1.155, bunt: 0.18, speed: 0.9, bats: 'R',
-    bio: 'Ninety years of it, under the vine, and it has not moved an inch.' },
-  { id: 'che4', name: 'Wrigley Nine-Ten', build: 'machine', trait: 'slugger', power: 1.391, contact: 1.056, vision: 0.995, clutch: 1.188, bunt: 0.24, speed: 0.85, bats: 'L',
-    bio: 'Older than the scoreboard and cheaper to maintain.' },
-  { id: 'che5', name: 'Rooftop Marchetti', build: 'human', trait: 'showman', power: 1.27, contact: 1.122, vision: 1.044, clutch: 1.21, bunt: 0.74, speed: 1.05, bats: 'L',
-    bio: 'Plays to the buildings across the street. They pay for the privilege.' },
-  { id: 'che6', name: 'Hand-Turned Ochoa', build: 'human', trait: 'grit', power: 1.05, contact: 1.188, vision: 1.143, clutch: 1.166, bunt: 1.3, speed: 1.2, bats: 'R',
-    bio: 'Somebody still turns that scoreboard by hand. It is him, between innings.' },
-  { id: 'che7', name: 'Groundskeeper Ivers', build: 'augmented', trait: 'precision', power: 1.171, contact: 1.133, vision: 1.089, clutch: 1.089, bunt: 0.8, speed: 1.16, bats: 'R',
-    bio: 'Tends the wall. Will tell you which parts of it are older than the club.' },
-  { id: 'che8', name: 'Gale Off The Lake', build: 'machine', trait: 'reader', power: 1.226, contact: 1.111, vision: 1.121, clutch: 1.122, bunt: 0.7, speed: 1.0, bats: 'L',
-    bio: 'Arrives without warning and rearranges the outfield.' },
-  { id: 'che9', name: 'Ivy Kowalczyk', build: 'human', trait: 'grit', power: 1.105, contact: 1.155, vision: 1.127, clutch: 1.243, bunt: 1.12, speed: 1.02, bats: 'R',
-    bio: 'Grows on the wall. Has swallowed two live balls and one glove.' },
+  h("che1", "Marquee Costanza", "human", "reader", 1.028, 1.227, 1.165, 1.144, 1.26, 1.38, "L", "CF", "Up in lights on the corner since before the lights worked."),
+  h("che2", "Addison Pruitt", "human", "reader", 1.072, 1.205, 1.188, 1.111, 1.16, 1.24, "R", "2B", "Knows every stop on the line and every pitcher on the circuit."),
+  h("che3", "Brick Wall Dombrowski", "augmented", "slugger", 1.446, 1.034, 0.968, 1.155, 0.18, 0.9, "R", "3B", "Ninety years of it, under the vine, and it has not moved an inch."),
+  h("che4", "Wrigley Nine-Ten", "machine", "ironman", 1.391, 1.056, 0.995, 1.188, 0.24, 0.85, "L", "1B", "Older than the scoreboard and cheaper to maintain."),
+  h("che5", "Rooftop Marchetti", "human", "grit", 1.27, 1.122, 1.044, 1.21, 0.74, 1.05, "L", "LF", "Plays to the buildings across the street. They pay for the privilege."),
+  h("che6", "Hand-Turned Ochoa", "human", "grit", 1.05, 1.188, 1.143, 1.166, 1.3, 1.2, "R", "RF", "Somebody still turns that scoreboard by hand. It is him, between innings."),
+  h("che7", "Groundskeeper Ivers", "augmented", "grit", 1.171, 1.133, 1.089, 1.089, 0.8, 1.16, "R", "C", "Tends the wall. Will tell you which parts of it are older than the club."),
+  h("che8", "Gale Off The Lake", "machine", "reader", 1.226, 1.111, 1.121, 1.122, 0.7, 1, "L", "SS", "Arrives without warning and rearranges the outfield."),
+  h("che9", "Ivy Kowalczyk", "human", "grit", 1.105, 1.155, 1.127, 1.243, 1.12, 1.02, "R", "DH", "Grows on the wall. Has swallowed two live balls and one glove."),
 ];
 
 const CHI_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Clark Street Fennimore', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.55,
-    blurb: 'Twelve pitches, none of them fast, all of them somewhere else.',
-    arsenal: { curveball: 0.35, changeup: 0.35, slider: 0.3 }, putaway: 'changeup', break: 1.11, clutch: 1.05, stamina: 1.11,
-  },
-  {
-    name: 'Daylight Nunziato', throws: 'R', signature: 'none', tellTiming: 'none', zoneRate: 0.58, speedBonus: 4,
-    blurb: 'Sixty years of afternoons. Has never once pitched under a light.',
-    arsenal: { fastball: 0.25, sinker: 0.41, curveball: 0.34 }, putaway: 'curveball', break: 1.094, clutch: 1.08, stamina: 1.12,
-  },
-  {
-    name: 'Bleacher Wind Aldridge', throws: 'R', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'Pitches to the flags. On a day they blow in he is unhittable.',
-    arsenal: { curveball: 0.45, slider: 0.32, changeup: 0.23 }, putaway: 'slider', break: 1.106, clutch: 1.062, stamina: 1.08,
-  },
+  a("Clark Street Fennimore", "L", "junk", "release", 0.55, "Twelve pitches, none of them fast, all of them somewhere else.", {"curveball":0.35,"changeup":0.35,"slider":0.3}, "changeup", 1.11, 1.05, 1.11),
+  a("Daylight Nunziato", "R", "none", "none", 0.58, "Sixty years of afternoons. Has never once pitched under a light.", {"fastball":0.25,"sinker":0.41,"curveball":0.34}, "curveball", 1.094, 1.08, 1.12, 4),
+  a("Bleacher Wind Aldridge", "R", "painter", "pre_pitch", 0.54, "Pitches to the flags. On a day they blow in he is unhittable.", {"curveball":0.45,"slider":0.32,"changeup":0.23}, "slider", 1.106, 1.062, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const CHI_PEN: readonly Pitcher[] = [
-  {
-    name: 'Sundown Bhatt', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.5, speedBonus: 4,
-    blurb: 'When the sun goes, the game goes. He is what happens first.',
-    arsenal: { slider: 0.4, fastball: 0.35, changeup: 0.25 }, putaway: 'slider', break: 1.09, clutch: 1.12, stamina: 0.94,
-  },
-  {
-    name: 'Ivy Vine Kaminski', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Gets into everything and takes a hundred years to get out.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'curveball', break: 1.072, clutch: 1.04, stamina: 0.82,
-  },
-  {
-    name: 'Seventh Inning Braun', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.52,
-    blurb: 'Comes in to singing and does not appear to notice it.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.14, clutch: 1.105, stamina: 0.7,
-  },
+  a("Sundown Bhatt", "R", "painter", "none", 0.5, "When the sun goes, the game goes. He is what happens first.", {"slider":0.4,"fastball":0.35,"changeup":0.25}, "slider", 1.09, 1.12, 0.94, 4),
+  a("Ivy Vine Kaminski", "L", "junk", "pre_pitch", 0.53, "Gets into everything and takes a hundred years to get out.", {"curveball":0.6,"changeup":0.4}, "curveball", 1.072, 1.04, 0.82),
+  a("Seventh Inning Braun", "R", "none", "release", 0.52, "Comes in to singing and does not appear to notice it.", {"fastball":0.6,"slider":0.4}, "slider", 1.14, 1.105, 0.7),
 ];
 
 /**
@@ -871,61 +550,28 @@ const CHI_PEN: readonly Pitcher[] = [
  * nine men who cannot run, cannot stay healthy, and have all been let go once.
  */
 const NYV: readonly Player[] = [
-  { id: 'nyv1', name: 'Marv "Two Knees" Gagliardo', build: 'human', trait: 'reader', power: 0.82, contact: 1.18, vision: 1.24, clutch: 1.27, bunt: 1.3, speed: 0.88, bats: 'L',
-    bio: 'Nineteenth season. Walks to first like the distance is negotiable.' },
-  { id: 'nyv2', name: 'The Perfessor', build: 'human', trait: 'reader', power: 0.86, contact: 1.16, vision: 1.26, clutch: 1.19, bunt: 1.24, speed: 0.82, bats: 'R',
-    bio: 'Talks the entire at-bat. Some of it is to the pitcher, some to nobody.' },
-  { id: 'nyv3', name: 'Big Sal Dandridge', build: 'human', trait: 'slugger', power: 1.38, contact: 0.94, vision: 0.96, clutch: 1.25, bunt: 0.38, speed: 0.7, bats: 'R',
-    bio: 'Led a league in home runs once. Will not say which league or when.' },
-  { id: 'nyv4', name: 'Cortisone Pete', build: 'augmented', trait: 'slugger', power: 1.32, contact: 0.9, vision: 0.92, clutch: 1.21, bunt: 0.34, speed: 0.66, bats: 'L',
-    bio: 'Held together chemically and available every single day regardless.' },
-  { id: 'nyv5', name: 'Shea Kowalski', build: 'human', trait: 'grit', power: 0.96, contact: 1.1, vision: 1.16, clutch: 1.29, bunt: 1.12, speed: 0.8, bats: 'R',
-    bio: 'Grew up in the parking lot of a stadium they knocked down.' },
-  { id: 'nyv6', name: 'Flushing Ray Mundy', build: 'human', trait: 'precision', power: 0.9, contact: 1.12, vision: 1.2, clutch: 1.15, bunt: 1.18, speed: 0.85, bats: 'L',
-    bio: 'Out by the bay, under the flight path, and never once distracted.' },
-  { id: 'nyv7', name: 'Last Contract Lomax', build: 'human', trait: 'grit', power: 1.04, contact: 1.04, vision: 1.1, clutch: 1.23, bunt: 0.96, speed: 0.75, bats: 'R',
-    bio: 'Playing it out. Everybody knows, including him, and it has helped.' },
-  { id: 'nyv8', name: 'Waiver Wire Ferraro', build: 'human', trait: 'reader', power: 0.88, contact: 1.06, vision: 1.18, clutch: 1.11, bunt: 1.1, speed: 0.9, bats: 'R',
-    bio: 'Four clubs in five years and hitting better at every stop.' },
-  { id: 'nyv9', name: 'Amazin Grace Petrosino', build: 'augmented', trait: 'showman', power: 1.2, contact: 0.96, vision: 0.98, clutch: 1.33, bunt: 0.42, speed: 0.78, bats: 'L',
-    bio: 'One October, a long time ago, she was the best player alive.' },
+  h("nyv1", "Marv \"Two Knees\" Gagliardo", "human", "reader", 0.82, 1.18, 1.24, 1.27, 1.3, 0.88, "L", "CF", "Nineteenth season. Walks to first like the distance is negotiable."),
+  h("nyv2", "The Perfessor", "human", "reader", 0.86, 1.16, 1.26, 1.19, 1.24, 0.82, "R", "2B", "Talks the entire at-bat. Some of it is to the pitcher, some to nobody."),
+  h("nyv3", "Big Sal Dandridge", "human", "slugger", 1.38, 0.94, 0.96, 1.25, 0.38, 0.7, "R", "3B", "Led a league in home runs once. Will not say which league or when."),
+  h("nyv4", "Cortisone Pete", "augmented", "ironman", 1.32, 0.9, 0.92, 1.21, 0.34, 0.66, "L", "1B", "Held together chemically and available every single day regardless."),
+  h("nyv5", "Shea Kowalski", "human", "grit", 0.96, 1.1, 1.16, 1.29, 1.12, 0.8, "R", "LF", "Grew up in the parking lot of a stadium they knocked down."),
+  h("nyv6", "Flushing Ray Mundy", "human", "precision", 0.9, 1.12, 1.2, 1.15, 1.18, 0.85, "L", "RF", "Out by the bay, under the flight path, and never once distracted."),
+  h("nyv7", "Last Contract Lomax", "human", "grit", 1.04, 1.04, 1.1, 1.23, 0.96, 0.75, "R", "C", "Playing it out. Everybody knows, including him, and it has helped."),
+  h("nyv8", "Waiver Wire Ferraro", "human", "reader", 0.88, 1.06, 1.18, 1.11, 1.1, 0.9, "R", "SS", "Four clubs in five years and hitting better at every stop."),
+  h("nyv9", "Amazin Grace Petrosino", "augmented", "showman", 1.2, 0.96, 0.98, 1.33, 0.42, 0.78, "L", "DH", "One October, a long time ago, she was the best player alive."),
 ];
 
 const NYV_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Doc Renner', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.57,
-    blurb: 'Nothing left but the plan, and the plan is usually enough.',
-    arsenal: { changeup: 0.38, curveball: 0.34, sinker: 0.28 }, putaway: 'changeup', break: 1, clutch: 1.08, stamina: 1.12,
-  },
-  {
-    name: 'One More Year Vitali', throws: 'L', signature: 'none', tellTiming: 'release', zoneRate: 0.54,
-    blurb: 'Retires every winter and unretires by February.',
-    arsenal: { curveball: 0.44, fastball: 0.25, changeup: 0.31 }, putaway: 'curveball', break: 0.949, clutch: 1.021, stamina: 1.05,
-  },
-  {
-    name: 'Comeback Attempt Dolan', throws: 'R', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Third one. The first two went fine, which is the problem.',
-    arsenal: { curveball: 0.45, changeup: 0.32, sinker: 0.23 }, putaway: 'curveball', break: 0.984, clutch: 1.052, stamina: 1.08,
-  },
+  a("Doc Renner", "R", "junk", "release", 0.57, "Nothing left but the plan, and the plan is usually enough.", {"changeup":0.38,"curveball":0.34,"sinker":0.28}, "changeup", 1, 1.08, 1.12),
+  a("One More Year Vitali", "L", "none", "release", 0.54, "Retires every winter and unretires by February.", {"curveball":0.44,"fastball":0.25,"changeup":0.31}, "curveball", 0.949, 1.021, 1.05),
+  a("Comeback Attempt Dolan", "R", "painter", "pre_pitch", 0.53, "Third one. The first two went fine, which is the problem.", {"curveball":0.45,"changeup":0.32,"sinker":0.23}, "curveball", 0.984, 1.052, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const NYV_PEN: readonly Pitcher[] = [
-  {
-    name: 'Old Man Bracco', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.48,
-    blurb: 'Eighty-three on the gun and nobody squares him up anyway.',
-    arsenal: { slider: 0.42, changeup: 0.33, curveball: 0.25 }, putaway: 'slider', break: 0.98, clutch: 1.12, stamina: 0.8,
-  },
-  {
-    name: 'Pension Plan Wysocki', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Twelve more appearances and it vests. He is counting out loud.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 0.954, clutch: 1.031, stamina: 0.82,
-  },
-  {
-    name: 'One Last Save Ruggiero', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'Has retired four times. The club keeps the locker made up.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.015, clutch: 1.095, stamina: 0.7,
-  },
+  a("Old Man Bracco", "R", "painter", "release", 0.48, "Eighty-three on the gun and nobody squares him up anyway.", {"slider":0.42,"changeup":0.33,"curveball":0.25}, "slider", 0.98, 1.12, 0.8),
+  a("Pension Plan Wysocki", "L", "junk", "pre_pitch", 0.52, "Twelve more appearances and it vests. He is counting out loud.", {"changeup":0.6,"curveball":0.4}, "changeup", 0.954, 1.031, 0.82),
+  a("One Last Save Ruggiero", "R", "none", "release", 0.51, "Has retired four times. The club keeps the locker made up.", {"fastball":0.6,"slider":0.4}, "slider", 1.015, 1.095, 0.7),
 ];
 
 
@@ -934,61 +580,28 @@ const NYV_PEN: readonly Pitcher[] = [
  * Chicago and not one man on the roster who can run.
  */
 const PHI: readonly Player[] = [
-  { id: 'phi1', name: 'Cobbled Street Boyle', build: 'human', trait: 'grit', power: 1.039, contact: 1.188, vision: 1.143, clutch: 1.155, bunt: 1.2, speed: 1.02, bats: 'L',
-    bio: 'Boos his own club from the on-deck circle. They consider it support.' },
-  { id: 'phi2', name: 'Rittenhouse Ferro', build: 'human', trait: 'reader', power: 1.094, contact: 1.177, vision: 1.165, clutch: 1.111, bunt: 1.08, speed: 0.95, bats: 'R',
-    bio: 'Studied the game properly. Nobody in the park lets him forget it.' },
-  { id: 'phi3', name: 'BROADSIDE', build: 'machine', trait: 'slugger', power: 1.512, contact: 1.001, vision: 0.946, clutch: 1.144, bunt: 0.12, speed: 0.6, bats: 'R',
-    bio: 'Fires everything at once or not at all.' },
-  { id: 'phi4', name: 'Casemate Dziedzic', build: 'machine', trait: 'slugger', power: 1.435, contact: 1.012, vision: 0.968, clutch: 1.177, bunt: 0.16, speed: 0.62, bats: 'L',
-    bio: 'Two inches of face plate and a very small window to hit through.' },
-  { id: 'phi5', name: 'Frankford Nunn', build: 'human', trait: 'slugger', power: 1.303, contact: 1.078, vision: 1.012, clutch: 1.199, bunt: 0.4, speed: 0.78, bats: 'R',
-    bio: 'Takes the long way around the bases and takes his time doing it.' },
-  { id: 'phi6', name: 'Rivet Line Sczepanski', build: 'machine', trait: 'precision', power: 1.182, contact: 1.133, vision: 1.099, clutch: 1.1, bunt: 0.76, speed: 0.8, bats: 'R',
-    bio: 'Same swing, ten thousand times, no complaint on record.' },
-  { id: 'phi7', name: 'Shipyard Colavito', build: 'augmented', trait: 'grit', power: 1.226, contact: 1.1, vision: 1.044, clutch: 1.166, bunt: 0.68, speed: 0.85, bats: 'R',
-    bio: 'Welded back together twice and hits better after each one.' },
-  { id: 'phi8', name: 'Delaware Grey', build: 'human', trait: 'grit', power: 1.072, contact: 1.144, vision: 1.111, clutch: 1.21, bunt: 1.14, speed: 0.9, bats: 'L',
-    bio: 'Cold, brown and moving faster than it looks.' },
-  { id: 'phi9', name: 'Powder Room Kelleher', build: 'augmented', trait: 'showman', power: 1.336, contact: 1.023, vision: 0.979, clutch: 1.133, bunt: 0.3, speed: 0.75, bats: 'R',
-    bio: 'Everything he does is loud and most of it lands short.' },
+  h("phi1", "Cobbled Street Boyle", "human", "grit", 1.039, 1.188, 1.143, 1.155, 1.2, 1.02, "L", "LF", "Boos his own club from the on-deck circle. They consider it support."),
+  h("phi2", "Rittenhouse Ferro", "human", "reader", 1.094, 1.177, 1.165, 1.111, 1.08, 0.95, "R", "3B", "Studied the game properly. Nobody in the park lets him forget it."),
+  h("phi3", "BROADSIDE", "machine", "slugger", 1.512, 1.001, 0.946, 1.144, 0.12, 0.6, "R", "1B", "Fires everything at once or not at all."),
+  h("phi4", "Casemate Dziedzic", "machine", "slugger", 1.435, 1.012, 0.968, 1.177, 0.16, 0.62, "L", "DH", "Two inches of face plate and a very small window to hit through."),
+  h("phi5", "Frankford Nunn", "human", "ironman", 1.303, 1.078, 1.012, 1.199, 0.4, 0.78, "R", "RF", "Takes the long way around the bases and takes his time doing it."),
+  h("phi6", "Rivet Line Sczepanski", "machine", "precision", 1.182, 1.133, 1.099, 1.1, 0.76, 0.8, "R", "2B", "Same swing, ten thousand times, no complaint on record."),
+  h("phi7", "Shipyard Colavito", "augmented", "grit", 1.226, 1.1, 1.044, 1.166, 0.68, 0.85, "R", "C", "Welded back together twice and hits better after each one."),
+  h("phi8", "Delaware Grey", "human", "grit", 1.072, 1.144, 1.111, 1.21, 1.14, 0.9, "L", "CF", "Cold, brown and moving faster than it looks."),
+  h("phi9", "Powder Room Kelleher", "augmented", "showman", 1.336, 1.023, 0.979, 1.133, 0.3, 0.75, "R", "SS", "Everything he does is loud and most of it lands short."),
 ];
 
 const PHI_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Ordnance Mahaffey', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5, speedBonus: 2,
-    blurb: 'Sights it, ranges it, and puts it exactly on the corner.',
-    arsenal: { fastball: 0.35, slider: 0.35, changeup: 0.3 }, putaway: 'slider', break: 1.11, clutch: 1.06, stamina: 1.12,
-  },
-  {
-    name: 'Boiler Plate Sullivan', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.55,
-    blurb: 'Nothing over eighty-four and nothing hit hard either.',
-    arsenal: { changeup: 0.4, curveball: 0.35, fastball: 0.25 }, putaway: 'changeup', break: 1.116, clutch: 1.04, stamina: 1.13,
-  },
-  {
-    name: 'Rivet Gun Mazzeo', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Ninety a minute and your teeth are still going at midnight.',
-    arsenal: { fastball: 0.45, sinker: 0.32, slider: 0.23 }, putaway: 'sinker', break: 1.092, clutch: 1.036, stamina: 1.08,
-  },
+  a("Ordnance Mahaffey", "R", "painter", "release", 0.5, "Sights it, ranges it, and puts it exactly on the corner.", {"fastball":0.35,"slider":0.35,"changeup":0.3}, "slider", 1.11, 1.06, 1.12, 2),
+  a("Boiler Plate Sullivan", "L", "junk", "release", 0.55, "Nothing over eighty-four and nothing hit hard either.", {"changeup":0.4,"curveball":0.35,"fastball":0.25}, "changeup", 1.116, 1.04, 1.13),
+  a("Rivet Gun Mazzeo", "R", "none", "pre_pitch", 0.52, "Ninety a minute and your teeth are still going at midnight.", {"fastball":0.45,"sinker":0.32,"slider":0.23}, "sinker", 1.092, 1.036, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const PHI_PEN: readonly Pitcher[] = [
-  {
-    name: 'Keel Haul Novotny', throws: 'R', signature: 'none', tellTiming: 'none', zoneRate: 0.52, speedBonus: 6,
-    blurb: 'Drags you the length of the at-bat and lets go at the end.',
-    arsenal: { fastball: 0.5, slider: 0.3, sinker: 0.2 }, putaway: 'slider', break: 1.03, clutch: 1.07, stamina: 0.92,
-  },
-  {
-    name: 'Casemate Brogan', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Fires through a slot in four feet of iron. Good luck.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'curveball', break: 1.059, clutch: 1.014, stamina: 0.82,
-  },
-  {
-    name: 'Broadside Kilcoyne', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.5, speedBonus: 7,
-    blurb: 'Everything at once, one time, and then it is quiet.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.127, clutch: 1.078, stamina: 0.7,
-  },
+  a("Keel Haul Novotny", "R", "none", "none", 0.52, "Drags you the length of the at-bat and lets go at the end.", {"fastball":0.5,"slider":0.3,"sinker":0.2}, "slider", 1.03, 1.07, 0.92, 6),
+  a("Casemate Brogan", "L", "none", "pre_pitch", 0.51, "Fires through a slot in four feet of iron. Good luck.", {"curveball":0.6,"changeup":0.4}, "curveball", 1.059, 1.014, 0.82),
+  a("Broadside Kilcoyne", "R", "fireball", "release", 0.5, "Everything at once, one time, and then it is quiet.", {"fastball":0.6,"slider":0.4}, "fastball", 1.127, 1.078, 0.7, 7),
 ];
 
 /**
@@ -996,61 +609,28 @@ const PHI_PEN: readonly Pitcher[] = [
  * staff in the league and a lineup that scratches out three and holds on.
  */
 const SFO: readonly Player[] = [
-  { id: 'sfo1', name: 'Bayside Ocampo', build: 'human', trait: 'reader', power: 0.962, contact: 1.232, vision: 1.199, clutch: 1.166, bunt: 1.3, speed: 1.3, bats: 'L',
-    bio: 'Sees the pitch a half-second before the fog does.' },
-  { id: 'sfo2', name: 'Marine Layer Quan', build: 'human', trait: 'grit', power: 0.995, contact: 1.21, vision: 1.177, clutch: 1.177, bunt: 1.26, speed: 1.2, bats: 'R',
-    bio: 'Rolls in low, sits all night, burns off around the seventh.' },
-  { id: 'sfo3', name: 'Cable Car Ferreira', build: 'human', trait: 'slugger', power: 1.314, contact: 1.078, vision: 1.012, clutch: 1.188, bunt: 0.42, speed: 0.9, bats: 'R',
-    bio: 'Grinds uphill all game and comes down on you in the ninth.' },
-  { id: 'sfo4', name: 'Dogwatch Ibarra', build: 'augmented', trait: 'slugger', power: 1.347, contact: 1.034, vision: 0.989, clutch: 1.144, bunt: 0.26, speed: 0.85, bats: 'L',
-    bio: 'Works the hours nobody wants and hits like it is nine in the morning.' },
-  { id: 'sfo5', name: 'Presidio Stackhouse', build: 'human', trait: 'precision', power: 1.116, contact: 1.166, vision: 1.133, clutch: 1.133, bunt: 0.9, speed: 1.05, bats: 'L',
-    bio: 'Old garrison, still standing, entirely ceremonial until it is not.' },
-  { id: 'sfo6', name: 'Gull', build: 'machine', trait: 'showman', power: 1.16, contact: 1.122, vision: 1.078, clutch: 1.199, bunt: 0.72, speed: 1.24, bats: 'R',
-    bio: 'Takes what is left on the seats and dares anybody to say anything.' },
-  { id: 'sfo7', name: 'Tule Fog Barrientos', build: 'human', trait: 'reader', power: 1.028, contact: 1.188, vision: 1.188, clutch: 1.122, bunt: 1.16, speed: 1.08, bats: 'R',
-    bio: 'You lose sight of him for an inning and he is on third.' },
-  { id: 'sfo8', name: 'Sourdough Pell', build: 'human', trait: 'grit', power: 1.006, contact: 1.155, vision: 1.121, clutch: 1.221, bunt: 1.22, speed: 0.95, bats: 'L',
-    bio: 'Started in a kitchen. Still shows up covered in flour.' },
-  { id: 'sfo9', name: 'Foghorn Amadi', build: 'machine', trait: 'slugger', power: 1.292, contact: 1.045, vision: 0.989, clutch: 1.155, bunt: 0.3, speed: 0.88, bats: 'R',
-    bio: 'One note, twice a minute, and you feel it in the seats.' },
+  h("sfo1", "Bayside Ocampo", "human", "reader", 0.962, 1.232, 1.199, 1.166, 1.3, 1.3, "S", "LF", "Sees the pitch a half-second before the fog does."),
+  h("sfo2", "Marine Layer Quan", "human", "grit", 0.995, 1.21, 1.177, 1.177, 1.26, 1.2, "S", "CF", "Rolls in low, sits all night, burns off around the seventh."),
+  h("sfo3", "Cable Car Ferreira", "human", "slugger", 1.314, 1.078, 1.012, 1.188, 0.42, 0.9, "R", "RF", "Grinds uphill all game and comes down on you in the ninth."),
+  h("sfo4", "Dogwatch Ibarra", "augmented", "slugger", 1.347, 1.034, 0.989, 1.144, 0.26, 0.85, "L", "1B", "Works the hours nobody wants and hits like it is nine in the morning."),
+  h("sfo5", "Presidio Stackhouse", "human", "utility", 1.116, 1.166, 1.133, 1.133, 0.9, 1.05, "L", "3B", "Old garrison, still standing, entirely ceremonial until it is not.", ["2B","SS"]),
+  h("sfo6", "Gull", "machine", "utility", 1.16, 1.122, 1.078, 1.199, 0.72, 1.24, "R", "2B", "Takes what is left on the seats and dares anybody to say anything.", ["3B","SS"]),
+  h("sfo7", "Tule Fog Barrientos", "human", "cannon", 1.028, 1.188, 1.188, 1.122, 1.16, 1.08, "R", "C", "You lose sight of him for an inning and he is on third."),
+  h("sfo8", "Sourdough Pell", "human", "grit", 1.006, 1.155, 1.121, 1.221, 1.22, 0.95, "L", "SS", "Started in a kitchen. Still shows up covered in flour."),
+  h("sfo9", "Foghorn Amadi", "machine", "slugger", 1.292, 1.045, 0.989, 1.155, 0.3, 0.88, "R", "DH", "One note, twice a minute, and you feel it in the seats."),
 ];
 
 const SFO_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Golden Gate Achebe', throws: 'L', signature: 'painter', tellTiming: 'none', zoneRate: 0.5, speedBonus: 2,
-    blurb: 'Long, orange and nobody gets across without paying.',
-    arsenal: { slider: 0.35, curveball: 0.3, changeup: 0.2, fastball: 0.15 }, putaway: 'curveball', break: 1.17, clutch: 1.09, stamina: 1.14,
-  },
-  {
-    name: 'Harbor Pilot Osei', throws: 'R', signature: 'junk', tellTiming: 'none', zoneRate: 0.54,
-    blurb: 'Steers the whole night from the mound and never touches the wheel twice.',
-    arsenal: { changeup: 0.4, slider: 0.35, sinker: 0.25 }, putaway: 'changeup', break: 1.156, clutch: 1.07, stamina: 1.14,
-  },
-  {
-    name: 'Cable Car Quintero', throws: 'R', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Slow, loud, and hauled up the hill by something you cannot see.',
-    arsenal: { curveball: 0.45, changeup: 0.32, slider: 0.23 }, putaway: 'curveball', break: 1.143, clutch: 1.068, stamina: 1.08,
-  },
+  a("Golden Gate Achebe", "L", "painter", "none", 0.5, "Long, orange and nobody gets across without paying.", {"slider":0.35,"curveball":0.3,"changeup":0.2,"fastball":0.15}, "curveball", 1.17, 1.09, 1.14, 2),
+  a("Harbor Pilot Osei", "R", "junk", "none", 0.54, "Steers the whole night from the mound and never touches the wheel twice.", {"changeup":0.4,"slider":0.35,"sinker":0.25}, "changeup", 1.156, 1.07, 1.14),
+  a("Cable Car Quintero", "R", "painter", "pre_pitch", 0.53, "Slow, loud, and hauled up the hill by something you cannot see.", {"curveball":0.45,"changeup":0.32,"slider":0.23}, "curveball", 1.143, 1.068, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const SFO_PEN: readonly Pitcher[] = [
-  {
-    name: 'Bar Pilot Nyland', throws: 'R', signature: 'none', tellTiming: 'none', zoneRate: 0.56, speedBonus: 5,
-    blurb: 'Comes on for the last mile, which is the only dangerous one.',
-    arsenal: { fastball: 0.5, slider: 0.35, curveball: 0.15 }, putaway: 'slider', break: 1.08, clutch: 1.11, stamina: 0.93,
-  },
-  {
-    name: 'Sea Lion Marsh', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Took the pier in 1989 and has never given it back.',
-    arsenal: { slider: 0.6, changeup: 0.4 }, putaway: 'slider', break: 1.109, clutch: 1.046, stamina: 0.82,
-  },
-  {
-    name: 'Point Bonita Ferreira', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'Last light before the open ocean. Miss it and you are gone.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.179, clutch: 1.112, stamina: 0.7,
-  },
+  a("Bar Pilot Nyland", "R", "none", "none", 0.56, "Comes on for the last mile, which is the only dangerous one.", {"fastball":0.5,"slider":0.35,"curveball":0.15}, "slider", 1.08, 1.11, 0.93, 5),
+  a("Sea Lion Marsh", "L", "junk", "pre_pitch", 0.52, "Took the pier in 1989 and has never given it back.", {"slider":0.6,"changeup":0.4}, "slider", 1.109, 1.046, 0.82),
+  a("Point Bonita Ferreira", "R", "none", "release", 0.51, "Last light before the open ocean. Miss it and you are gone.", {"fastball":0.6,"slider":0.4}, "slider", 1.179, 1.112, 0.7),
 ];
 
 /**
@@ -1058,61 +638,28 @@ const SFO_PEN: readonly Pitcher[] = [
  * most patient club in the league and the least interested in your hurry.
  */
 const STL: readonly Player[] = [
-  { id: 'stl1', name: 'Levee Boudreaux', build: 'human', trait: 'grit', power: 1.017, contact: 1.21, vision: 1.165, clutch: 1.177, bunt: 1.28, speed: 1.18, bats: 'L',
-    bio: 'Holds the water back all season and nobody sends him a thank-you.' },
-  { id: 'stl2', name: 'Eads Kaminski', build: 'human', trait: 'reader', power: 1.061, contact: 1.194, vision: 1.182, clutch: 1.133, bunt: 1.12, speed: 1.1, bats: 'R',
-    bio: 'Built the crossing everyone said would fall down. It did not.' },
-  { id: 'stl3', name: 'Deckhand Poteet', build: 'machine', trait: 'slugger', power: 1.413, contact: 1.023, vision: 0.957, clutch: 1.166, bunt: 0.16, speed: 0.72, bats: 'R',
-    bio: 'Lifts what four men would rather not.' },
-  { id: 'stl4', name: 'Slackwater Cruz', build: 'augmented', trait: 'slugger', power: 1.358, contact: 1.034, vision: 0.979, clutch: 1.155, bunt: 0.24, speed: 0.8, bats: 'L',
-    bio: 'Still, wide and deeper than the crew tells passengers.' },
-  { id: 'stl5', name: 'Toll Booth Rachford', build: 'human', trait: 'precision', power: 1.149, contact: 1.155, vision: 1.121, clutch: 1.144, bunt: 0.88, speed: 0.95, bats: 'R',
-    bio: 'Everybody pays. Nobody enjoys the transaction.' },
-  { id: 'stl6', name: 'Chouteau Vance', build: 'human', trait: 'showman', power: 1.204, contact: 1.122, vision: 1.056, clutch: 1.21, bunt: 0.66, speed: 1.0, bats: 'L',
-    bio: 'Old fur money, new batting gloves, same opinion of himself.' },
-  { id: 'stl7', name: 'Mud Island Fesler', build: 'human', trait: 'grit', power: 1.072, contact: 1.166, vision: 1.133, clutch: 1.188, bunt: 1.1, speed: 1.02, bats: 'R',
-    bio: 'Comes and goes with the river and hits the same either way.' },
-  { id: 'stl8', name: 'Sternwheel Ojeda', build: 'machine', trait: 'grit', power: 1.127, contact: 1.133, vision: 1.099, clutch: 1.122, bunt: 0.94, speed: 0.86, bats: 'R',
-    bio: 'Slow to start, impossible to stop, loud the entire way.' },
-  { id: 'stl9', name: 'Undertow Salas', build: 'augmented', trait: 'slugger', power: 1.281, contact: 1.045, vision: 0.989, clutch: 1.111, bunt: 0.34, speed: 0.82, bats: 'L',
-    bio: 'Nothing on the surface and everything underneath it.' },
+  h("stl1", "Levee Boudreaux", "human", "reader", 1.017, 1.21, 1.165, 1.177, 1.28, 1.18, "L", "CF", "Holds the water back all season and nobody sends him a thank-you."),
+  h("stl2", "Eads Kaminski", "human", "reader", 1.061, 1.194, 1.182, 1.133, 1.12, 1.1, "R", "2B", "Built the crossing everyone said would fall down. It did not."),
+  h("stl3", "Deckhand Poteet", "machine", "slugger", 1.413, 1.023, 0.957, 1.166, 0.16, 0.72, "R", "3B", "Lifts what four men would rather not."),
+  h("stl4", "Slackwater Cruz", "augmented", "ironman", 1.358, 1.034, 0.979, 1.155, 0.24, 0.8, "L", "1B", "Still, wide and deeper than the crew tells passengers."),
+  h("stl5", "Toll Booth Rachford", "human", "grit", 1.149, 1.155, 1.121, 1.144, 0.88, 0.95, "R", "LF", "Everybody pays. Nobody enjoys the transaction."),
+  h("stl6", "Chouteau Vance", "human", "showman", 1.204, 1.122, 1.056, 1.21, 0.66, 1, "L", "RF", "Old fur money, new batting gloves, same opinion of himself."),
+  h("stl7", "Mud Island Fesler", "human", "grit", 1.072, 1.166, 1.133, 1.188, 1.1, 1.02, "R", "C", "Comes and goes with the river and hits the same either way."),
+  h("stl8", "Sternwheel Ojeda", "machine", "grit", 1.127, 1.133, 1.099, 1.122, 0.94, 0.86, "R", "SS", "Slow to start, impossible to stop, loud the entire way."),
+  h("stl9", "Undertow Salas", "augmented", "slugger", 1.281, 1.045, 0.989, 1.111, 0.34, 0.82, "L", "DH", "Nothing on the surface and everything underneath it."),
 ];
 
 const STL_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Slow Ferry Dabrowski', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.56,
-    blurb: 'You will get there. You will not enjoy the trip.',
-    arsenal: { changeup: 0.4, curveball: 0.32, sinker: 0.28 }, putaway: 'changeup', break: 1.07, clutch: 1.05, stamina: 1.1,
-  },
-  {
-    name: 'Ice Jam Prewett', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.55, speedBonus: 3,
-    blurb: 'Backs up the whole river for an inning at a time.',
-    arsenal: { sinker: 0.45, slider: 0.3, fastball: 0.25 }, putaway: 'sinker', break: 1.074, clutch: 1.03, stamina: 1.12,
-  },
-  {
-    name: 'Slack Water Kovacic', throws: 'L', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'The hour the river forgets which way it is going.',
-    arsenal: { sinker: 0.45, changeup: 0.32, curveball: 0.23 }, putaway: 'changeup', break: 1.075, clutch: 1.039, stamina: 1.08,
-  },
+  a("Slow Ferry Dabrowski", "L", "junk", "release", 0.56, "You will get there. You will not enjoy the trip.", {"changeup":0.4,"curveball":0.32,"sinker":0.28}, "changeup", 1.07, 1.05, 1.1),
+  a("Ice Jam Prewett", "R", "none", "release", 0.55, "Backs up the whole river for an inning at a time.", {"sinker":0.45,"slider":0.3,"fastball":0.25}, "sinker", 1.074, 1.03, 1.12, 3),
+  a("Slack Water Kovacic", "L", "painter", "pre_pitch", 0.53, "The hour the river forgets which way it is going.", {"sinker":0.45,"changeup":0.32,"curveball":0.23}, "changeup", 1.075, 1.039, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const STL_PEN: readonly Pitcher[] = [
-  {
-    name: 'Last Boat Gennaro', throws: 'R', signature: 'painter', tellTiming: 'none', zoneRate: 0.48, speedBonus: 4,
-    blurb: 'One crossing left and he is not waiting for you.',
-    arsenal: { slider: 0.4, fastball: 0.35, changeup: 0.25 }, putaway: 'slider', break: 1.06, clutch: 1.1, stamina: 0.91,
-  },
-  {
-    name: 'Toll Taker Rhys', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Sets the fare, takes the fare, does not discuss the fare.',
-    arsenal: { curveball: 0.6, slider: 0.4 }, putaway: 'curveball', break: 1.043, clutch: 1.017, stamina: 0.82,
-  },
-  {
-    name: 'Far Bank Sopko', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'You can see it the whole way across. Getting there is the trouble.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 1.11, clutch: 1.081, stamina: 0.7,
-  },
+  a("Last Boat Gennaro", "R", "painter", "none", 0.48, "One crossing left and he is not waiting for you.", {"slider":0.4,"fastball":0.35,"changeup":0.25}, "slider", 1.06, 1.1, 0.91, 4),
+  a("Toll Taker Rhys", "R", "none", "pre_pitch", 0.52, "Sets the fare, takes the fare, does not discuss the fare.", {"curveball":0.6,"slider":0.4}, "curveball", 1.043, 1.017, 0.82),
+  a("Far Bank Sopko", "R", "none", "release", 0.51, "You can see it the whole way across. Getting there is the trouble.", {"fastball":0.6,"sinker":0.4}, "sinker", 1.11, 1.081, 0.7),
 ];
 
 /**
@@ -1120,61 +667,28 @@ const STL_PEN: readonly Pitcher[] = [
  * line, no legs anywhere, and a mistake pitch leaves the county.
  */
 const CLE: readonly Player[] = [
-  { id: 'cle1', name: 'Flats Wojcik', build: 'machine', trait: 'grit', power: 1.05, contact: 1.166, vision: 1.121, clutch: 1.089, bunt: 1.06, speed: 0.92, bats: 'L',
-    bio: 'Built where the river caught fire. Unbothered by that fact.' },
-  { id: 'cle2', name: 'Hot Rivet Palladino', build: 'machine', trait: 'grit', power: 1.105, contact: 1.155, vision: 1.111, clutch: 1.122, bunt: 1.0, speed: 0.88, bats: 'R',
-    bio: 'Thrown, caught and driven home, four times a minute, forty years.' },
-  { id: 'cle3', name: 'OPEN HEARTH', build: 'machine', trait: 'slugger', power: 1.479, contact: 0.99, vision: 0.934, clutch: 1.1, bunt: 0.14, speed: 0.6, bats: 'R',
-    bio: 'Runs at two thousand degrees and has never been allowed indoors.' },
-  { id: 'cle4', name: 'Slag Heap Yurchenko', build: 'machine', trait: 'slugger', power: 1.402, contact: 0.979, vision: 0.946, clutch: 1.067, bunt: 0.18, speed: 0.58, bats: 'L',
-    bio: 'What is left over, stacked forty feet high and still dangerous.' },
-  { id: 'cle5', name: 'Terminal Tower', build: 'machine', trait: 'slugger', power: 1.358, contact: 1.012, vision: 0.968, clutch: 1.111, bunt: 0.2, speed: 0.65, bats: 'R',
-    bio: 'Tallest thing for four hundred miles and knows it.' },
-  { id: 'cle6', name: 'Pig Iron Skala', build: 'machine', trait: 'precision', power: 1.237, contact: 1.078, vision: 1.034, clutch: 1.045, bunt: 0.6, speed: 0.75, bats: 'R',
-    bio: 'Crude, cheap and in absolutely everything the league is built from.' },
-  { id: 'cle7', name: 'Bessemer Nixon', build: 'machine', trait: 'grit', power: 1.171, contact: 1.111, vision: 1.078, clutch: 1.133, bunt: 0.88, speed: 0.8, bats: 'L',
-    bio: 'Blows the impurities out in one loud, terrifying pass.' },
-  { id: 'cle8', name: 'Erie Fog Bank', build: 'augmented', trait: 'reader', power: 1.094, contact: 1.122, vision: 1.133, clutch: 1.078, bunt: 0.82, speed: 0.9, bats: 'R',
-    bio: 'Comes off the water in November and ruins three straight games.' },
-  { id: 'cle9', name: 'Drop Forge Kucera', build: 'machine', trait: 'slugger', power: 1.314, contact: 1.001, vision: 0.957, clutch: 1.056, bunt: 0.22, speed: 0.62, bats: 'R',
-    bio: 'One swing per plate appearance. It is all he was rated for.' },
+  h("cle1", "Flats Wojcik", "machine", "grit", 1.05, 1.166, 1.121, 1.089, 1.06, 0.92, "L", "LF", "Built where the river caught fire. Unbothered by that fact."),
+  h("cle2", "Hot Rivet Palladino", "machine", "grit", 1.105, 1.155, 1.111, 1.122, 1, 0.88, "R", "3B", "Thrown, caught and driven home, four times a minute, forty years."),
+  h("cle3", "OPEN HEARTH", "machine", "slugger", 1.479, 0.99, 0.934, 1.1, 0.14, 0.6, "R", "1B", "Runs at two thousand degrees and has never been allowed indoors."),
+  h("cle4", "Slag Heap Yurchenko", "machine", "slugger", 1.402, 0.979, 0.946, 1.067, 0.18, 0.58, "L", "DH", "What is left over, stacked forty feet high and still dangerous."),
+  h("cle5", "Terminal Tower", "machine", "ironman", 1.358, 1.012, 0.968, 1.111, 0.2, 0.65, "R", "RF", "Tallest thing for four hundred miles and knows it."),
+  h("cle6", "Pig Iron Skala", "machine", "precision", 1.237, 1.078, 1.034, 1.045, 0.6, 0.75, "R", "2B", "Crude, cheap and in absolutely everything the league is built from."),
+  h("cle7", "Bessemer Nixon", "machine", "grit", 1.171, 1.111, 1.078, 1.133, 0.88, 0.8, "L", "C", "Blows the impurities out in one loud, terrifying pass."),
+  h("cle8", "Erie Fog Bank", "augmented", "reader", 1.094, 1.122, 1.133, 1.078, 0.82, 0.9, "R", "CF", "Comes off the water in November and ruins three straight games."),
+  h("cle9", "Drop Forge Kucera", "machine", "slugger", 1.314, 1.001, 0.957, 1.056, 0.22, 0.62, "R", "SS", "One swing per plate appearance. It is all he was rated for."),
 ];
 
 const CLE_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Coke Oven Bialas', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.54, speedBonus: 2,
-    blurb: 'Burns for eighteen hours and finishes filthy.',
-    arsenal: { sinker: 0.4, slider: 0.35, changeup: 0.25 }, putaway: 'slider', break: 1.07, clutch: 1, stamina: 1.09,
-  },
-  {
-    name: 'Cuyahoga Voss', throws: 'L', signature: 'none', tellTiming: 'release', zoneRate: 0.52, speedBonus: 3,
-    blurb: 'Bends six times before it gets anywhere near the lake.',
-    arsenal: { curveball: 0.46, fastball: 0.25, changeup: 0.29 }, putaway: 'curveball', break: 1.085, clutch: 1.021, stamina: 1.1,
-  },
-  {
-    name: 'Hot Rivet Marek', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Thrown glowing across a gap and caught in a bucket. Every time.',
-    arsenal: { fastball: 0.45, slider: 0.32, sinker: 0.23 }, putaway: 'slider', break: 1.062, clutch: 1.006, stamina: 1.08,
-  },
+  a("Coke Oven Bialas", "R", "junk", "release", 0.54, "Burns for eighteen hours and finishes filthy.", {"sinker":0.4,"slider":0.35,"changeup":0.25}, "slider", 1.07, 1, 1.09, 2),
+  a("Cuyahoga Voss", "L", "none", "release", 0.52, "Bends six times before it gets anywhere near the lake.", {"curveball":0.46,"fastball":0.25,"changeup":0.29}, "curveball", 1.085, 1.021, 1.1, 3),
+  a("Hot Rivet Marek", "R", "none", "pre_pitch", 0.52, "Thrown glowing across a gap and caught in a bucket. Every time.", {"fastball":0.45,"slider":0.32,"sinker":0.23}, "slider", 1.062, 1.006, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const CLE_PEN: readonly Pitcher[] = [
-  {
-    name: 'Night Pour Radich', throws: 'R', signature: 'fireball', tellTiming: 'none', zoneRate: 0.5, speedBonus: 7,
-    blurb: 'The whole sky goes orange and then the inning is over.',
-    arsenal: { fastball: 0.68, slider: 0.32 }, putaway: 'fastball', break: 1.01, clutch: 1.06, stamina: 0.9,
-  },
-  {
-    name: 'Bucket Boy Sladek', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Catches what the last man threw and never drops one.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'curveball', break: 1.03, clutch: 0.985, stamina: 0.82,
-  },
-  {
-    name: 'COLD SHUT', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.5, speedBonus: 7,
-    blurb: 'A seam where two pours did not take. Nothing gets through it.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.095, clutch: 1.047, stamina: 0.7,
-  },
+  a("Night Pour Radich", "R", "fireball", "none", 0.5, "The whole sky goes orange and then the inning is over.", {"fastball":0.68,"slider":0.32}, "fastball", 1.01, 1.06, 0.9, 7),
+  a("Bucket Boy Sladek", "L", "none", "pre_pitch", 0.51, "Catches what the last man threw and never drops one.", {"curveball":0.6,"changeup":0.4}, "curveball", 1.03, 0.985, 0.82),
+  a("COLD SHUT", "R", "fireball", "release", 0.5, "A seam where two pours did not take. Nothing gets through it.", {"fastball":0.6,"slider":0.4}, "fastball", 1.095, 1.047, 0.7, 7),
 ];
 
 /**
@@ -1182,61 +696,28 @@ const CLE_PEN: readonly Pitcher[] = [
  * everything until somebody makes a mistake, and no power to punish it with.
  */
 const MIN: readonly Player[] = [
-  { id: 'min1', name: 'Washburn Aho', build: 'human', trait: 'grit', power: 0.973, contact: 1.221, vision: 1.177, clutch: 1.155, bunt: 1.32, speed: 1.24, bats: 'L',
-    bio: 'Grinds it fine. Takes all night and gets there.' },
-  { id: 'min2', name: 'St. Anthony Lindqvist', build: 'human', trait: 'reader', power: 1.006, contact: 1.21, vision: 1.188, clutch: 1.122, bunt: 1.24, speed: 1.16, bats: 'R',
-    bio: 'Named for the falls that ran the whole city. Runs the whole lineup.' },
-  { id: 'min3', name: 'Grain Elevator Sorenson', build: 'machine', trait: 'slugger', power: 1.38, contact: 1.023, vision: 0.968, clutch: 1.1, bunt: 0.18, speed: 0.68, bats: 'R',
-    bio: 'Takes it up and holds it there until somebody asks for it.' },
-  { id: 'min4', name: 'Bran Halvorsen', build: 'human', trait: 'slugger', power: 1.259, contact: 1.067, vision: 1, clutch: 1.133, bunt: 0.44, speed: 0.85, bats: 'L',
-    bio: 'Good for you and nobody is happy about it.' },
-  { id: 'min5', name: 'Hard Freeze Ndiaye', build: 'human', trait: 'grit', power: 1.072, contact: 1.177, vision: 1.143, clutch: 1.188, bunt: 1.14, speed: 1.05, bats: 'R',
-    bio: 'Plays six months a year in weather nobody else will stand in.' },
-  { id: 'min6', name: 'Millrace Tvedt', build: 'human', trait: 'precision', power: 1.039, contact: 1.188, vision: 1.155, clutch: 1.111, bunt: 1.06, speed: 1.0, bats: 'L',
-    bio: 'Same channel, same speed, every single night of the year.' },
-  { id: 'min7', name: 'Nokomis Fairbanks', build: 'augmented', trait: 'reader', power: 1.127, contact: 1.133, vision: 1.133, clutch: 1.089, bunt: 0.84, speed: 1.12, bats: 'R',
-    bio: 'Quiet, frozen half the year, and deeper than the map says.' },
-  { id: 'min8', name: 'Dust Explosion Kirk', build: 'augmented', trait: 'slugger', power: 1.303, contact: 1.012, vision: 0.968, clutch: 1.067, bunt: 0.3, speed: 0.82, bats: 'R',
-    bio: 'Nothing for an hour, and then the roof is somewhere else.' },
-  { id: 'min9', name: 'Sifter Bergstrom', build: 'human', trait: 'grit', power: 1.017, contact: 1.155, vision: 1.121, clutch: 1.166, bunt: 1.2, speed: 0.95, bats: 'L',
-    bio: 'Everything goes through him twice before anybody is satisfied.' },
+  h("min1", "Washburn Aho", "human", "reader", 0.973, 1.221, 1.177, 1.155, 1.32, 1.24, "L", "CF", "Grinds it fine. Takes all night and gets there."),
+  h("min2", "St. Anthony Lindqvist", "human", "reader", 1.006, 1.21, 1.188, 1.122, 1.24, 1.16, "R", "2B", "Named for the falls that ran the whole city. Runs the whole lineup."),
+  h("min3", "Grain Elevator Sorenson", "machine", "slugger", 1.38, 1.023, 0.968, 1.1, 0.18, 0.68, "R", "3B", "Takes it up and holds it there until somebody asks for it."),
+  h("min4", "Bran Halvorsen", "human", "ironman", 1.259, 1.067, 1, 1.133, 0.44, 0.85, "L", "1B", "Good for you and nobody is happy about it."),
+  h("min5", "Hard Freeze Ndiaye", "human", "grit", 1.072, 1.177, 1.143, 1.188, 1.14, 1.05, "R", "LF", "Plays six months a year in weather nobody else will stand in."),
+  h("min6", "Millrace Tvedt", "human", "precision", 1.039, 1.188, 1.155, 1.111, 1.06, 1, "L", "RF", "Same channel, same speed, every single night of the year."),
+  h("min7", "Nokomis Fairbanks", "augmented", "grit", 1.127, 1.133, 1.133, 1.089, 0.84, 1.12, "R", "C", "Quiet, frozen half the year, and deeper than the map says."),
+  h("min8", "Dust Explosion Kirk", "augmented", "slugger", 1.303, 1.012, 0.968, 1.067, 0.3, 0.82, "R", "SS", "Nothing for an hour, and then the roof is somewhere else."),
+  h("min9", "Sifter Bergstrom", "human", "grit", 1.017, 1.155, 1.121, 1.166, 1.2, 0.95, "L", "DH", "Everything goes through him twice before anybody is satisfied."),
 ];
 
 const MIN_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Whiteout Lundeen', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.55,
-    blurb: 'You know it is coming. You cannot see any of it.',
-    arsenal: { curveball: 0.38, changeup: 0.34, sinker: 0.28 }, putaway: 'curveball', break: 1.06, clutch: 1.02, stamina: 1.08,
-  },
-  {
-    name: 'Millstone Ryba', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.58,
-    blurb: 'Turns all night at exactly one speed.',
-    arsenal: { sinker: 0.48, fastball: 0.25, slider: 0.27 }, putaway: 'sinker', break: 1.032, clutch: 1.01, stamina: 1.18,
-  },
-  {
-    name: 'Flour Dust Lindgren', throws: 'R', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'Hangs in the air all night. One spark and the mill is gone.',
-    arsenal: { curveball: 0.45, changeup: 0.32, sinker: 0.23 }, putaway: 'curveball', break: 1.052, clutch: 1.013, stamina: 1.08,
-  },
+  a("Whiteout Lundeen", "R", "junk", "release", 0.55, "You know it is coming. You cannot see any of it.", {"curveball":0.38,"changeup":0.34,"sinker":0.28}, "curveball", 1.06, 1.02, 1.08),
+  a("Millstone Ryba", "R", "none", "pre_pitch", 0.58, "Turns all night at exactly one speed.", {"sinker":0.48,"fastball":0.25,"slider":0.27}, "sinker", 1.032, 1.01, 1.18),
+  a("Flour Dust Lindgren", "R", "painter", "pre_pitch", 0.54, "Hangs in the air all night. One spark and the mill is gone.", {"curveball":0.45,"changeup":0.32,"sinker":0.23}, "curveball", 1.052, 1.013, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const MIN_PEN: readonly Pitcher[] = [
-  {
-    name: 'Ten Below Vasquez', throws: 'L', signature: 'painter', tellTiming: 'release', zoneRate: 0.48, speedBonus: 3,
-    blurb: 'Nothing over the plate and nobody wants to be out there anyway.',
-    arsenal: { slider: 0.42, changeup: 0.33, fastball: 0.25 }, putaway: 'slider', break: 1.04, clutch: 1.07, stamina: 0.92,
-  },
-  {
-    name: 'Ice House Anders', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Cut it in January, sell it in July, tell nobody how.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 1.02, clutch: 0.992, stamina: 0.82,
-  },
-  {
-    name: 'Twenty Below Halvorsen', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.52,
-    blurb: 'Considers it bracing. Has said so to reporters, in it, in shirtsleeves.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.085, clutch: 1.054, stamina: 0.7,
-  },
+  a("Ten Below Vasquez", "L", "painter", "release", 0.48, "Nothing over the plate and nobody wants to be out there anyway.", {"slider":0.42,"changeup":0.33,"fastball":0.25}, "slider", 1.04, 1.07, 0.92, 3),
+  a("Ice House Anders", "L", "junk", "pre_pitch", 0.53, "Cut it in January, sell it in July, tell nobody how.", {"changeup":0.6,"curveball":0.4}, "changeup", 1.02, 0.992, 0.82),
+  a("Twenty Below Halvorsen", "R", "none", "release", 0.52, "Considers it bracing. Has said so to reporters, in it, in shirtsleeves.", {"fastball":0.6,"slider":0.4}, "slider", 1.085, 1.054, 0.7),
 ];
 
 /**
@@ -1246,61 +727,28 @@ const MIN_PEN: readonly Pitcher[] = [
  * a hit, take the extra base, win 3-2 in front of nobody.
  */
 const BAL: readonly Player[] = [
-  { id: 'bal1', name: 'Sook Delaney', build: 'human', trait: 'showman', power: 0.918, contact: 1.221, vision: 1.177, clutch: 1.188, bunt: 1.34, speed: 1.42, bats: 'L',
-    bio: 'Sideways, fast, and impossible to get hold of.' },
-  { id: 'bal2', name: 'Trotline Feeny', build: 'human', trait: 'reader', power: 0.962, contact: 1.199, vision: 1.188, clutch: 1.144, bunt: 1.28, speed: 1.3, bats: 'R',
-    bio: 'Sets it at four in the morning and hauls it in all day.' },
-  { id: 'bal3', name: 'Jimmy Crab Pusateri', build: 'human', trait: 'slugger', power: 1.27, contact: 1.089, vision: 1.022, clutch: 1.166, bunt: 0.5, speed: 1.05, bats: 'R',
-    bio: 'The big one at the bottom of the bushel. Still fighting.' },
-  { id: 'bal4', name: 'Chesapeake Lorne', build: 'augmented', trait: 'slugger', power: 1.292, contact: 1.045, vision: 0.989, clutch: 1.122, bunt: 0.34, speed: 0.95, bats: 'L',
-    bio: 'Wide, shallow and full of things that will hurt you.' },
-  { id: 'bal5', name: 'Old Bay Sczerbiak', build: 'human', trait: 'grit', power: 1.039, contact: 1.177, vision: 1.133, clutch: 1.21, bunt: 1.16, speed: 1.15, bats: 'R',
-    bio: 'On everything, whether anybody asked for it or not.' },
-  { id: 'bal6', name: 'Skipjack Moten', build: 'human', trait: 'precision', power: 1.006, contact: 1.188, vision: 1.143, clutch: 1.111, bunt: 1.1, speed: 1.22, bats: 'L',
-    bio: 'Last of the sailing fleet. Refuses an engine on principle.' },
-  { id: 'bal7', name: 'Fells Point Amara', build: 'human', trait: 'reader', power: 1.05, contact: 1.166, vision: 1.165, clutch: 1.133, bunt: 1.08, speed: 1.18, bats: 'R',
-    bio: 'Knows every dock, every bar and every umpire on the eastern seaboard.' },
-  { id: 'bal8', name: 'Molting Season Pratt', build: 'human', trait: 'grit', power: 0.984, contact: 1.144, vision: 1.111, clutch: 1.199, bunt: 1.24, speed: 1.1, bats: 'L',
-    bio: 'Soft for two weeks a year and hides the whole time.' },
-  { id: 'bal9', name: 'Dredge Boat Kilcoyne', build: 'machine', trait: 'slugger', power: 1.237, contact: 1.056, vision: 1, clutch: 1.089, bunt: 0.38, speed: 0.9, bats: 'R',
-    bio: 'Scrapes the bottom and comes up with something every time.' },
+  h("bal1", "Sook Delaney", "human", "showman", 0.918, 1.221, 1.177, 1.188, 1.34, 1.42, "S", "LF", "Sideways, fast, and impossible to get hold of."),
+  h("bal2", "Trotline Feeny", "human", "reader", 0.962, 1.199, 1.188, 1.144, 1.28, 1.3, "S", "CF", "Sets it at four in the morning and hauls it in all day."),
+  h("bal3", "Jimmy Crab Pusateri", "human", "slugger", 1.27, 1.089, 1.022, 1.166, 0.5, 1.05, "R", "RF", "The big one at the bottom of the bushel. Still fighting."),
+  h("bal4", "Chesapeake Lorne", "augmented", "slugger", 1.292, 1.045, 0.989, 1.122, 0.34, 0.95, "L", "1B", "Wide, shallow and full of things that will hurt you."),
+  h("bal5", "Old Bay Sczerbiak", "human", "utility", 1.039, 1.177, 1.133, 1.21, 1.16, 1.15, "R", "3B", "On everything, whether anybody asked for it or not.", ["2B","SS"]),
+  h("bal6", "Skipjack Moten", "human", "utility", 1.006, 1.188, 1.143, 1.111, 1.1, 1.22, "L", "2B", "Last of the sailing fleet. Refuses an engine on principle.", ["3B","SS"]),
+  h("bal7", "Fells Point Amara", "human", "cannon", 1.05, 1.166, 1.165, 1.133, 1.08, 1.18, "R", "C", "Knows every dock, every bar and every umpire on the eastern seaboard."),
+  h("bal8", "Molting Season Pratt", "human", "grit", 0.984, 1.144, 1.111, 1.199, 1.24, 1.1, "L", "SS", "Soft for two weeks a year and hides the whole time."),
+  h("bal9", "Dredge Boat Kilcoyne", "machine", "slugger", 1.237, 1.056, 1, 1.089, 0.38, 0.9, "R", "DH", "Scrapes the bottom and comes up with something every time."),
 ];
 
 const BAL_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Bay Squall Iyer', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.52,
-    blurb: 'Twenty minutes of chaos and then it is over.',
-    arsenal: { curveball: 0.4, changeup: 0.3, slider: 0.3 }, putaway: 'curveball', break: 1.05, clutch: 1.03, stamina: 1.05,
-  },
-  {
-    name: 'Crab Pot Rickerts', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.56,
-    blurb: 'Easy to get into. That was never the hard part.',
-    arsenal: { sinker: 0.47, fastball: 0.25, changeup: 0.28 }, putaway: 'sinker', break: 1.043, clutch: 1, stamina: 1.14,
-  },
-  {
-    name: 'Steamed Hard Volkov', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Twenty minutes under the lid and everything comes apart clean.',
-    arsenal: { fastball: 0.45, sinker: 0.32, slider: 0.23 }, putaway: 'sinker', break: 1.035, clutch: 1.006, stamina: 1.08,
-  },
+  a("Bay Squall Iyer", "L", "junk", "release", 0.52, "Twenty minutes of chaos and then it is over.", {"curveball":0.4,"changeup":0.3,"slider":0.3}, "curveball", 1.05, 1.03, 1.05),
+  a("Crab Pot Rickerts", "R", "none", "release", 0.56, "Easy to get into. That was never the hard part.", {"sinker":0.47,"fastball":0.25,"changeup":0.28}, "sinker", 1.043, 1, 1.14),
+  a("Steamed Hard Volkov", "R", "none", "pre_pitch", 0.53, "Twenty minutes under the lid and everything comes apart clean.", {"fastball":0.45,"sinker":0.32,"slider":0.23}, "sinker", 1.035, 1.006, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const BAL_PEN: readonly Pitcher[] = [
-  {
-    name: 'Nor easter Fawcett', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.5, speedBonus: 6,
-    blurb: 'Three days of warning and it still takes the roof off.',
-    arsenal: { fastball: 0.66, slider: 0.34 }, putaway: 'fastball', break: 0.99, clutch: 1.05, stamina: 0.91,
-  },
-  {
-    name: 'Bushel Basket Pryor', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Holds a great deal more than it looks like it should.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'curveball', break: 1.004, clutch: 0.985, stamina: 0.82,
-  },
-  {
-    name: 'Mallet Man Petrosian', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.51, speedBonus: 7,
-    blurb: 'One tool, one motion, and he has never needed a second.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.068, clutch: 1.047, stamina: 0.7,
-  },
+  a("Nor easter Fawcett", "R", "fireball", "release", 0.5, "Three days of warning and it still takes the roof off.", {"fastball":0.66,"slider":0.34}, "fastball", 0.99, 1.05, 0.91, 6),
+  a("Bushel Basket Pryor", "L", "none", "pre_pitch", 0.52, "Holds a great deal more than it looks like it should.", {"curveball":0.6,"changeup":0.4}, "curveball", 1.004, 0.985, 0.82),
+  a("Mallet Man Petrosian", "R", "fireball", "release", 0.51, "One tool, one motion, and he has never needed a second.", {"fastball":0.6,"slider":0.4}, "fastball", 1.068, 1.047, 0.7, 7),
 ];
 
 /**
@@ -1309,61 +757,28 @@ const BAL_PEN: readonly Pitcher[] = [
  * settle with everybody who replaced them.
  */
 const PIT: readonly Player[] = [
-  { id: 'pit1', name: 'Hunky Zawadzki', build: 'human', trait: 'grit', power: 1.028, contact: 1.188, vision: 1.143, clutch: 1.199, bunt: 1.24, speed: 1.0, bats: 'L',
-    bio: 'Twelve-hour turn, seven days, and then a doubleheader.' },
-  { id: 'pit2', name: 'Incline Bevacqua', build: 'human', trait: 'reader', power: 1.061, contact: 1.177, vision: 1.165, clutch: 1.155, bunt: 1.14, speed: 1.08, bats: 'R',
-    bio: 'Goes up the hill and comes back down on somebody.' },
-  { id: 'pit3', name: 'Puddling Bar Mazur', build: 'human', trait: 'slugger', power: 1.347, contact: 1.045, vision: 0.989, clutch: 1.177, bunt: 0.3, speed: 0.75, bats: 'R',
-    bio: 'Stirred iron by hand for nine years. His wrists are the story.' },
-  { id: 'pit4', name: 'Homestead Krall', build: 'machine', trait: 'slugger', power: 1.391, contact: 1.012, vision: 0.957, clutch: 1.144, bunt: 0.16, speed: 0.66, bats: 'L',
-    bio: 'Remembers the strike. Was on the wrong side of it and says so.' },
-  { id: 'pit5', name: 'Three Rivers Osifo', build: 'human', trait: 'precision', power: 1.127, contact: 1.144, vision: 1.111, clutch: 1.122, bunt: 0.9, speed: 0.98, bats: 'R',
-    bio: 'Everything meets at him and leaves in one direction.' },
-  { id: 'pit6', name: 'Coal Barge Tutko', build: 'machine', trait: 'grit', power: 1.204, contact: 1.089, vision: 1.056, clutch: 1.111, bunt: 0.86, speed: 0.7, bats: 'R',
-    bio: 'Loaded to the waterline and never once late.' },
-  { id: 'pit7', name: 'Bloomery Nance', build: 'augmented', trait: 'slugger', power: 1.259, contact: 1.034, vision: 0.989, clutch: 1.1, bunt: 0.34, speed: 0.8, bats: 'L',
-    bio: 'Old process, obsolete on paper, still turns out iron.' },
-  { id: 'pit8', name: 'Smoke Ordinance Duda', build: 'human', trait: 'grit', power: 1.05, contact: 1.155, vision: 1.121, clutch: 1.21, bunt: 1.12, speed: 0.92, bats: 'R',
-    bio: 'They passed a law about him. He got worse.' },
-  { id: 'pit9', name: 'Slag Ladle Prokop', build: 'machine', trait: 'slugger', power: 1.303, contact: 1.001, vision: 0.968, clutch: 1.078, bunt: 0.2, speed: 0.64, bats: 'R',
-    bio: 'Tips once a shift. Everybody stands well back when he does.' },
+  h("pit1", "Hunky Zawadzki", "human", "grit", 1.028, 1.188, 1.143, 1.199, 1.24, 1, "L", "RF", "Twelve-hour turn, seven days, and then a doubleheader."),
+  h("pit2", "Incline Bevacqua", "human", "reader", 1.061, 1.177, 1.165, 1.155, 1.14, 1.08, "R", "LF", "Goes up the hill and comes back down on somebody."),
+  h("pit3", "Puddling Bar Mazur", "human", "showman", 1.347, 1.045, 0.989, 1.177, 0.3, 0.75, "R", "3B", "Stirred iron by hand for nine years. His wrists are the story."),
+  h("pit4", "Homestead Krall", "machine", "slugger", 1.391, 1.012, 0.957, 1.144, 0.16, 0.66, "L", "1B", "Remembers the strike. Was on the wrong side of it and says so."),
+  h("pit5", "Three Rivers Osifo", "human", "showman", 1.127, 1.144, 1.111, 1.122, 0.9, 0.98, "R", "DH", "Everything meets at him and leaves in one direction."),
+  h("pit6", "Coal Barge Tutko", "machine", "grit", 1.204, 1.089, 1.056, 1.111, 0.86, 0.7, "R", "CF", "Loaded to the waterline and never once late."),
+  h("pit7", "Bloomery Nance", "augmented", "slugger", 1.259, 1.034, 0.989, 1.1, 0.34, 0.8, "L", "2B", "Old process, obsolete on paper, still turns out iron."),
+  h("pit8", "Smoke Ordinance Duda", "human", "grit", 1.05, 1.155, 1.121, 1.21, 1.12, 0.92, "R", "C", "They passed a law about him. He got worse."),
+  h("pit9", "Slag Ladle Prokop", "machine", "slugger", 1.303, 1.001, 0.968, 1.078, 0.2, 0.64, "R", "SS", "Tips once a shift. Everybody stands well back when he does."),
 ];
 
 const PIT_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Blast Furnace Kobylka', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.56, speedBonus: 5,
-    blurb: 'Runs hot for eight innings and does not cool between them.',
-    arsenal: { fastball: 0.45, sinker: 0.3, slider: 0.25 }, putaway: 'sinker', break: 1.03, clutch: 1.02, stamina: 1.11,
-  },
-  {
-    name: 'Mon Wharf Cerny', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'Floods twice a year and pitches through both.',
-    arsenal: { changeup: 0.4, curveball: 0.35, fastball: 0.25 }, putaway: 'changeup', break: 1.053, clutch: 1, stamina: 1.12,
-  },
-  {
-    name: 'Open Hearth Sokolowski', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Twelve hours in front of it and he says the winters are worse.',
-    arsenal: { sinker: 0.45, slider: 0.32, fastball: 0.23 }, putaway: 'slider', break: 1.052, clutch: 1.013, stamina: 1.08,
-  },
+  a("Blast Furnace Kobylka", "R", "none", "release", 0.56, "Runs hot for eight innings and does not cool between them.", {"fastball":0.45,"sinker":0.3,"slider":0.25}, "sinker", 1.03, 1.02, 1.11, 5),
+  a("Mon Wharf Cerny", "L", "junk", "pre_pitch", 0.54, "Floods twice a year and pitches through both.", {"changeup":0.4,"curveball":0.35,"fastball":0.25}, "changeup", 1.053, 1, 1.12),
+  a("Open Hearth Sokolowski", "R", "none", "pre_pitch", 0.53, "Twelve hours in front of it and he says the winters are worse.", {"sinker":0.45,"slider":0.32,"fastball":0.23}, "slider", 1.052, 1.013, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const PIT_PEN: readonly Pitcher[] = [
-  {
-    name: 'Tapper Yablonski', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5, speedBonus: 3,
-    blurb: 'Opens the hole, lets it run, closes it again. Ninth inning only.',
-    arsenal: { slider: 0.4, sinker: 0.35, fastball: 0.25 }, putaway: 'slider', break: 1.05, clutch: 1.08, stamina: 0.89,
-  },
-  {
-    name: 'Scrap Ladle Mihalik', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Whatever is left in the bottom, poured out on somebody.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 1.02, clutch: 0.992, stamina: 0.82,
-  },
-  {
-    name: 'Last Pour Wysocki', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'The heat goes off after this one. Make it count or do not.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.085, clutch: 1.054, stamina: 0.7,
-  },
+  a("Tapper Yablonski", "R", "painter", "release", 0.5, "Opens the hole, lets it run, closes it again. Ninth inning only.", {"slider":0.4,"sinker":0.35,"fastball":0.25}, "slider", 1.05, 1.08, 0.89, 3),
+  a("Scrap Ladle Mihalik", "L", "junk", "pre_pitch", 0.52, "Whatever is left in the bottom, poured out on somebody.", {"changeup":0.6,"curveball":0.4}, "changeup", 1.02, 0.992, 0.82),
+  a("Last Pour Wysocki", "R", "none", "release", 0.51, "The heat goes off after this one. Make it count or do not.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.085, 1.054, 0.7),
 ];
 
 
@@ -1372,61 +787,28 @@ const PIT_PEN: readonly Pitcher[] = [
  * the power the tier allows and nothing else at all.
  */
 const MIL: readonly Player[] = [
-  { id: 'mil1', name: 'Stave Bender Reuss', build: 'human', trait: 'grit', power: 1.039, contact: 1.144, vision: 1.099, clutch: 1.078, bunt: 1.1, speed: 0.98, bats: 'L',
-    bio: 'Bends oak for a living and considers a bat a small job.' },
-  { id: 'mil2', name: 'Hoop Driver Falkner', build: 'human', trait: 'reader', power: 1.072, contact: 1.133, vision: 1.121, clutch: 1.056, bunt: 1.04, speed: 1.02, bats: 'R',
-    bio: 'Six hits with a hammer and the whole thing holds for thirty years.' },
-  { id: 'mil3', name: 'Bung Hole Vogel', build: 'machine', trait: 'slugger', power: 1.435, contact: 0.99, vision: 0.934, clutch: 1.045, bunt: 0.14, speed: 0.62, bats: 'R',
-    bio: 'One small opening and everything comes out of it.' },
-  { id: 'mil4', name: 'Sixty Gallon Grohl', build: 'machine', trait: 'slugger', power: 1.457, contact: 0.968, vision: 0.923, clutch: 1.012, bunt: 0.12, speed: 0.58, bats: 'L',
-    bio: 'Full, and nobody has any idea how they get him on the bus.' },
-  { id: 'mil5', name: 'Menomonee Strack', build: 'human', trait: 'slugger', power: 1.237, contact: 1.056, vision: 1, clutch: 1.089, bunt: 0.42, speed: 0.8, bats: 'R',
-    bio: 'Valley kid. Still lives four blocks from where the river bends.' },
-  { id: 'mil6', name: 'Cold Cellar Behnke', build: 'human', trait: 'precision', power: 1.105, contact: 1.122, vision: 1.089, clutch: 1.034, bunt: 0.86, speed: 0.9, bats: 'L',
-    bio: 'Kept underground for six months and improved by it.' },
-  { id: 'mil7', name: 'Char Level Three', build: 'machine', trait: 'grit', power: 1.193, contact: 1.067, vision: 1.034, clutch: 1.067, bunt: 0.7, speed: 0.72, bats: 'R',
-    bio: 'Burnt on the inside on purpose. Says it improves the finish.' },
-  { id: 'mil8', name: 'Draymen Kowalczyk', build: 'augmented', trait: 'grit', power: 1.149, contact: 1.089, vision: 1.044, clutch: 1.1, bunt: 0.8, speed: 0.85, bats: 'R',
-    bio: 'Hauls it, stacks it, and then plays nine.' },
-  { id: 'mil9', name: 'Tap Room Piotrowski', build: 'human', trait: 'showman', power: 1.215, contact: 1.034, vision: 0.989, clutch: 1.111, bunt: 0.44, speed: 0.88, bats: 'L',
-    bio: 'Best in the league from the sixth inning on, in his own estimation.' },
+  h("mil1", "Stave Bender Reuss", "human", "grit", 1.039, 1.144, 1.099, 1.078, 1.1, 0.98, "L", "LF", "Bends oak for a living and considers a bat a small job."),
+  h("mil2", "Hoop Driver Falkner", "human", "reader", 1.072, 1.133, 1.121, 1.056, 1.04, 1.02, "R", "3B", "Six hits with a hammer and the whole thing holds for thirty years."),
+  h("mil3", "Bung Hole Vogel", "machine", "slugger", 1.435, 0.99, 0.934, 1.045, 0.14, 0.62, "R", "1B", "One small opening and everything comes out of it."),
+  h("mil4", "Sixty Gallon Grohl", "machine", "slugger", 1.457, 0.968, 0.923, 1.012, 0.12, 0.58, "L", "DH", "Full, and nobody has any idea how they get him on the bus."),
+  h("mil5", "Menomonee Strack", "human", "ironman", 1.237, 1.056, 1, 1.089, 0.42, 0.8, "R", "RF", "Valley kid. Still lives four blocks from where the river bends."),
+  h("mil6", "Cold Cellar Behnke", "human", "precision", 1.105, 1.122, 1.089, 1.034, 0.86, 0.9, "L", "2B", "Kept underground for six months and improved by it."),
+  h("mil7", "Char Level Three", "machine", "grit", 1.193, 1.067, 1.034, 1.067, 0.7, 0.72, "R", "C", "Burnt on the inside on purpose. Says it improves the finish."),
+  h("mil8", "Draymen Kowalczyk", "augmented", "grit", 1.149, 1.089, 1.044, 1.1, 0.8, 0.85, "R", "CF", "Hauls it, stacks it, and then plays nine."),
+  h("mil9", "Tap Room Piotrowski", "human", "showman", 1.215, 1.034, 0.989, 1.111, 0.44, 0.88, "L", "SS", "Best in the league from the sixth inning on, in his own estimation."),
 ];
 
 const MIL_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Cooperage Selig', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.56,
-    blurb: 'Round, slow and holds together far longer than it should.',
-    arsenal: { sinker: 0.4, changeup: 0.35, curveball: 0.25 }, putaway: 'changeup', break: 1, clutch: 0.99, stamina: 1.07,
-  },
-  {
-    name: 'Lager Cave Umbach', throws: 'L', signature: 'none', tellTiming: 'release', zoneRate: 0.54,
-    blurb: 'Takes his time. Everything about him takes its time.',
-    arsenal: { curveball: 0.46, fastball: 0.25, changeup: 0.29 }, putaway: 'curveball', break: 1.002, clutch: 0.98, stamina: 1.11,
-  },
-  {
-    name: 'Stave Mill Gerhardt', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Cuts them all to the same curve without measuring once.',
-    arsenal: { sinker: 0.45, slider: 0.32, changeup: 0.23 }, putaway: 'slider', break: 0.99, clutch: 0.977, stamina: 1.08,
-  },
+  a("Cooperage Selig", "R", "junk", "pre_pitch", 0.56, "Round, slow and holds together far longer than it should.", {"sinker":0.4,"changeup":0.35,"curveball":0.25}, "changeup", 1, 0.99, 1.07),
+  a("Lager Cave Umbach", "L", "none", "release", 0.54, "Takes his time. Everything about him takes its time.", {"curveball":0.46,"fastball":0.25,"changeup":0.29}, "curveball", 1.002, 0.98, 1.11),
+  a("Stave Mill Gerhardt", "L", "none", "pre_pitch", 0.53, "Cuts them all to the same curve without measuring once.", {"sinker":0.45,"slider":0.32,"changeup":0.23}, "slider", 0.99, 0.977, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const MIL_PEN: readonly Pitcher[] = [
-  {
-    name: 'Last Call Wenzel', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.5, speedBonus: 5,
-    blurb: 'Everybody out, and quickly.',
-    arsenal: { fastball: 0.68, slider: 0.32 }, putaway: 'fastball', break: 0.95, clutch: 1.02, stamina: 0.88,
-  },
-  {
-    name: 'Hoop Iron Brauer', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Holds the whole barrel together and is the cheapest part of it.',
-    arsenal: { fastball: 0.6, curveball: 0.4 }, putaway: 'curveball', break: 0.961, clutch: 0.957, stamina: 0.82,
-  },
-  {
-    name: 'Bung Hammer Dietz', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.51, speedBonus: 7,
-    blurb: 'One swing, the barrel is sealed, and everybody goes home.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.022, clutch: 1.017, stamina: 0.7,
-  },
+  a("Last Call Wenzel", "R", "fireball", "release", 0.5, "Everybody out, and quickly.", {"fastball":0.68,"slider":0.32}, "fastball", 0.95, 1.02, 0.88, 5),
+  a("Hoop Iron Brauer", "R", "none", "pre_pitch", 0.52, "Holds the whole barrel together and is the cheapest part of it.", {"fastball":0.6,"curveball":0.4}, "curveball", 0.961, 0.957, 0.82),
+  a("Bung Hammer Dietz", "R", "fireball", "release", 0.51, "One swing, the barrel is sealed, and everybody goes home.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.022, 1.017, 0.7, 7),
 ];
 
 /**
@@ -1434,61 +816,28 @@ const MIL_PEN: readonly Pitcher[] = [
  * peace with it. Good gloves, patient bats, and no way to score in a hurry.
  */
 const SEA: readonly Player[] = [
-  { id: 'sea1', name: 'Sluiceway Tan', build: 'human', trait: 'reader', power: 0.951, contact: 1.188, vision: 1.165, clutch: 1.089, bunt: 1.26, speed: 1.26, bats: 'L',
-    bio: 'Waits out the delay better than anybody in the sport.' },
-  { id: 'sea2', name: 'Ballard Locks Ivey', build: 'machine', trait: 'grit', power: 1.017, contact: 1.155, vision: 1.111, clutch: 1.056, bunt: 1.12, speed: 1.04, bats: 'R',
-    bio: 'One at a time, both directions, no exceptions made.' },
-  { id: 'sea3', name: 'Timber Fall Mahoney', build: 'human', trait: 'slugger', power: 1.303, contact: 1.034, vision: 0.968, clutch: 1.078, bunt: 0.3, speed: 0.82, bats: 'R',
-    bio: 'Shouts before he swings. Nobody has told him he does it.' },
-  { id: 'sea4', name: 'Cascade Fog Ozuna', build: 'augmented', trait: 'slugger', power: 1.27, contact: 1.023, vision: 0.979, clutch: 1.034, bunt: 0.28, speed: 0.9, bats: 'L',
-    bio: 'Sits in the valley all week and lifts on a Sunday.' },
-  { id: 'sea5', name: 'Puget Kestrel', build: 'machine', trait: 'precision', power: 1.094, contact: 1.122, vision: 1.099, clutch: 1.045, bunt: 0.84, speed: 1.18, bats: 'R',
-    bio: 'Covers more ground than the outfield fence does.' },
-  { id: 'sea6', name: 'Drizzle Bhatia', build: 'human', trait: 'grit', power: 0.984, contact: 1.166, vision: 1.133, clutch: 1.111, bunt: 1.2, speed: 1.1, bats: 'L',
-    bio: 'Not a downpour. Just never, ever stops.' },
-  { id: 'sea7', name: 'Cannery Row Feodorov', build: 'human', trait: 'grit', power: 1.061, contact: 1.122, vision: 1.078, clutch: 1.078, bunt: 1.0, speed: 0.95, bats: 'R',
-    bio: 'Twelve-hour line shift, then the bus, then batting practice.' },
-  { id: 'sea8', name: 'Rain Delay Osgood', build: 'human', trait: 'showman', power: 1.127, contact: 1.078, vision: 1.034, clutch: 1.122, bunt: 0.62, speed: 0.98, bats: 'L',
-    bio: 'Has an entire tarpaulin routine and does it whether it rains or not.' },
-  { id: 'sea9', name: 'Old Growth Larsen', build: 'machine', trait: 'slugger', power: 1.336, contact: 0.99, vision: 0.946, clutch: 1.023, bunt: 0.18, speed: 0.6, bats: 'R',
-    bio: 'Four hundred years to grow and one swing to explain it.' },
+  h("sea1", "Sluiceway Tan", "human", "reader", 0.951, 1.188, 1.165, 1.089, 1.26, 1.26, "L", "CF", "Waits out the delay better than anybody in the sport."),
+  h("sea2", "Ballard Locks Ivey", "machine", "reader", 1.017, 1.155, 1.111, 1.056, 1.12, 1.04, "R", "2B", "One at a time, both directions, no exceptions made."),
+  h("sea3", "Timber Fall Mahoney", "human", "slugger", 1.303, 1.034, 0.968, 1.078, 0.3, 0.82, "R", "3B", "Shouts before he swings. Nobody has told him he does it."),
+  h("sea4", "Cascade Fog Ozuna", "augmented", "ironman", 1.27, 1.023, 0.979, 1.034, 0.28, 0.9, "L", "1B", "Sits in the valley all week and lifts on a Sunday."),
+  h("sea5", "Puget Kestrel", "machine", "grit", 1.094, 1.122, 1.099, 1.045, 0.84, 1.18, "R", "LF", "Covers more ground than the outfield fence does."),
+  h("sea6", "Drizzle Bhatia", "human", "grit", 0.984, 1.166, 1.133, 1.111, 1.2, 1.1, "L", "RF", "Not a downpour. Just never, ever stops."),
+  h("sea7", "Cannery Row Feodorov", "human", "grit", 1.061, 1.122, 1.078, 1.078, 1, 0.95, "R", "C", "Twelve-hour line shift, then the bus, then batting practice."),
+  h("sea8", "Rain Delay Osgood", "human", "showman", 1.127, 1.078, 1.034, 1.122, 0.62, 0.98, "L", "SS", "Has an entire tarpaulin routine and does it whether it rains or not."),
+  h("sea9", "Old Growth Larsen", "machine", "slugger", 1.336, 0.99, 0.946, 1.023, 0.18, 0.6, "R", "DH", "Four hundred years to grow and one swing to explain it."),
 ];
 
 const SEA_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Sound Fog Aoki', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.53,
-    blurb: 'You can hear it fine. Seeing it is the problem.',
-    arsenal: { changeup: 0.4, curveball: 0.35, slider: 0.25 }, putaway: 'changeup', break: 1.03, clutch: 1, stamina: 1.04,
-  },
-  {
-    name: 'Mudslide Pettersen', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.55, speedBonus: 2,
-    blurb: 'Comes down all at once and takes the road with it.',
-    arsenal: { sinker: 0.5, slider: 0.3, fastball: 0.2 }, putaway: 'sinker', break: 1.022, clutch: 0.97, stamina: 1.12,
-  },
-  {
-    name: 'Drizzle Nakamura', throws: 'L', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Never hard enough to stop play and never quite stops.',
-    arsenal: { changeup: 0.45, curveball: 0.32, sinker: 0.23 }, putaway: 'changeup', break: 1.024, clutch: 0.983, stamina: 1.08,
-  },
+  a("Sound Fog Aoki", "L", "junk", "release", 0.53, "You can hear it fine. Seeing it is the problem.", {"changeup":0.4,"curveball":0.35,"slider":0.25}, "changeup", 1.03, 1, 1.04),
+  a("Mudslide Pettersen", "R", "none", "pre_pitch", 0.55, "Comes down all at once and takes the road with it.", {"sinker":0.5,"slider":0.3,"fastball":0.2}, "sinker", 1.022, 0.97, 1.12, 2),
+  a("Drizzle Nakamura", "L", "painter", "pre_pitch", 0.51, "Never hard enough to stop play and never quite stops.", {"changeup":0.45,"curveball":0.32,"sinker":0.23}, "changeup", 1.024, 0.983, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const SEA_PEN: readonly Pitcher[] = [
-  {
-    name: 'Harbor Bell Kuo', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.46, speedBonus: 3,
-    blurb: 'Rings once an inning and then you are done.',
-    arsenal: { slider: 0.42, curveball: 0.33, fastball: 0.25 }, putaway: 'slider', break: 1, clutch: 1.04, stamina: 0.9,
-  },
-  {
-    name: 'Ferry Horn Bergstrom', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'One note, no warning, and everybody on the water knows where he is.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.993, clutch: 0.963, stamina: 0.82,
-  },
-  {
-    name: 'Cloudburst Tanaka', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.49, speedBonus: 7,
-    blurb: 'A whole month of it in nine minutes.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.056, clutch: 1.023, stamina: 0.7,
-  },
+  a("Harbor Bell Kuo", "R", "painter", "release", 0.46, "Rings once an inning and then you are done.", {"slider":0.42,"curveball":0.33,"fastball":0.25}, "slider", 1, 1.04, 0.9, 3),
+  a("Ferry Horn Bergstrom", "R", "none", "pre_pitch", 0.5, "One note, no warning, and everybody on the water knows where he is.", {"fastball":0.6,"slider":0.4}, "slider", 0.993, 0.963, 0.82),
+  a("Cloudburst Tanaka", "R", "fireball", "release", 0.49, "A whole month of it in nine minutes.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.056, 1.023, 0.7, 7),
 ];
 
 /**
@@ -1496,61 +845,28 @@ const SEA_PEN: readonly Pitcher[] = [
  * to pitch. Real power, no staff, and every game finishes 9-8.
  */
 const DEN: readonly Player[] = [
-  { id: 'den1', name: 'Placer Vance', build: 'human', trait: 'showman', power: 1.05, contact: 1.155, vision: 1.099, clutch: 1.045, bunt: 1.08, speed: 1.24, bats: 'L',
-    bio: 'Pans the same creek every winter and finds enough to come back.' },
-  { id: 'den2', name: 'Assay Office Nunn', build: 'human', trait: 'reader', power: 1.083, contact: 1.144, vision: 1.133, clutch: 1.034, bunt: 1.02, speed: 1.12, bats: 'R',
-    bio: 'Tells you what it is worth and is never wrong and never popular.' },
-  { id: 'den3', name: 'Mile High Ostrowski', build: 'machine', trait: 'slugger', power: 1.49, contact: 0.979, vision: 0.923, clutch: 1.045, bunt: 0.12, speed: 0.7, bats: 'R',
-    bio: 'Hits it a mile because the air lets him and takes full credit anyway.' },
-  { id: 'den4', name: 'Tailings Pond Grieve', build: 'augmented', trait: 'slugger', power: 1.369, contact: 0.99, vision: 0.946, clutch: 1.001, bunt: 0.2, speed: 0.78, bats: 'L',
-    bio: 'Everything the mountain did not want, in one place, glowing faintly.' },
-  { id: 'den5', name: 'Front Range Yazzie', build: 'human', trait: 'grit', power: 1.138, contact: 1.111, vision: 1.078, clutch: 1.1, bunt: 0.94, speed: 1.06, bats: 'R',
-    bio: 'Runs the fence line all game at altitude and never gets tired.' },
-  { id: 'den6', name: 'Dynamite Shack Bell', build: 'human', trait: 'slugger', power: 1.314, contact: 1.012, vision: 0.968, clutch: 1.012, bunt: 0.26, speed: 0.85, bats: 'R',
-    bio: 'Kept well away from the dugout for reasons never written down.' },
-  { id: 'den7', name: 'Silver Plume Ockerman', build: 'human', trait: 'precision', power: 1.105, contact: 1.122, vision: 1.089, clutch: 1.056, bunt: 0.88, speed: 0.95, bats: 'L',
-    bio: 'The town is gone. He still gives it as his address.' },
-  { id: 'den8', name: 'Thin Air Dubois', build: 'augmented', trait: 'reader', power: 1.171, contact: 1.067, vision: 1.067, clutch: 0.99, bunt: 0.64, speed: 1.0, bats: 'R',
-    bio: 'Plays the whole season at home and cannot breathe anywhere else.' },
-  { id: 'den9', name: 'Ore Cart Pankowski', build: 'machine', trait: 'grit', power: 1.248, contact: 1.034, vision: 0.989, clutch: 1.023, bunt: 0.4, speed: 0.68, bats: 'L',
-    bio: 'Downhill only, and nothing gets in the way of it.' },
+  h("den1", "Placer Vance", "human", "speedster", 1.05, 1.155, 1.099, 1.045, 1.08, 1.24, "L", "CF", "Pans the same creek every winter and finds enough to come back."),
+  h("den2", "Assay Office Nunn", "human", "utility", 1.083, 1.144, 1.133, 1.034, 1.02, 1.12, "R", "2B", "Tells you what it is worth and is never wrong and never popular.", ["3B","SS"]),
+  h("den3", "Mile High Ostrowski", "machine", "slugger", 1.49, 0.979, 0.923, 1.045, 0.12, 0.7, "R", "LF", "Hits it a mile because the air lets him and takes full credit anyway."),
+  h("den4", "Tailings Pond Grieve", "augmented", "slugger", 1.369, 0.99, 0.946, 1.001, 0.2, 0.78, "L", "1B", "Everything the mountain did not want, in one place, glowing faintly."),
+  h("den5", "Front Range Yazzie", "human", "grit", 1.138, 1.111, 1.078, 1.1, 0.94, 1.06, "R", "3B", "Runs the fence line all game at altitude and never gets tired."),
+  h("den6", "Dynamite Shack Bell", "human", "slugger", 1.314, 1.012, 0.968, 1.012, 0.26, 0.85, "R", "RF", "Kept well away from the dugout for reasons never written down."),
+  h("den7", "Silver Plume Ockerman", "human", "utility", 1.105, 1.122, 1.089, 1.056, 0.88, 0.95, "L", "SS", "The town is gone. He still gives it as his address.", ["2B","3B"]),
+  h("den8", "Thin Air Dubois", "augmented", "reader", 1.171, 1.067, 1.067, 0.99, 0.64, 1, "R", "C", "Plays the whole season at home and cannot breathe anywhere else."),
+  h("den9", "Ore Cart Pankowski", "machine", "grit", 1.248, 1.034, 0.989, 1.023, 0.4, 0.68, "L", "DH", "Downhill only, and nothing gets in the way of it."),
 ];
 
 const DEN_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Altitude Sickness Rowe', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.58, speedBonus: 4,
-    blurb: 'Great for four innings. Nobody has seen his fifth.',
-    arsenal: { fastball: 0.5, sinker: 0.3, slider: 0.2 }, putaway: 'fastball', break: 0.93, clutch: 0.95, stamina: 0.95,
-  },
-  {
-    name: 'Flat Curve Dunmire', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'It breaks at sea level. He has never pitched at sea level.',
-    arsenal: { curveball: 0.45, changeup: 0.3, fastball: 0.25 }, putaway: 'curveball', break: 0.94, clutch: 0.97, stamina: 1.1,
-  },
-  {
-    name: 'Thin Air Ostrander', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Nothing breaks up here and he has stopped pretending otherwise.',
-    arsenal: { fastball: 0.45, changeup: 0.32, slider: 0.23 }, putaway: 'changeup', break: 0.956, clutch: 0.957, stamina: 1.08,
-  },
+  a("Altitude Sickness Rowe", "R", "none", "pre_pitch", 0.58, "Great for four innings. Nobody has seen his fifth.", {"fastball":0.5,"sinker":0.3,"slider":0.2}, "fastball", 0.93, 0.95, 0.95, 4),
+  a("Flat Curve Dunmire", "L", "junk", "pre_pitch", 0.52, "It breaks at sea level. He has never pitched at sea level.", {"curveball":0.45,"changeup":0.3,"fastball":0.25}, "curveball", 0.94, 0.97, 1.1),
+  a("Thin Air Ostrander", "R", "none", "pre_pitch", 0.53, "Nothing breaks up here and he has stopped pretending otherwise.", {"fastball":0.45,"changeup":0.32,"slider":0.23}, "changeup", 0.956, 0.957, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const DEN_PEN: readonly Pitcher[] = [
-  {
-    name: 'Timberline Krupa', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.48, speedBonus: 2,
-    blurb: 'Above this line nothing grows and nothing scores.',
-    arsenal: { slider: 0.4, sinker: 0.35, changeup: 0.25 }, putaway: 'slider', break: 0.98, clutch: 1.01, stamina: 0.87,
-  },
-  {
-    name: 'Switchback Neary', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Gets there eventually and you see the same view four times.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'curveball', break: 0.927, clutch: 0.938, stamina: 0.82,
-  },
-  {
-    name: 'Continental Divide Roan', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'Everything goes one way or the other and none of it comes back.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 0.987, clutch: 0.996, stamina: 0.7,
-  },
+  a("Timberline Krupa", "R", "painter", "release", 0.48, "Above this line nothing grows and nothing scores.", {"slider":0.4,"sinker":0.35,"changeup":0.25}, "slider", 0.98, 1.01, 0.87, 2),
+  a("Switchback Neary", "L", "junk", "pre_pitch", 0.52, "Gets there eventually and you see the same view four times.", {"curveball":0.6,"changeup":0.4}, "curveball", 0.927, 0.938, 0.82),
+  a("Continental Divide Roan", "R", "none", "release", 0.51, "Everything goes one way or the other and none of it comes back.", {"fastball":0.6,"sinker":0.4}, "sinker", 0.987, 0.996, 0.7),
 ];
 
 /**
@@ -1558,61 +874,28 @@ const DEN_PEN: readonly Pitcher[] = [
  * enormous bats, seven ordinary ones, and a staff that gambles every pitch.
  */
 const MEM: readonly Player[] = [
-  { id: 'mem1', name: 'Beale Street Ottley', build: 'human', trait: 'showman', power: 1.006, contact: 1.166, vision: 1.111, clutch: 1.111, bunt: 1.14, speed: 1.28, bats: 'L',
-    bio: 'Plays four bars of something on the way to the box every time.' },
-  { id: 'mem2', name: 'Paddle Wheel Ruffin', build: 'human', trait: 'grit', power: 1.039, contact: 1.144, vision: 1.099, clutch: 1.078, bunt: 1.1, speed: 1.06, bats: 'R',
-    bio: 'Same rhythm all night, and it gets faster when he is behind.' },
-  { id: 'mem3', name: 'High Card Delacroix', build: 'machine', trait: 'slugger', power: 1.468, contact: 0.99, vision: 0.946, clutch: 1.1, bunt: 0.12, speed: 0.68, bats: 'R',
-    bio: 'One hand, all in, twice a game.' },
-  { id: 'mem4', name: 'Cotton Exchange Hobbs', build: 'machine', trait: 'slugger', power: 1.402, contact: 0.979, vision: 0.934, clutch: 1.056, bunt: 0.16, speed: 0.64, bats: 'L',
-    bio: 'Sets the price and then hits the price.' },
-  { id: 'mem5', name: 'Steamboat Gambler Voss', build: 'human', trait: 'showman', power: 1.16, contact: 1.078, vision: 1.022, clutch: 1.144, bunt: 0.56, speed: 0.98, bats: 'R',
-    bio: 'Swings at 3-0 on principle. Has explained the principle at length.' },
-  { id: 'mem6', name: 'Mud Bar Cheatham', build: 'human', trait: 'grit', power: 1.028, contact: 1.133, vision: 1.089, clutch: 1.089, bunt: 1.06, speed: 0.92, bats: 'L',
-    bio: 'Shows up where the channel used to be and ruins somebody evening.' },
-  { id: 'mem7', name: 'Boiler Deck Prue', build: 'augmented', trait: 'grit', power: 1.149, contact: 1.067, vision: 1.022, clutch: 1.045, bunt: 0.7, speed: 0.86, bats: 'R',
-    bio: 'Hottest place on the boat and the cheapest ticket.' },
-  { id: 'mem8', name: 'Levee Camp Sisson', build: 'human', trait: 'reader', power: 1.017, contact: 1.122, vision: 1.121, clutch: 1.067, bunt: 1.02, speed: 1.0, bats: 'R',
-    bio: 'Built the wall that keeps the river out of the ballpark.' },
-  { id: 'mem9', name: 'Calliope Nance', build: 'machine', trait: 'showman', power: 1.226, contact: 1.023, vision: 0.979, clutch: 1.122, bunt: 0.36, speed: 0.8, bats: 'L',
-    bio: 'Audible from two miles and in tune from none.' },
+  h("mem1", "Beale Street Ottley", "human", "showman", 1.006, 1.166, 1.111, 1.111, 1.14, 1.28, "L", "CF", "Plays four bars of something on the way to the box every time."),
+  h("mem2", "Paddle Wheel Ruffin", "human", "grit", 1.039, 1.144, 1.099, 1.078, 1.1, 1.06, "R", "SS", "Same rhythm all night, and it gets faster when he is behind."),
+  h("mem3", "High Card Delacroix", "machine", "slugger", 1.468, 0.99, 0.946, 1.1, 0.12, 0.68, "R", "LF", "One hand, all in, twice a game."),
+  h("mem4", "Cotton Exchange Hobbs", "machine", "slugger", 1.402, 0.979, 0.934, 1.056, 0.16, 0.64, "L", "1B", "Sets the price and then hits the price."),
+  h("mem5", "Steamboat Gambler Voss", "human", "ironman", 1.16, 1.078, 1.022, 1.144, 0.56, 0.98, "R", "RF", "Swings at 3-0 on principle. Has explained the principle at length."),
+  h("mem6", "Mud Bar Cheatham", "human", "grit", 1.028, 1.133, 1.089, 1.089, 1.06, 0.92, "L", "3B", "Shows up where the channel used to be and ruins somebody evening."),
+  h("mem7", "Boiler Deck Prue", "augmented", "cannon", 1.149, 1.067, 1.022, 1.045, 0.7, 0.86, "R", "C", "Hottest place on the boat and the cheapest ticket."),
+  h("mem8", "Levee Camp Sisson", "human", "reader", 1.017, 1.122, 1.121, 1.067, 1.02, 1, "R", "2B", "Built the wall that keeps the river out of the ballpark."),
+  h("mem9", "Calliope Nance", "machine", "showman", 1.226, 1.023, 0.979, 1.122, 0.36, 0.8, "L", "DH", "Audible from two miles and in tune from none."),
 ];
 
 const MEM_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Riverboat Rell', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'Never throws the same thing twice and could not tell you why.',
-    arsenal: { changeup: 0.35, curveball: 0.3, slider: 0.2, sinker: 0.15 }, putaway: 'changeup', break: 1.02, clutch: 0.99, stamina: 1.03,
-  },
-  {
-    name: 'Snag Boat Trueblood', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.54, speedBonus: 3,
-    blurb: 'Pulls whatever is under the surface out of the way. Slowly.',
-    arsenal: { sinker: 0.48, fastball: 0.25, curveball: 0.27 }, putaway: 'sinker', break: 0.981, clutch: 0.96, stamina: 1.09,
-  },
-  {
-    name: 'Paddlewheel Mack', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Same revolution all night and it moves a great deal of water.',
-    arsenal: { fastball: 0.45, slider: 0.32, changeup: 0.23 }, putaway: 'slider', break: 0.987, clutch: 0.964, stamina: 1.08,
-  },
+  a("Riverboat Rell", "R", "junk", "release", 0.5, "Never throws the same thing twice and could not tell you why.", {"changeup":0.35,"curveball":0.3,"slider":0.2,"sinker":0.15}, "changeup", 1.02, 0.99, 1.03),
+  a("Snag Boat Trueblood", "L", "none", "pre_pitch", 0.54, "Pulls whatever is under the surface out of the way. Slowly.", {"sinker":0.48,"fastball":0.25,"curveball":0.27}, "sinker", 0.981, 0.96, 1.09, 3),
+  a("Paddlewheel Mack", "R", "none", "pre_pitch", 0.51, "Same revolution all night and it moves a great deal of water.", {"fastball":0.45,"slider":0.32,"changeup":0.23}, "slider", 0.987, 0.964, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const MEM_PEN: readonly Pitcher[] = [
-  {
-    name: 'Bluff City Odum', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.48, speedBonus: 7,
-    blurb: 'All of it, every pitch, and no plan for the second time through.',
-    arsenal: { fastball: 0.72, slider: 0.28 }, putaway: 'fastball', break: 0.94, clutch: 1, stamina: 0.86,
-  },
-  {
-    name: 'Card Sharp Ledoux', throws: 'L', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'Deals himself the same hand every time and nobody can prove it.',
-    arsenal: { curveball: 0.6, changeup: 0.4 }, putaway: 'changeup', break: 0.958, clutch: 0.944, stamina: 0.82,
-  },
-  {
-    name: 'All In Bonnaire', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.49, speedBonus: 7,
-    blurb: 'Pushes the whole stack in on every pitch. It has mostly worked.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.019, clutch: 1.003, stamina: 0.7,
-  },
+  a("Bluff City Odum", "R", "fireball", "release", 0.48, "All of it, every pitch, and no plan for the second time through.", {"fastball":0.72,"slider":0.28}, "fastball", 0.94, 1, 0.86, 7),
+  a("Card Sharp Ledoux", "L", "painter", "pre_pitch", 0.5, "Deals himself the same hand every time and nobody can prove it.", {"curveball":0.6,"changeup":0.4}, "changeup", 0.958, 0.944, 0.82),
+  a("All In Bonnaire", "R", "fireball", "release", 0.49, "Pushes the whole stack in on every pitch. It has mostly worked.", {"fastball":0.6,"slider":0.4}, "fastball", 1.019, 1.003, 0.7, 7),
 ];
 
 /**
@@ -1622,61 +905,28 @@ const MEM_PEN: readonly Pitcher[] = [
  * get famous for it. Slow, heavy, funny about it, and still here.
  */
 const CIN: readonly Player[] = [
-  { id: 'cin1', name: 'Over The Rhine Bruhn', build: 'human', trait: 'grit', power: 0.995, contact: 1.155, vision: 1.111, clutch: 1.1, bunt: 1.18, speed: 1.0, bats: 'L',
-    bio: 'Walks to the park from the same house his grandfather did.' },
-  { id: 'cin2', name: 'Findlay Market Ross', build: 'human', trait: 'reader', power: 1.028, contact: 1.144, vision: 1.133, clutch: 1.067, bunt: 1.12, speed: 1.04, bats: 'R',
-    bio: 'Opening day parade marshal, and will remind you every May.' },
-  { id: 'cin3', name: 'Smoke House Pfaff', build: 'machine', trait: 'slugger', power: 1.391, contact: 0.99, vision: 0.934, clutch: 1.045, bunt: 0.14, speed: 0.6, bats: 'R',
-    bio: 'Cured for eleven months and worth every day of it.' },
-  { id: 'cin4', name: 'Packer Vollmer', build: 'machine', trait: 'slugger', power: 1.325, contact: 0.99, vision: 0.946, clutch: 1.023, bunt: 0.18, speed: 0.58, bats: 'L',
-    bio: 'Nothing wasted, nothing hurried, nothing pretty.' },
-  { id: 'cin5', name: 'Mount Adams Kruse', build: 'human', trait: 'precision', power: 1.083, contact: 1.122, vision: 1.089, clutch: 1.056, bunt: 0.88, speed: 0.9, bats: 'R',
-    bio: 'Looks down on the whole river and mentions it constantly.' },
-  { id: 'cin6', name: 'Queen City Ledbetter', build: 'human', trait: 'showman', power: 1.138, contact: 1.089, vision: 1.034, clutch: 1.111, bunt: 0.6, speed: 0.94, bats: 'L',
-    bio: 'Insists on the full title. Never accepts the short one.' },
-  { id: 'cin7', name: 'Canal Lock Duffey', build: 'augmented', trait: 'grit', power: 1.116, contact: 1.078, vision: 1.044, clutch: 1.045, bunt: 0.78, speed: 0.85, bats: 'R',
-    bio: 'The canal was filled in sixty years ago. Nobody told him.' },
-  { id: 'cin8', name: 'Hog Drover Tillery', build: 'human', trait: 'grit', power: 1.061, contact: 1.1, vision: 1.056, clutch: 1.078, bunt: 0.98, speed: 0.88, bats: 'R',
-    bio: 'Moved four hundred head down Main Street once and never got over it.' },
-  { id: 'cin9', name: 'Rhinegeist Obermeyer', build: 'machine', trait: 'slugger', power: 1.259, contact: 1.012, vision: 0.968, clutch: 1.012, bunt: 0.24, speed: 0.62, bats: 'L',
-    bio: 'Ghost of the brewery district, still on the payroll.' },
+  h("cin1", "Over The Rhine Bruhn", "human", "grit", 0.995, 1.155, 1.111, 1.1, 1.18, 1, "L", "RF", "Walks to the park from the same house his grandfather did."),
+  h("cin2", "Findlay Market Ross", "human", "reader", 1.028, 1.144, 1.133, 1.067, 1.12, 1.04, "R", "LF", "Opening day parade marshal, and will remind you every May."),
+  h("cin3", "Smoke House Pfaff", "machine", "showman", 1.391, 0.99, 0.934, 1.045, 0.14, 0.6, "R", "3B", "Cured for eleven months and worth every day of it."),
+  h("cin4", "Packer Vollmer", "machine", "slugger", 1.325, 0.99, 0.946, 1.023, 0.18, 0.58, "L", "1B", "Nothing wasted, nothing hurried, nothing pretty."),
+  h("cin5", "Mount Adams Kruse", "human", "showman", 1.083, 1.122, 1.089, 1.056, 0.88, 0.9, "R", "DH", "Looks down on the whole river and mentions it constantly."),
+  h("cin6", "Queen City Ledbetter", "human", "showman", 1.138, 1.089, 1.034, 1.111, 0.6, 0.94, "L", "CF", "Insists on the full title. Never accepts the short one."),
+  h("cin7", "Canal Lock Duffey", "augmented", "grit", 1.116, 1.078, 1.044, 1.045, 0.78, 0.85, "R", "2B", "The canal was filled in sixty years ago. Nobody told him."),
+  h("cin8", "Hog Drover Tillery", "human", "grit", 1.061, 1.1, 1.056, 1.078, 0.98, 0.88, "R", "C", "Moved four hundred head down Main Street once and never got over it."),
+  h("cin9", "Rhinegeist Obermeyer", "machine", "slugger", 1.259, 1.012, 0.968, 1.012, 0.24, 0.62, "L", "SS", "Ghost of the brewery district, still on the payroll."),
 ];
 
 const CIN_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Old Cossett', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.58,
-    blurb: 'Forty-one years old and pitching entirely from memory.',
-    arsenal: { changeup: 0.4, curveball: 0.35, sinker: 0.25 }, putaway: 'curveball', break: 0.99, clutch: 0.98, stamina: 1.06,
-  },
-  {
-    name: 'Ludlow Viaduct Beem', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.55,
-    blurb: 'Structurally unsound and load-bearing anyway.',
-    arsenal: { fastball: 0.25, curveball: 0.41, changeup: 0.34 }, putaway: 'curveball', break: 0.971, clutch: 0.96, stamina: 1.09,
-  },
-  {
-    name: 'Porkopolis Stemler', throws: 'L', signature: 'painter', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'The town was called that first and he will tell you why.',
-    arsenal: { sinker: 0.45, changeup: 0.32, slider: 0.23 }, putaway: 'changeup', break: 0.984, clutch: 0.967, stamina: 1.08,
-  },
+  a("Old Cossett", "R", "junk", "pre_pitch", 0.58, "Forty-one years old and pitching entirely from memory.", {"changeup":0.4,"curveball":0.35,"sinker":0.25}, "curveball", 0.99, 0.98, 1.06),
+  a("Ludlow Viaduct Beem", "L", "none", "pre_pitch", 0.55, "Structurally unsound and load-bearing anyway.", {"fastball":0.25,"curveball":0.41,"changeup":0.34}, "curveball", 0.971, 0.96, 1.09),
+  a("Porkopolis Stemler", "L", "painter", "pre_pitch", 0.54, "The town was called that first and he will tell you why.", {"sinker":0.45,"changeup":0.32,"slider":0.23}, "changeup", 0.984, 0.967, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const CIN_PEN: readonly Pitcher[] = [
-  {
-    name: 'River Fog Kappel', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5, speedBonus: 2,
-    blurb: 'Sits on the water and takes the last two innings with it.',
-    arsenal: { slider: 0.4, changeup: 0.35, sinker: 0.25 }, putaway: 'slider', break: 0.97, clutch: 1.02, stamina: 0.89,
-  },
-  {
-    name: 'Rhineland Vogt', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Over the river, up the steps, and back down for the ninth.',
-    arsenal: { fastball: 0.6, curveball: 0.4 }, putaway: 'curveball', break: 0.954, clutch: 0.947, stamina: 0.82,
-  },
-  {
-    name: 'Slaughterhouse Nine', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.52, speedBonus: 7,
-    blurb: 'Ninth of nine off the same line. The other eight are still working.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.015, clutch: 1.006, stamina: 0.7,
-  },
+  a("River Fog Kappel", "R", "painter", "release", 0.5, "Sits on the water and takes the last two innings with it.", {"slider":0.4,"changeup":0.35,"sinker":0.25}, "slider", 0.97, 1.02, 0.89, 2),
+  a("Rhineland Vogt", "R", "none", "pre_pitch", 0.53, "Over the river, up the steps, and back down for the ninth.", {"fastball":0.6,"curveball":0.4}, "curveball", 0.954, 0.947, 0.82),
+  a("Slaughterhouse Nine", "R", "fireball", "release", 0.52, "Ninth of nine off the same line. The other eight are still working.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.015, 1.006, 0.7, 7),
 ];
 
 /**
@@ -1687,61 +937,28 @@ const CIN_PEN: readonly Pitcher[] = [
  * season with.
  */
 const NOL: readonly Player[] = [
-  { id: 'nol1', name: 'Tremé Boudreaux', build: 'human', trait: 'showman', power: 0.973, contact: 1.177, vision: 1.121, clutch: 1.133, bunt: 1.22, speed: 1.32, bats: 'L',
-    bio: 'Dances the whole way to first and beats the throw doing it.' },
-  { id: 'nol2', name: 'Grand Marshal Fontenot', build: 'human', trait: 'showman', power: 1.017, contact: 1.155, vision: 1.099, clutch: 1.155, bunt: 1.16, speed: 1.2, bats: 'R',
-    bio: 'Leads it, and the club follows him whether or not it should.' },
-  { id: 'nol3', name: 'Sousaphone Ancelet', build: 'machine', trait: 'slugger', power: 1.413, contact: 0.979, vision: 0.923, clutch: 1.078, bunt: 0.14, speed: 0.66, bats: 'R',
-    bio: 'Carries the whole bottom end and weighs as much as the bench.' },
-  { id: 'nol4', name: 'Pumping Station Six', build: 'machine', trait: 'slugger', power: 1.336, contact: 0.99, vision: 0.946, clutch: 1.045, bunt: 0.18, speed: 0.62, bats: 'L',
-    bio: 'Holds the whole city up in a storm and never gets a parade.' },
-  { id: 'nol5', name: 'Vieux Carré Thibault', build: 'human', trait: 'grit', power: 1.072, contact: 1.111, vision: 1.078, clutch: 1.144, bunt: 1.0, speed: 1.0, bats: 'R',
-    bio: 'Two hundred years old, structurally, and still open all night.' },
-  { id: 'nol6', name: 'Snare Beaudry', build: 'human', trait: 'precision', power: 1.039, contact: 1.133, vision: 1.099, clutch: 1.1, bunt: 0.96, speed: 1.08, bats: 'L',
-    bio: 'Keeps time for everybody. Nobody keeps it for him.' },
-  { id: 'nol7', name: 'Crawfish Boil Pitre', build: 'human', trait: 'grit', power: 1.105, contact: 1.089, vision: 1.044, clutch: 1.111, bunt: 0.86, speed: 0.9, bats: 'R',
-    bio: 'Three hours, one table, everybody invited, nothing left.' },
-  { id: 'nol8', name: 'Levee Break Gaudet', build: 'augmented', trait: 'slugger', power: 1.237, contact: 1.012, vision: 0.968, clutch: 1.034, bunt: 0.3, speed: 0.82, bats: 'R',
-    bio: 'Fine, fine, fine, and then not fine at all.' },
-  { id: 'nol9', name: 'Storyville Marchand', build: 'human', trait: 'showman', power: 1.171, contact: 1.045, vision: 1, clutch: 1.122, bunt: 0.5, speed: 0.95, bats: 'L',
-    bio: 'Every story he tells is about himself and about half of them happened.' },
+  h("nol1", "Tremé Boudreaux", "human", "showman", 0.973, 1.177, 1.121, 1.133, 1.22, 1.32, "L", "RF", "Dances the whole way to first and beats the throw doing it."),
+  h("nol2", "Grand Marshal Fontenot", "human", "showman", 1.017, 1.155, 1.099, 1.155, 1.16, 1.2, "R", "LF", "Leads it, and the club follows him whether or not it should."),
+  h("nol3", "Sousaphone Ancelet", "machine", "showman", 1.413, 0.979, 0.923, 1.078, 0.14, 0.66, "R", "3B", "Carries the whole bottom end and weighs as much as the bench."),
+  h("nol4", "Pumping Station Six", "machine", "slugger", 1.336, 0.99, 0.946, 1.045, 0.18, 0.62, "L", "1B", "Holds the whole city up in a storm and never gets a parade."),
+  h("nol5", "Vieux Carré Thibault", "human", "showman", 1.072, 1.111, 1.078, 1.144, 1, 1, "R", "DH", "Two hundred years old, structurally, and still open all night."),
+  h("nol6", "Snare Beaudry", "human", "precision", 1.039, 1.133, 1.099, 1.1, 0.96, 1.08, "L", "CF", "Keeps time for everybody. Nobody keeps it for him."),
+  h("nol7", "Crawfish Boil Pitre", "human", "grit", 1.105, 1.089, 1.044, 1.111, 0.86, 0.9, "R", "2B", "Three hours, one table, everybody invited, nothing left."),
+  h("nol8", "Levee Break Gaudet", "augmented", "slugger", 1.237, 1.012, 0.968, 1.034, 0.3, 0.82, "R", "C", "Fine, fine, fine, and then not fine at all."),
+  h("nol9", "Storyville Marchand", "human", "showman", 1.171, 1.045, 1, 1.122, 0.5, 0.95, "L", "SS", "Every story he tells is about himself and about half of them happened."),
 ];
 
 const NOL_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Second Line Rousseau', throws: 'L', signature: 'junk', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'No two innings in the same tempo and he insists that is the plan.',
-    arsenal: { changeup: 0.38, curveball: 0.32, slider: 0.3 }, putaway: 'changeup', break: 1.01, clutch: 1.02, stamina: 1,
-  },
-  {
-    name: 'Bayou Fever Landry', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52, speedBonus: 3,
-    blurb: 'Sweats through three jerseys and gets worse in the eighth.',
-    arsenal: { sinker: 0.47, fastball: 0.25, changeup: 0.28 }, putaway: 'sinker', break: 0.981, clutch: 0.95, stamina: 1.04,
-  },
-  {
-    name: 'Brass Band Fontenot', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'Never plays the same tune twice and never plays it quietly.',
-    arsenal: { fastball: 0.45, changeup: 0.32, curveball: 0.23 }, putaway: 'changeup', break: 0.99, clutch: 0.98, stamina: 1.08,
-  },
+  a("Second Line Rousseau", "L", "junk", "release", 0.5, "No two innings in the same tempo and he insists that is the plan.", {"changeup":0.38,"curveball":0.32,"slider":0.3}, "changeup", 1.01, 1.02, 1),
+  a("Bayou Fever Landry", "R", "none", "pre_pitch", 0.52, "Sweats through three jerseys and gets worse in the eighth.", {"sinker":0.47,"fastball":0.25,"changeup":0.28}, "sinker", 0.981, 0.95, 1.04, 3),
+  a("Brass Band Fontenot", "L", "none", "pre_pitch", 0.5, "Never plays the same tune twice and never plays it quietly.", {"fastball":0.45,"changeup":0.32,"curveball":0.23}, "changeup", 0.99, 0.98, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const NOL_PEN: readonly Pitcher[] = [
-  {
-    name: 'Ninth Ward Baptiste', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.48, speedBonus: 6,
-    blurb: 'Comes on in the ninth because there was never a plan for the eighth.',
-    arsenal: { fastball: 0.7, curveball: 0.3 }, putaway: 'fastball', break: 0.96, clutch: 1.03, stamina: 0.86,
-  },
-  {
-    name: 'Cemetery Row Guidry', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.49,
-    blurb: 'Everything above ground here, including whatever he throws.',
-    arsenal: { curveball: 0.6, slider: 0.4 }, putaway: 'curveball', break: 0.961, clutch: 0.96, stamina: 0.82,
-  },
-  {
-    name: 'Last Parade Thibault', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.48, speedBonus: 7,
-    blurb: 'Comes out at the end whether you won or not. That is the point.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 1.022, clutch: 1.02, stamina: 0.7,
-  },
+  a("Ninth Ward Baptiste", "R", "fireball", "release", 0.48, "Comes on in the ninth because there was never a plan for the eighth.", {"fastball":0.7,"curveball":0.3}, "fastball", 0.96, 1.03, 0.86, 6),
+  a("Cemetery Row Guidry", "R", "junk", "pre_pitch", 0.49, "Everything above ground here, including whatever he throws.", {"curveball":0.6,"slider":0.4}, "curveball", 0.961, 0.96, 0.82),
+  a("Last Parade Thibault", "R", "fireball", "release", 0.48, "Comes out at the end whether you won or not. That is the point.", {"fastball":0.6,"sinker":0.4}, "fastball", 1.022, 1.02, 0.7, 7),
 ];
 
 /**
@@ -1750,61 +967,28 @@ const NOL_PEN: readonly Pitcher[] = [
  * none of whom were drafted here, playing what amounts to a road season.
  */
 const TOR: readonly Player[] = [
-  { id: 'tor1', name: 'Red Eye Nakashima', build: 'human', trait: 'grit', power: 0.86, contact: 1.2, vision: 1.18, clutch: 1.12, bunt: 1.2, speed: 1.22, bats: 'L',
-    bio: 'Sleeps on the plane, wakes up in a city, hits .290 in all of them.' },
-  { id: 'tor2', name: 'Customs Line Beaulieu', build: 'human', trait: 'reader', power: 0.92, contact: 1.18, vision: 1.22, clutch: 1.04, bunt: 1.14, speed: 1.1, bats: 'R',
-    bio: 'Declares everything. It takes an hour and he has never been fined.' },
-  { id: 'tor3', name: 'THE CN', build: 'machine', trait: 'slugger', power: 1.7, contact: 0.9, vision: 0.84, clutch: 1.08, bunt: 0.12, speed: 0.6, bats: 'R',
-    bio: 'Eighteen hundred feet of it, visible from the next province.' },
-  { id: 'tor4', name: 'Hogtown Vasilev', build: 'machine', trait: 'slugger', power: 1.52, contact: 0.9, vision: 0.86, clutch: 1.0, bunt: 0.16, speed: 0.64, bats: 'L',
-    bio: 'This town was a pork town too. Nobody down south believes it.' },
-  { id: 'tor5', name: 'Yonge Street Achterberg', build: 'human', trait: 'grit', power: 1.0, contact: 1.14, vision: 1.1, clutch: 1.1, bunt: 1.0, speed: 0.95, bats: 'R',
-    bio: 'Named for a road that goes on for a thousand miles and never turns.' },
-  { id: 'tor6', name: 'Layover Ibarra', build: 'human', trait: 'precision', power: 0.94, contact: 1.16, vision: 1.14, clutch: 1.0, bunt: 0.92, speed: 1.05, bats: 'L',
-    bio: 'Has been through every airport in the league and slept in most of them.' },
-  { id: 'tor7', name: 'Don Valley Okonjo', build: 'augmented', trait: 'reader', power: 1.14, contact: 1.06, vision: 1.12, clutch: 0.96, bunt: 0.74, speed: 0.98, bats: 'R',
-    bio: 'Comes up out of the ravine that runs under the whole city.' },
-  { id: 'tor8', name: 'Lakeshore Tremblay', build: 'human', trait: 'grit', power: 0.98, contact: 1.1, vision: 1.08, clutch: 1.14, bunt: 1.02, speed: 0.9, bats: 'R',
-    bio: 'Plays the whole year in a wind coming off a lake the size of a sea.' },
-  { id: 'tor9', name: 'Passport Kaur', build: 'human', trait: 'showman', power: 1.16, contact: 1.0, vision: 0.98, clutch: 1.18, bunt: 0.48, speed: 1.0, bats: 'L',
-    bio: 'Four countries on the cover and a nickname in each one.' },
+  h("tor1", "Red Eye Nakashima", "human", "grit", 0.86, 1.2, 1.18, 1.12, 1.2, 1.22, "L", "CF", "Sleeps on the plane, wakes up in a city, hits .290 in all of them."),
+  h("tor2", "Customs Line Beaulieu", "human", "reader", 0.92, 1.18, 1.22, 1.04, 1.14, 1.1, "R", "2B", "Declares everything. It takes an hour and he has never been fined."),
+  h("tor3", "THE CN", "machine", "slugger", 1.7, 0.9, 0.84, 1.08, 0.12, 0.6, "R", "RF", "Eighteen hundred feet of it, visible from the next province."),
+  h("tor4", "Hogtown Vasilev", "machine", "slugger", 1.52, 0.9, 0.86, 1, 0.16, 0.64, "L", "1B", "This town was a pork town too. Nobody down south believes it."),
+  h("tor5", "Yonge Street Achterberg", "human", "grit", 1, 1.14, 1.1, 1.1, 1, 0.95, "R", "3B", "Named for a road that goes on for a thousand miles and never turns."),
+  h("tor6", "Layover Ibarra", "human", "precision", 0.94, 1.16, 1.14, 1, 0.92, 1.05, "L", "LF", "Has been through every airport in the league and slept in most of them."),
+  h("tor7", "Don Valley Okonjo", "augmented", "reader", 1.14, 1.06, 1.12, 0.96, 0.74, 0.98, "R", "DH", "Comes up out of the ravine that runs under the whole city."),
+  h("tor8", "Lakeshore Tremblay", "human", "grit", 0.98, 1.1, 1.08, 1.14, 1.02, 0.9, "R", "C", "Plays the whole year in a wind coming off a lake the size of a sea."),
+  h("tor9", "Passport Kaur", "human", "showman", 1.16, 1, 0.98, 1.18, 0.48, 1, "L", "SS", "Four countries on the cover and a nickname in each one."),
 ];
 
 const TOR_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Time Zone Fyodorov', throws: 'R', signature: 'junk', tellTiming: 'release', zoneRate: 0.54,
-    blurb: 'Nothing arrives when you expect it. He blames the schedule.',
-    arsenal: { changeup: 0.4, curveball: 0.32, sinker: 0.28 }, putaway: 'changeup', break: 1.02, clutch: 0.98, stamina: 1.08,
-  },
-  {
-    name: 'Border Crossing Mensah', throws: 'L', signature: 'none', tellTiming: 'release', zoneRate: 0.55, speedBonus: 3,
-    blurb: 'Slow going in, quick coming back.',
-    arsenal: { fastball: 0.25, sinker: 0.41, slider: 0.34 }, putaway: 'sinker', break: 0.971, clutch: 0.96, stamina: 1.1,
-  },
-  {
-    name: 'Red Eye Lachance', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.53,
-    blurb: 'Lands at six, pitches at seven, and does not believe in hotels.',
-    arsenal: { fastball: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 1.004, clutch: 0.987, stamina: 1.08,
-  },
+  a("Time Zone Fyodorov", "R", "junk", "release", 0.54, "Nothing arrives when you expect it. He blames the schedule.", {"changeup":0.4,"curveball":0.32,"sinker":0.28}, "changeup", 1.02, 0.98, 1.08),
+  a("Border Crossing Mensah", "L", "none", "release", 0.55, "Slow going in, quick coming back.", {"fastball":0.25,"sinker":0.41,"slider":0.34}, "sinker", 0.971, 0.96, 1.1, 3),
+  a("Red Eye Lachance", "R", "none", "pre_pitch", 0.53, "Lands at six, pitches at seven, and does not believe in hotels.", {"fastball":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 1.004, 0.987, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const TOR_PEN: readonly Pitcher[] = [
-  {
-    name: 'Last Flight Doucet', throws: 'R', signature: 'painter', tellTiming: 'release', zoneRate: 0.5, speedBonus: 4,
-    blurb: 'Gets it done and gets on the plane. Has never seen a hotel bar.',
-    arsenal: { slider: 0.4, fastball: 0.34, changeup: 0.26 }, putaway: 'slider', break: 1.0, clutch: 1.08, stamina: 0.8,
-  },
-  {
-    name: 'Customs Line Adeyemi', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Takes as long as it takes and there is no other line.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 0.973, clutch: 0.967, stamina: 0.82,
-  },
-  {
-    name: 'Final Call Bouchard', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.51,
-    blurb: 'Last boarding announcement of the night, in two languages.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 1.035, clutch: 1.027, stamina: 0.7,
-  },
+  a("Last Flight Doucet", "R", "painter", "release", 0.5, "Gets it done and gets on the plane. Has never seen a hotel bar.", {"slider":0.4,"fastball":0.34,"changeup":0.26}, "slider", 1, 1.08, 0.8, 4),
+  a("Customs Line Adeyemi", "L", "junk", "pre_pitch", 0.52, "Takes as long as it takes and there is no other line.", {"changeup":0.6,"curveball":0.4}, "changeup", 0.973, 0.967, 0.82),
+  a("Final Call Bouchard", "R", "none", "release", 0.51, "Last boarding announcement of the night, in two languages.", {"fastball":0.6,"slider":0.4}, "slider", 1.035, 1.027, 0.7),
 ];
 
 /**
@@ -1812,61 +996,28 @@ const TOR_PEN: readonly Pitcher[] = [
  * through. Nothing on this roster was drafted; all of it was picked up cheap.
  */
 const KCF: readonly Player[] = [
-  { id: 'kcf1', name: 'Hump Yard Delacruz', build: 'human', trait: 'grit', power: 0.962, contact: 1.133, vision: 1.089, clutch: 1.045, bunt: 1.18, speed: 1.2, bats: 'L',
-    bio: 'Pushed over the crest and left to find his own track.' },
-  { id: 'kcf2', name: 'Waybill Osment', build: 'human', trait: 'reader', power: 0.984, contact: 1.122, vision: 1.111, clutch: 1.012, bunt: 1.1, speed: 1.08, bats: 'R',
-    bio: 'Knows where everything is going and has never gone anywhere.' },
-  { id: 'kcf3', name: 'Hopper Car Wren', build: 'machine', trait: 'slugger', power: 1.369, contact: 0.968, vision: 0.913, clutch: 0.99, bunt: 0.14, speed: 0.6, bats: 'R',
-    bio: 'Full or empty, and no way to tell from the outside.' },
-  { id: 'kcf4', name: 'Reefer Unit Nine', build: 'machine', trait: 'slugger', power: 1.292, contact: 0.968, vision: 0.923, clutch: 0.968, bunt: 0.16, speed: 0.58, bats: 'L',
-    bio: 'Runs cold all season. Cost more to keep than to replace.' },
-  { id: 'kcf5', name: 'Stockyard Bridge Aubry', build: 'human', trait: 'grit', power: 1.061, contact: 1.089, vision: 1.044, clutch: 1.056, bunt: 0.94, speed: 0.9, bats: 'R',
-    bio: 'Everything crosses him and nobody stops.' },
-  { id: 'kcf6', name: 'Boxcar Willie Nunn', build: 'human', trait: 'showman', power: 1.094, contact: 1.056, vision: 1.012, clutch: 1.078, bunt: 0.6, speed: 0.95, bats: 'L',
-    bio: 'Rode in on one and tells the story before anybody asks.' },
-  { id: 'kcf7', name: 'Switch Frog Halima', build: 'augmented', trait: 'precision', power: 1.072, contact: 1.078, vision: 1.034, clutch: 1.001, bunt: 0.8, speed: 0.98, bats: 'R',
-    bio: 'One small part, and if it fails everything behind it is on the ground.' },
-  { id: 'kcf8', name: 'Caboose Rennick', build: 'human', trait: 'grit', power: 1.006, contact: 1.078, vision: 1.034, clutch: 1.045, bunt: 1.0, speed: 0.85, bats: 'R',
-    bio: 'Last man on the train and the last one anybody thinks about.' },
-  { id: 'kcf9', name: 'Air Brake Sowell', build: 'machine', trait: 'slugger', power: 1.204, contact: 1.001, vision: 0.957, clutch: 0.979, bunt: 0.3, speed: 0.64, bats: 'L',
-    bio: 'Stops everything, eventually, and nobody enjoys the sound.' },
+  h("kcf1", "Hump Yard Delacruz", "human", "grit", 0.962, 1.133, 1.089, 1.045, 1.18, 1.2, "L", "RF", "Pushed over the crest and left to find his own track."),
+  h("kcf2", "Waybill Osment", "human", "reader", 0.984, 1.122, 1.111, 1.012, 1.1, 1.08, "R", "LF", "Knows where everything is going and has never gone anywhere."),
+  h("kcf3", "Hopper Car Wren", "machine", "showman", 1.369, 0.968, 0.913, 0.99, 0.14, 0.6, "R", "3B", "Full or empty, and no way to tell from the outside."),
+  h("kcf4", "Reefer Unit Nine", "machine", "slugger", 1.292, 0.968, 0.923, 0.968, 0.16, 0.58, "L", "1B", "Runs cold all season. Cost more to keep than to replace."),
+  h("kcf5", "Stockyard Bridge Aubry", "human", "showman", 1.061, 1.089, 1.044, 1.056, 0.94, 0.9, "R", "DH", "Everything crosses him and nobody stops."),
+  h("kcf6", "Boxcar Willie Nunn", "human", "showman", 1.094, 1.056, 1.012, 1.078, 0.6, 0.95, "L", "CF", "Rode in on one and tells the story before anybody asks."),
+  h("kcf7", "Switch Frog Halima", "augmented", "precision", 1.072, 1.078, 1.034, 1.001, 0.8, 0.98, "R", "2B", "One small part, and if it fails everything behind it is on the ground."),
+  h("kcf8", "Caboose Rennick", "human", "grit", 1.006, 1.078, 1.034, 1.045, 1, 0.85, "R", "C", "Last man on the train and the last one anybody thinks about."),
+  h("kcf9", "Air Brake Sowell", "machine", "slugger", 1.204, 1.001, 0.957, 0.979, 0.3, 0.64, "L", "SS", "Stops everything, eventually, and nobody enjoys the sound."),
 ];
 
 const KCF_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Slow Order Vaught', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.54,
-    blurb: 'Ten miles an hour through the whole yard by regulation.',
-    arsenal: { sinker: 0.4, changeup: 0.35, curveball: 0.25 }, putaway: 'changeup', break: 0.95, clutch: 0.95, stamina: 1.02,
-  },
-  {
-    name: 'Dead Head Pruitt', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Rides all the way out and does no work when he gets there.',
-    arsenal: { fastball: 0.25, curveball: 0.45, changeup: 0.3 }, putaway: 'curveball', break: 0.949, clutch: 0.93, stamina: 1.06,
-  },
-  {
-    name: 'Empty Boxcar Whitlow', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Rides out full and comes back with nothing in him. Every trip.',
-    arsenal: { sinker: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.939, clutch: 0.921, stamina: 1.08,
-  },
+  a("Slow Order Vaught", "R", "junk", "pre_pitch", 0.54, "Ten miles an hour through the whole yard by regulation.", {"sinker":0.4,"changeup":0.35,"curveball":0.25}, "changeup", 0.95, 0.95, 1.02),
+  a("Dead Head Pruitt", "L", "none", "pre_pitch", 0.52, "Rides all the way out and does no work when he gets there.", {"fastball":0.25,"curveball":0.45,"changeup":0.3}, "curveball", 0.949, 0.93, 1.06),
+  a("Empty Boxcar Whitlow", "R", "none", "pre_pitch", 0.51, "Rides out full and comes back with nothing in him. Every trip.", {"sinker":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.939, 0.921, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const KCF_PEN: readonly Pitcher[] = [
-  {
-    name: 'Hot Box Ferrier', throws: 'R', signature: 'fireball', tellTiming: 'pre_pitch', zoneRate: 0.46, speedBonus: 5,
-    blurb: 'Runs hot, catches fire, and stops the whole line.',
-    arsenal: { fastball: 0.72, slider: 0.28 }, putaway: 'fastball', break: 0.9, clutch: 0.94, stamina: 0.85,
-  },
-  {
-    name: 'Coupler Pin Stroud', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'One piece of steel between the whole train and a very bad day.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.911, clutch: 0.903, stamina: 0.82,
-  },
-  {
-    name: 'Last Car Hennigan', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.49,
-    blurb: 'You know the thing is over when you see him go past.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'fastball', break: 0.969, clutch: 0.959, stamina: 0.7,
-  },
+  a("Hot Box Ferrier", "R", "fireball", "pre_pitch", 0.46, "Runs hot, catches fire, and stops the whole line.", {"fastball":0.72,"slider":0.28}, "fastball", 0.9, 0.94, 0.85, 5),
+  a("Coupler Pin Stroud", "L", "none", "pre_pitch", 0.5, "One piece of steel between the whole train and a very bad day.", {"fastball":0.6,"slider":0.4}, "slider", 0.911, 0.903, 0.82),
+  a("Last Car Hennigan", "R", "none", "release", 0.49, "You know the thing is over when you see him go past.", {"fastball":0.6,"sinker":0.4}, "fastball", 0.969, 0.959, 0.7),
 ];
 
 /**
@@ -1874,61 +1025,28 @@ const KCF_PEN: readonly Pitcher[] = [
  * been given a reason to expect anything better.
  */
 const BUF: readonly Player[] = [
-  { id: 'buf1', name: 'Lake Effect Zdrojewski', build: 'human', trait: 'grit', power: 0.951, contact: 1.144, vision: 1.099, clutch: 1.078, bunt: 1.22, speed: 1.16, bats: 'L',
-    bio: 'Arrives all at once and stays until March.' },
-  { id: 'buf2', name: 'Thruway Coyne', build: 'human', trait: 'reader', power: 0.973, contact: 1.122, vision: 1.111, clutch: 1.034, bunt: 1.12, speed: 1.06, bats: 'R',
-    bio: 'Closed four times this year and still made every game.' },
-  { id: 'buf3', name: 'Grain Scoop Piasecki', build: 'machine', trait: 'slugger', power: 1.347, contact: 0.968, vision: 0.913, clutch: 1.001, bunt: 0.14, speed: 0.6, bats: 'R',
-    bio: 'Invented here, and the only thing the city still exports.' },
-  { id: 'buf4', name: 'Wing Night Ferraro', build: 'human', trait: 'slugger', power: 1.237, contact: 1.001, vision: 0.946, clutch: 1.023, bunt: 0.3, speed: 0.72, bats: 'L',
-    bio: 'Twenty-five cents each, Tuesdays, and he has never missed one.' },
-  { id: 'buf5', name: 'Snow Fence Duschene', build: 'human', trait: 'grit', power: 1.028, contact: 1.1, vision: 1.056, clutch: 1.067, bunt: 1.0, speed: 0.95, bats: 'R',
-    bio: 'Slows it down. Does not stop it. Nobody claimed it would.' },
-  { id: 'buf6', name: 'Salt Truck Obiora', build: 'machine', trait: 'grit', power: 1.138, contact: 1.045, vision: 1, clutch: 1.012, bunt: 0.7, speed: 0.66, bats: 'R',
-    bio: 'Out before anybody else and rusting faster than the rest of the club.' },
-  { id: 'buf7', name: 'Blizzard Of Sixteen', build: 'machine', trait: 'slugger', power: 1.259, contact: 0.99, vision: 0.934, clutch: 0.979, bunt: 0.2, speed: 0.62, bats: 'L',
-    bio: 'They still talk about him. He has done nothing since.' },
-  { id: 'buf8', name: 'Broadway Market Nowicki', build: 'human', trait: 'precision', power: 1.017, contact: 1.089, vision: 1.056, clutch: 1.034, bunt: 0.88, speed: 0.88, bats: 'R',
-    bio: 'Busy one week in April, shuttered the rest of the year.' },
-  { id: 'buf9', name: 'Wide Right Kulesza', build: 'human', trait: 'showman', power: 1.072, contact: 1.023, vision: 0.979, clutch: 0.957, bunt: 0.54, speed: 0.9, bats: 'L',
-    bio: 'Nobody in this town will say the nickname out loud. It is on his jersey.' },
+  h("buf1", "Lake Effect Zdrojewski", "human", "grit", 0.951, 1.144, 1.099, 1.078, 1.22, 1.16, "L", "CF", "Arrives all at once and stays until March."),
+  h("buf2", "Thruway Coyne", "human", "reader", 0.973, 1.122, 1.111, 1.034, 1.12, 1.06, "R", "SS", "Closed four times this year and still made every game."),
+  h("buf3", "Grain Scoop Piasecki", "machine", "slugger", 1.347, 0.968, 0.913, 1.001, 0.14, 0.6, "R", "LF", "Invented here, and the only thing the city still exports."),
+  h("buf4", "Wing Night Ferraro", "human", "slugger", 1.237, 1.001, 0.946, 1.023, 0.3, 0.72, "L", "1B", "Twenty-five cents each, Tuesdays, and he has never missed one."),
+  h("buf5", "Snow Fence Duschene", "human", "ironman", 1.028, 1.1, 1.056, 1.067, 1, 0.95, "R", "RF", "Slows it down. Does not stop it. Nobody claimed it would."),
+  h("buf6", "Salt Truck Obiora", "machine", "grit", 1.138, 1.045, 1, 1.012, 0.7, 0.66, "R", "3B", "Out before anybody else and rusting faster than the rest of the club."),
+  h("buf7", "Blizzard Of Sixteen", "machine", "cannon", 1.259, 0.99, 0.934, 0.979, 0.2, 0.62, "L", "C", "They still talk about him. He has done nothing since."),
+  h("buf8", "Broadway Market Nowicki", "human", "precision", 1.017, 1.089, 1.056, 1.034, 0.88, 0.88, "R", "2B", "Busy one week in April, shuttered the rest of the year."),
+  h("buf9", "Wide Right Kulesza", "human", "showman", 1.072, 1.023, 0.979, 0.957, 0.54, 0.9, "L", "DH", "Nobody in this town will say the nickname out loud. It is on his jersey."),
 ];
 
 const BUF_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Whiteout Gorski', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Nothing visible and nothing especially good either.',
-    arsenal: { curveball: 0.4, changeup: 0.35, sinker: 0.25 }, putaway: 'curveball', break: 0.96, clutch: 0.94, stamina: 1.01,
-  },
-  {
-    name: 'Plow Blade Cwiklinski', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.55, speedBonus: 2,
-    blurb: 'Straight, heavy and the same every night of the winter.',
-    arsenal: { fastball: 0.25, sinker: 0.5, slider: 0.25 }, putaway: 'fastball', break: 0.94, clutch: 0.95, stamina: 1.1,
-  },
-  {
-    name: 'Lake Effect Zielinski', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Comes off the water without warning and buries the whole county.',
-    arsenal: { fastball: 0.45, curveball: 0.32, sinker: 0.23 }, putaway: 'curveball', break: 0.95, clutch: 0.931, stamina: 1.08,
-  },
+  a("Whiteout Gorski", "R", "junk", "pre_pitch", 0.52, "Nothing visible and nothing especially good either.", {"curveball":0.4,"changeup":0.35,"sinker":0.25}, "curveball", 0.96, 0.94, 1.01),
+  a("Plow Blade Cwiklinski", "L", "none", "pre_pitch", 0.55, "Straight, heavy and the same every night of the winter.", {"fastball":0.25,"sinker":0.5,"slider":0.25}, "fastball", 0.94, 0.95, 1.1, 2),
+  a("Lake Effect Zielinski", "R", "none", "pre_pitch", 0.52, "Comes off the water without warning and buries the whole county.", {"fastball":0.45,"curveball":0.32,"sinker":0.23}, "curveball", 0.95, 0.931, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const BUF_PEN: readonly Pitcher[] = [
-  {
-    name: 'Ice Boom Marlette', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.48, speedBonus: 4,
-    blurb: 'Holds it back for one inning. That is the whole design spec.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.93, clutch: 0.96, stamina: 0.85,
-  },
-  {
-    name: 'Salt Truck Barone', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.51,
-    blurb: 'Out before anybody else and nobody thanks him for it.',
-    arsenal: { sinker: 0.6, changeup: 0.4 }, putaway: 'changeup', break: 0.921, clutch: 0.912, stamina: 0.82,
-  },
-  {
-    name: 'Six Feet Dombrowski', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.5,
-    blurb: 'That is not a forecast, it is a measurement. Twice a winter.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'slider', break: 0.98, clutch: 0.969, stamina: 0.7,
-  },
+  a("Ice Boom Marlette", "R", "none", "release", 0.48, "Holds it back for one inning. That is the whole design spec.", {"fastball":0.6,"slider":0.4}, "slider", 0.93, 0.96, 0.85, 4),
+  a("Salt Truck Barone", "L", "junk", "pre_pitch", 0.51, "Out before anybody else and nobody thanks him for it.", {"sinker":0.6,"changeup":0.4}, "changeup", 0.921, 0.912, 0.82),
+  a("Six Feet Dombrowski", "R", "none", "release", 0.5, "That is not a forecast, it is a measurement. Twice a winter.", {"fastball":0.6,"slider":0.4}, "slider", 0.98, 0.969, 0.7),
 ];
 
 /**
@@ -1947,61 +1065,28 @@ const BUF_PEN: readonly Pitcher[] = [
  * it for YOU to get a hit off. Both of those are correct.
  */
 const PHX: readonly Player[] = [
-  { id: 'phx1', name: 'Dry Heat Villalobos', build: 'human', trait: 'showman', power: 0.94, contact: 1.133, vision: 1.078, clutch: 1.034, bunt: 1.12, speed: 1.28, bats: 'L',
-    bio: 'Insists it is different from the other kind. It is not.' },
-  { id: 'phx2', name: 'Canal Bank Estrada', build: 'human', trait: 'reader', power: 0.973, contact: 1.111, vision: 1.099, clutch: 1.001, bunt: 1.06, speed: 1.14, bats: 'R',
-    bio: 'The canals were here a thousand years before the club was.' },
-  { id: 'phx3', name: 'Saguaro', build: 'machine', trait: 'slugger', power: 1.38, contact: 0.957, vision: 0.901, clutch: 0.99, bunt: 0.1, speed: 0.56, bats: 'R',
-    bio: 'Takes sixty years to grow an arm and uses it exactly once.' },
-  { id: 'phx4', name: 'Haboob Nakai', build: 'augmented', trait: 'slugger', power: 1.281, contact: 0.979, vision: 0.934, clutch: 0.968, bunt: 0.2, speed: 0.8, bats: 'L',
-    bio: 'Visible from forty miles and over in ten minutes.' },
-  { id: 'phx5', name: 'Copper Queen Amado', build: 'human', trait: 'grit', power: 1.039, contact: 1.089, vision: 1.044, clutch: 1.045, bunt: 0.96, speed: 1.0, bats: 'R',
-    bio: 'The mine closed. The nickname stayed and so did she.' },
-  { id: 'phx6', name: 'Swamp Cooler Prieto', build: 'machine', trait: 'precision', power: 1.083, contact: 1.067, vision: 1.022, clutch: 0.99, bunt: 0.76, speed: 0.85, bats: 'L',
-    bio: 'Works fine until the humidity. Then he is furniture.' },
-  { id: 'phx7', name: 'Sun Devil Rooker', build: 'human', trait: 'grit', power: 1.105, contact: 1.045, vision: 1.012, clutch: 1.023, bunt: 0.72, speed: 0.95, bats: 'R',
-    bio: 'Local product, local legend, and league average at everything.' },
-  { id: 'phx8', name: 'Ash Layer Tobin', build: 'augmented', trait: 'slugger', power: 1.226, contact: 0.99, vision: 0.946, clutch: 0.957, bunt: 0.26, speed: 0.78, bats: 'R',
-    bio: 'Grey the whole way down and nothing grows in him.' },
-  { id: 'phx9', name: 'Rookie Card Ybarra', build: 'human', trait: 'showman', power: 1.061, contact: 1.012, vision: 0.989, clutch: 0.99, bunt: 0.6, speed: 1.05, bats: 'L',
-    bio: 'Twenty years old and already the best story this club has.' },
+  h("phx1", "Dry Heat Villalobos", "human", "showman", 0.94, 1.133, 1.078, 1.034, 1.12, 1.28, "L", "CF", "Insists it is different from the other kind. It is not."),
+  h("phx2", "Canal Bank Estrada", "human", "reader", 0.973, 1.111, 1.099, 1.001, 1.06, 1.14, "R", "2B", "The canals were here a thousand years before the club was."),
+  h("phx3", "Saguaro", "machine", "slugger", 1.38, 0.957, 0.901, 0.99, 0.1, 0.56, "R", "RF", "Takes sixty years to grow an arm and uses it exactly once."),
+  h("phx4", "Haboob Nakai", "augmented", "slugger", 1.281, 0.979, 0.934, 0.968, 0.2, 0.8, "L", "1B", "Visible from forty miles and over in ten minutes."),
+  h("phx5", "Copper Queen Amado", "human", "grit", 1.039, 1.089, 1.044, 1.045, 0.96, 1, "R", "3B", "The mine closed. The nickname stayed and so did she."),
+  h("phx6", "Swamp Cooler Prieto", "machine", "precision", 1.083, 1.067, 1.022, 0.99, 0.76, 0.85, "L", "LF", "Works fine until the humidity. Then he is furniture."),
+  h("phx7", "Sun Devil Rooker", "human", "grit", 1.105, 1.045, 1.012, 1.023, 0.72, 0.95, "R", "DH", "Local product, local legend, and league average at everything."),
+  h("phx8", "Ash Layer Tobin", "augmented", "slugger", 1.226, 0.99, 0.946, 0.957, 0.26, 0.78, "R", "C", "Grey the whole way down and nothing grows in him."),
+  h("phx9", "Rookie Card Ybarra", "human", "showman", 1.061, 1.012, 0.989, 0.99, 0.6, 1.05, "L", "SS", "Twenty years old and already the best story this club has."),
 ];
 
 const PHX_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Hundred And Ten Chee', throws: 'R', signature: 'fireball', tellTiming: 'pre_pitch', zoneRate: 0.5, speedBonus: 8,
-    blurb: 'Same number as the afternoon and about as pleasant.',
-    arsenal: { fastball: 0.45, sinker: 0.3, slider: 0.25 }, putaway: 'fastball', break: 1.2, clutch: 0.93, stamina: 0.96,
-  },
-  {
-    name: 'Two Hundred Innings Bly', throws: 'L', signature: 'fireball', tellTiming: 'pre_pitch', zoneRate: 0.54, speedBonus: 7,
-    blurb: 'Throws every one of them as hard as the first. Nobody has explained why.',
-    arsenal: { fastball: 0.25, sinker: 0.48, changeup: 0.27 }, putaway: 'fastball', break: 1.178, clutch: 0.921, stamina: 1.18,
-  },
-  {
-    name: 'Monsoon Season Tso', throws: 'L', signature: 'fireball', tellTiming: 'pre_pitch', zoneRate: 0.5, speedBonus: 5,
-    blurb: 'Six weeks a year he is the best arm alive. The rest is desert.',
-    arsenal: { fastball: 0.45, sinker: 0.32, slider: 0.23 }, putaway: 'sinker', break: 1.187, clutch: 0.911, stamina: 1.08,
-  },
+  a("Hundred And Ten Chee", "R", "fireball", "pre_pitch", 0.5, "Same number as the afternoon and about as pleasant.", {"fastball":0.45,"sinker":0.3,"slider":0.25}, "fastball", 1.2, 0.93, 0.96, 8),
+  a("Two Hundred Innings Bly", "L", "fireball", "pre_pitch", 0.54, "Throws every one of them as hard as the first. Nobody has explained why.", {"fastball":0.25,"sinker":0.48,"changeup":0.27}, "fastball", 1.178, 0.921, 1.18, 7),
+  a("Monsoon Season Tso", "L", "fireball", "pre_pitch", 0.5, "Six weeks a year he is the best arm alive. The rest is desert.", {"fastball":0.45,"sinker":0.32,"slider":0.23}, "sinker", 1.187, 0.911, 1.08, 5),
 ];
 
 /** ...and the three who finish it. */
 const PHX_PEN: readonly Pitcher[] = [
-  {
-    name: 'Night Game Wickenburg', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.46, speedBonus: 11,
-    blurb: 'Cannot pitch before eight in the evening and does not need to.',
-    arsenal: { fastball: 0.58, slider: 0.42 }, putaway: 'fastball', break: 1.16, clutch: 0.94, stamina: 0.84,
-  },
-  {
-    name: 'Asphalt Shimmer Begay', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.49,
-    blurb: 'You can see it moving and there is nothing there.',
-    arsenal: { fastball: 0.6, changeup: 0.4 }, putaway: 'changeup', break: 1.152, clutch: 0.893, stamina: 0.82,
-  },
-  {
-    name: 'Hundred And Fifteen Yazzie', throws: 'R', signature: 'fireball', tellTiming: 'release', zoneRate: 0.48, speedBonus: 7,
-    blurb: 'Five hotter than Chee and he has never let anybody forget it.',
-    arsenal: { fastball: 0.6, slider: 0.4 }, putaway: 'fastball', break: 1.225, clutch: 0.949, stamina: 0.7,
-  },
+  a("Night Game Wickenburg", "R", "fireball", "release", 0.46, "Cannot pitch before eight in the evening and does not need to.", {"fastball":0.58,"slider":0.42}, "fastball", 1.16, 0.94, 0.84, 11),
+  a("Asphalt Shimmer Begay", "R", "none", "pre_pitch", 0.49, "You can see it moving and there is nothing there.", {"fastball":0.6,"changeup":0.4}, "changeup", 1.152, 0.893, 0.82),
+  a("Hundred And Fifteen Yazzie", "R", "fireball", "release", 0.48, "Five hotter than Chee and he has never let anybody forget it.", {"fastball":0.6,"slider":0.4}, "fastball", 1.225, 0.949, 0.7, 7),
 ];
 
 /**
@@ -2009,61 +1094,28 @@ const PHX_PEN: readonly Pitcher[] = [
  * Nine men, no money, no staff, and a town that turns out for every game.
  */
 const OKC: readonly Player[] = [
-  { id: 'okc1', name: 'Black Sunday Purl', build: 'human', trait: 'grit', power: 0.929, contact: 1.122, vision: 1.078, clutch: 1.067, bunt: 1.2, speed: 1.14, bats: 'L',
-    bio: 'Named for the worst day the county ever had. Wears it well.' },
-  { id: 'okc2', name: 'Section Line Choate', build: 'human', trait: 'reader', power: 0.951, contact: 1.111, vision: 1.099, clutch: 1.023, bunt: 1.1, speed: 1.08, bats: 'R',
-    bio: 'Straight for a mile in every direction and never in a hurry.' },
-  { id: 'okc3', name: 'Pump Jack Ottoway', build: 'machine', trait: 'slugger', power: 1.336, contact: 0.957, vision: 0.901, clutch: 0.979, bunt: 0.12, speed: 0.58, bats: 'R',
-    bio: 'Up, down, up, down, all day, for a barrel and a half.' },
-  { id: 'okc4', name: 'Red Dirt Hackler', build: 'human', trait: 'slugger', power: 1.204, contact: 0.99, vision: 0.946, clutch: 1.012, bunt: 0.34, speed: 0.75, bats: 'L',
-    bio: 'It gets into everything and it never washes out.' },
-  { id: 'okc5', name: 'Land Run Sedberry', build: 'human', trait: 'grit', power: 1.006, contact: 1.078, vision: 1.034, clutch: 1.056, bunt: 0.98, speed: 1.1, bats: 'R',
-    bio: 'His people were on the line at noon. Some of them jumped it.' },
-  { id: 'okc6', name: 'Grain Co-op Wenzel', build: 'human', trait: 'precision', power: 1.017, contact: 1.078, vision: 1.044, clutch: 1.001, bunt: 0.88, speed: 0.9, bats: 'L',
-    bio: 'Everybody owns a piece and nobody makes a dollar.' },
-  { id: 'okc7', name: 'Twister Season Deel', build: 'augmented', trait: 'showman', power: 1.16, contact: 1.012, vision: 0.968, clutch: 0.968, bunt: 0.48, speed: 0.92, bats: 'R',
-    bio: 'Chases them for fun in the off-season. Has caught two.' },
-  { id: 'okc8', name: 'Dry Well Kanady', build: 'human', trait: 'grit', power: 0.984, contact: 1.056, vision: 1.012, clutch: 1.034, bunt: 0.94, speed: 0.85, bats: 'R',
-    bio: 'Drilled eleven and hit nothing. Still drilling.' },
-  { id: 'okc9', name: 'Tent Revival Pinkston', build: 'machine', trait: 'slugger', power: 1.182, contact: 0.979, vision: 0.934, clutch: 1.001, bunt: 0.28, speed: 0.6, bats: 'L',
-    bio: 'Comes through once a summer and everybody shows up for it.' },
+  h("okc1", "Black Sunday Purl", "human", "grit", 0.929, 1.122, 1.078, 1.067, 1.2, 1.14, "L", "CF", "Named for the worst day the county ever had. Wears it well."),
+  h("okc2", "Section Line Choate", "human", "reader", 0.951, 1.111, 1.099, 1.023, 1.1, 1.08, "R", "SS", "Straight for a mile in every direction and never in a hurry."),
+  h("okc3", "Pump Jack Ottoway", "machine", "slugger", 1.336, 0.957, 0.901, 0.979, 0.12, 0.58, "R", "LF", "Up, down, up, down, all day, for a barrel and a half."),
+  h("okc4", "Red Dirt Hackler", "human", "slugger", 1.204, 0.99, 0.946, 1.012, 0.34, 0.75, "L", "1B", "It gets into everything and it never washes out."),
+  h("okc5", "Land Run Sedberry", "human", "ironman", 1.006, 1.078, 1.034, 1.056, 0.98, 1.1, "R", "RF", "His people were on the line at noon. Some of them jumped it."),
+  h("okc6", "Grain Co-op Wenzel", "human", "precision", 1.017, 1.078, 1.044, 1.001, 0.88, 0.9, "L", "3B", "Everybody owns a piece and nobody makes a dollar."),
+  h("okc7", "Twister Season Deel", "augmented", "cannon", 1.16, 1.012, 0.968, 0.968, 0.48, 0.92, "R", "C", "Chases them for fun in the off-season. Has caught two."),
+  h("okc8", "Dry Well Kanady", "human", "grit", 0.984, 1.056, 1.012, 1.034, 0.94, 0.85, "R", "2B", "Drilled eleven and hit nothing. Still drilling."),
+  h("okc9", "Tent Revival Pinkston", "machine", "slugger", 1.182, 0.979, 0.934, 1.001, 0.28, 0.6, "L", "DH", "Comes through once a summer and everybody shows up for it."),
 ];
 
 const OKC_ARMS: readonly Pitcher[] = [
-  {
-    name: 'Dust Devil Kanady', throws: 'R', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.5,
-    blurb: 'Spins up out of nothing and is gone before it does any damage.',
-    arsenal: { curveball: 0.4, changeup: 0.35, sinker: 0.25 }, putaway: 'curveball', break: 0.94, clutch: 0.92, stamina: 0.98,
-  },
-  {
-    name: 'Sooner Hyde', throws: 'L', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.52,
-    blurb: 'Starts before the signal. Has done it his whole life.',
-    arsenal: { fastball: 0.25, curveball: 0.45, changeup: 0.3 }, putaway: 'curveball', break: 0.929, clutch: 0.91, stamina: 1.06,
-  },
-  {
-    name: 'Windbreak Coldiron', throws: 'R', signature: 'none', tellTiming: 'pre_pitch', zoneRate: 0.49,
-    blurb: 'Somebody planted him in a line in 1936 and he is still standing.',
-    arsenal: { sinker: 0.45, curveball: 0.32, changeup: 0.23 }, putaway: 'curveball', break: 0.922, clutch: 0.902, stamina: 1.08,
-  },
+  a("Dust Devil Kanady", "R", "junk", "pre_pitch", 0.5, "Spins up out of nothing and is gone before it does any damage.", {"curveball":0.4,"changeup":0.35,"sinker":0.25}, "curveball", 0.94, 0.92, 0.98),
+  a("Sooner Hyde", "L", "none", "pre_pitch", 0.52, "Starts before the signal. Has done it his whole life.", {"fastball":0.25,"curveball":0.45,"changeup":0.3}, "curveball", 0.929, 0.91, 1.06),
+  a("Windbreak Coldiron", "R", "none", "pre_pitch", 0.49, "Somebody planted him in a line in 1936 and he is still standing.", {"sinker":0.45,"curveball":0.32,"changeup":0.23}, "curveball", 0.922, 0.902, 1.08),
 ];
 
 /** ...and the three who finish it. */
 const OKC_PEN: readonly Pitcher[] = [
-  {
-    name: 'Cimarron Rooks', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.46, speedBonus: 4,
-    blurb: 'One good inning in him and nobody knows which one it is.',
-    arsenal: { fastball: 0.62, slider: 0.38 }, putaway: 'slider', break: 0.88, clutch: 0.93, stamina: 0.83,
-  },
-  {
-    name: 'Grain Dust Stovall', throws: 'L', signature: 'junk', tellTiming: 'pre_pitch', zoneRate: 0.48,
-    blurb: 'Gets in your eyes and there is nothing you can do about it.',
-    arsenal: { changeup: 0.6, curveball: 0.4 }, putaway: 'changeup', break: 0.895, clutch: 0.883, stamina: 0.82,
-  },
-  {
-    name: 'Last Rain Amos', throws: 'R', signature: 'none', tellTiming: 'release', zoneRate: 0.47,
-    blurb: 'Everybody remembers exactly when. Nobody expects another.',
-    arsenal: { fastball: 0.6, sinker: 0.4 }, putaway: 'sinker', break: 0.951, clutch: 0.938, stamina: 0.7,
-  },
+  a("Cimarron Rooks", "R", "none", "release", 0.46, "One good inning in him and nobody knows which one it is.", {"fastball":0.62,"slider":0.38}, "slider", 0.88, 0.93, 0.83, 4),
+  a("Grain Dust Stovall", "L", "junk", "pre_pitch", 0.48, "Gets in your eyes and there is nothing you can do about it.", {"changeup":0.6,"curveball":0.4}, "changeup", 0.895, 0.883, 0.82),
+  a("Last Rain Amos", "R", "none", "release", 0.47, "Everybody remembers exactly when. Nobody expects another.", {"fastball":0.6,"sinker":0.4}, "sinker", 0.951, 0.938, 0.7),
 ];
 
 // ------------------------------------------------------------- the benches
@@ -2116,273 +1168,183 @@ const OKC_PEN: readonly Pitcher[] = [
  */
 
 const NYE_BENCH: readonly Player[] = [
-  { id: 'nyeB1', name: 'Uptown Jack Ferraro', build: 'human', trait: 'slugger', power: 1.49, contact: 0.86, vision: 0.74, clutch: 1.33, bunt: 0.3, speed: 0.72, bats: 'R',
-    bio: 'Twelve years in the organisation and still dresses like a rookie with money.' },
-  { id: 'nyeB2', name: 'Turnstile Ruiz', build: 'human', trait: 'precision', power: 0.74, contact: 1.06, vision: 1.08, clutch: 1.2, bunt: 1.16, speed: 1.37, bats: 'R',
-    bio: 'Goes in for the ninth and the whole infield shifts a step shallower.' },
-  { id: 'nyeB3', name: 'Lefty Vermilyea', build: 'human', trait: 'reader', power: 1.02, contact: 1.21, vision: 1.14, clutch: 1.26, bunt: 1.0, speed: 1.0, bats: 'L',
-    bio: 'Kept around for one at-bat a week and has never once looked surprised to get it.' },
+  h("nyeB1", "Uptown Jack Ferraro", "human", "grit", 1.49, 0.86, 0.74, 1.33, 0.3, 0.72, "R", "C", "Twelve years in the organisation and still dresses like a rookie with money.", ["1B"]),
+  h("nyeB2", "Turnstile Ruiz", "human", "utility", 0.74, 1.06, 1.08, 1.2, 1.16, 1.37, "R", "2B", "Goes in for the ninth and the whole infield shifts a step shallower.", ["3B","SS"]),
+  h("nyeB3", "Lefty Vermilyea", "human", "speedster", 1.02, 1.21, 1.14, 1.26, 1, 1, "L", "CF", "Kept around for one at-bat a week and has never once looked surprised to get it.", ["LF","RF"]),
 ];
 
 const NYV_BENCH: readonly Player[] = [
-  { id: 'nyvB1', name: 'Pension Day Kowalczyk', build: 'human', trait: 'slugger', power: 1.44, contact: 0.88, vision: 0.76, clutch: 1.36, bunt: 0.31, speed: 0.7, bats: 'R',
-    bio: 'Swings like a man settling an old argument with somebody who has left.' },
-  { id: 'nyvB2', name: 'Whistle Stop Dolan', build: 'human', trait: 'grit', power: 0.76, contact: 1.04, vision: 1.09, clutch: 1.22, bunt: 1.18, speed: 1.35, bats: 'R',
-    bio: 'Ran out a walk once. Nobody has been able to talk him out of it since.' },
-  { id: 'nyvB3', name: 'Southpaw Nardozzi', build: 'human', trait: 'reader', power: 0.99, contact: 1.22, vision: 1.16, clutch: 1.24, bunt: 1.02, speed: 0.98, bats: 'L',
-    bio: 'Waits on the slider like a man who has been told it is coming.' },
+  h("nyvB1", "Pension Day Kowalczyk", "human", "grit", 1.44, 0.88, 0.76, 1.36, 0.31, 0.7, "R", "C", "Swings like a man settling an old argument with somebody who has left.", ["1B"]),
+  h("nyvB2", "Whistle Stop Dolan", "human", "utility", 0.76, 1.04, 1.09, 1.22, 1.18, 1.35, "R", "2B", "Ran out a walk once. Nobody has been able to talk him out of it since.", ["3B","SS"]),
+  h("nyvB3", "Southpaw Nardozzi", "human", "speedster", 0.99, 1.22, 1.16, 1.24, 1.02, 0.98, "L", "CF", "Waits on the slider like a man who has been told it is coming.", ["LF","RF"]),
 ];
 
 const LAC_BENCH: readonly Player[] = [
-  { id: 'lacB1', name: 'Second Unit Bishop', build: 'augmented', trait: 'slugger', power: 1.52, contact: 0.82, vision: 0.72, clutch: 1.31, bunt: 0.28, speed: 0.76, bats: 'R',
-    bio: 'Does the swing nobody films and takes none of the credit for the highlight.' },
-  { id: 'lacB2', name: 'Sunset Bracamonte', build: 'human', trait: 'precision', power: 0.72, contact: 1.05, vision: 1.07, clutch: 1.18, bunt: 1.14, speed: 1.41, bats: 'L',
-    bio: 'Comes in when the shadows reach the mound and is gone before they leave.' },
-  { id: 'lacB3', name: 'Reseda Ottway', build: 'human', trait: 'reader', power: 1.04, contact: 1.19, vision: 1.13, clutch: 1.25, bunt: 0.98, speed: 1.02, bats: 'L',
-    bio: 'From the valley, and mentions it roughly once an inning.' },
+  h("lacB1", "Second Unit Bishop", "augmented", "grit", 1.52, 0.82, 0.72, 1.31, 0.28, 0.76, "R", "C", "Does the swing nobody films and takes none of the credit for the highlight.", ["1B"]),
+  h("lacB2", "Sunset Bracamonte", "human", "utility", 0.72, 1.05, 1.07, 1.18, 1.14, 1.41, "L", "2B", "Comes in when the shadows reach the mound and is gone before they leave.", ["3B","SS"]),
+  h("lacB3", "Reseda Ottway", "human", "speedster", 1.04, 1.19, 1.13, 1.25, 0.98, 1.02, "L", "CF", "From the valley, and mentions it roughly once an inning.", ["LF","RF"]),
 ];
 
 const LAA_BENCH: readonly Player[] = [
-  { id: 'laaB1', name: 'Owens Valley Pike', build: 'human', trait: 'slugger', power: 1.46, contact: 0.85, vision: 0.75, clutch: 1.34, bunt: 0.32, speed: 0.71, bats: 'R',
-    bio: 'Took everything he has from somewhere upstream and will not discuss it.' },
-  { id: 'laaB2', name: 'Standpipe Aguilar', build: 'human', trait: 'grit', power: 0.75, contact: 1.07, vision: 1.1, clutch: 1.21, bunt: 1.2, speed: 1.36, bats: 'R',
-    bio: 'Holds the pressure all game and lets it out in one bag at a time.' },
-  { id: 'laaB3', name: 'Culvert Mendonca', build: 'human', trait: 'precision', power: 0.97, contact: 1.24, vision: 1.15, clutch: 1.23, bunt: 1.06, speed: 1.0, bats: 'L',
-    bio: 'Goes under everything. Comes out the other side dry and on second.' },
+  h("laaB1", "Owens Valley Pike", "human", "grit", 1.46, 0.85, 0.75, 1.34, 0.32, 0.71, "R", "C", "Took everything he has from somewhere upstream and will not discuss it.", ["1B"]),
+  h("laaB2", "Standpipe Aguilar", "human", "utility", 0.75, 1.07, 1.1, 1.21, 1.2, 1.36, "R", "2B", "Holds the pressure all game and lets it out in one bag at a time.", ["3B","SS"]),
+  h("laaB3", "Culvert Mendonca", "human", "speedster", 0.97, 1.24, 1.15, 1.23, 1.06, 1, "L", "CF", "Goes under everything. Comes out the other side dry and on second.", ["LF","RF"]),
 ];
 
 const CHF_BENCH: readonly Player[] = [
-  { id: 'chfB1', name: 'Backdraft Sowinski', build: 'human', trait: 'slugger', power: 1.5, contact: 0.84, vision: 0.73, clutch: 1.35, bunt: 0.29, speed: 0.73, bats: 'R',
-    bio: 'Quiet for eight innings and then takes the roof off the place.' },
-  { id: 'chfB2', name: 'Ladder Company Nash', build: 'human', trait: 'precision', power: 0.73, contact: 1.05, vision: 1.09, clutch: 1.19, bunt: 1.15, speed: 1.38, bats: 'R',
-    bio: 'First man up and first man back down. Never in the picture afterwards.' },
-  { id: 'chfB3', name: 'Hook And Line Petrakis', build: 'human', trait: 'reader', power: 1.0, contact: 1.2, vision: 1.17, clutch: 1.27, bunt: 1.01, speed: 0.99, bats: 'L',
-    bio: 'Gets his bat on things that were already past him.' },
+  h("chfB1", "Backdraft Sowinski", "human", "grit", 1.5, 0.84, 0.73, 1.35, 0.29, 0.73, "R", "C", "Quiet for eight innings and then takes the roof off the place.", ["1B"]),
+  h("chfB2", "Ladder Company Nash", "human", "utility", 0.73, 1.05, 1.09, 1.19, 1.15, 1.38, "R", "2B", "First man up and first man back down. Never in the picture afterwards.", ["3B","SS"]),
+  h("chfB3", "Hook And Line Petrakis", "human", "speedster", 1, 1.2, 1.17, 1.27, 1.01, 0.99, "L", "CF", "Gets his bat on things that were already past him.", ["LF","RF"]),
 ];
 
 const CHI_BENCH: readonly Player[] = [
-  { id: 'chiB1', name: 'Bleacher Seat Duffy', build: 'human', trait: 'slugger', power: 1.47, contact: 0.87, vision: 0.74, clutch: 1.3, bunt: 0.3, speed: 0.7, bats: 'R',
-    bio: 'Hits them where he used to sit and points at the row every time.' },
-  { id: 'chiB2', name: 'Ivy Wall Coyne', build: 'human', trait: 'grit', power: 0.77, contact: 1.03, vision: 1.11, clutch: 1.23, bunt: 1.17, speed: 1.34, bats: 'R',
-    bio: 'Knows exactly where the ball disappears and exactly where it comes back.' },
-  { id: 'chiB3', name: 'Wrigleyville Sandoval', build: 'human', trait: 'reader', power: 1.01, contact: 1.23, vision: 1.14, clutch: 1.22, bunt: 1.03, speed: 1.01, bats: 'L',
-    bio: 'Plays the whole game like the wind is about to change, because it is.' },
+  h("chiB1", "Bleacher Seat Duffy", "human", "grit", 1.47, 0.87, 0.74, 1.3, 0.3, 0.7, "R", "C", "Hits them where he used to sit and points at the row every time.", ["1B"]),
+  h("chiB2", "Ivy Wall Coyne", "human", "utility", 0.77, 1.03, 1.11, 1.23, 1.17, 1.34, "R", "2B", "Knows exactly where the ball disappears and exactly where it comes back.", ["3B","SS"]),
+  h("chiB3", "Wrigleyville Sandoval", "human", "speedster", 1.01, 1.23, 1.14, 1.22, 1.03, 1.01, "L", "CF", "Plays the whole game like the wind is about to change, because it is.", ["LF","RF"]),
 ];
 
 const ALB_BENCH: readonly Player[] = [
-  { id: 'albB1', name: 'Session Day Muldoon', build: 'human', trait: 'slugger', power: 1.45, contact: 0.86, vision: 0.75, clutch: 1.37, bunt: 0.31, speed: 0.72, bats: 'R',
-    bio: 'Shows up when there is something to be decided and not one minute earlier.' },
-  { id: 'albB2', name: 'Erie Lock Tyminski', build: 'human', trait: 'grit', power: 0.76, contact: 1.06, vision: 1.08, clutch: 1.2, bunt: 1.19, speed: 1.35, bats: 'R',
-    bio: 'Moves men up one level at a time and never spills a drop.' },
-  { id: 'albB3', name: 'Hudson Ice Baranowski', build: 'human', trait: 'precision', power: 0.98, contact: 1.22, vision: 1.16, clutch: 1.24, bunt: 1.04, speed: 0.97, bats: 'L',
-    bio: 'Cold, thick and cut into blocks. Keeps until you need him in July.' },
+  h("albB1", "Session Day Muldoon", "human", "grit", 1.45, 0.86, 0.75, 1.37, 0.31, 0.72, "R", "C", "Shows up when there is something to be decided and not one minute earlier.", ["1B"]),
+  h("albB2", "Erie Lock Tyminski", "human", "utility", 0.76, 1.06, 1.08, 1.2, 1.19, 1.35, "R", "2B", "Moves men up one level at a time and never spills a drop.", ["3B","SS"]),
+  h("albB3", "Hudson Ice Baranowski", "human", "speedster", 0.98, 1.22, 1.16, 1.24, 1.04, 0.97, "L", "CF", "Cold, thick and cut into blocks. Keeps until you need him in July.", ["LF","RF"]),
 ];
 
 const BAL_BENCH: readonly Player[] = [
-  { id: 'balB1', name: 'Steamed Hardesty', build: 'human', trait: 'slugger', power: 1.43, contact: 0.88, vision: 0.76, clutch: 1.32, bunt: 0.33, speed: 0.74, bats: 'R',
-    bio: 'Comes out red and loud and there is not much of him left afterwards.' },
-  { id: 'balB2', name: 'Soft Shell Kirwan', build: 'human', trait: 'precision', power: 0.74, contact: 1.08, vision: 1.1, clutch: 1.21, bunt: 1.24, speed: 1.36, bats: 'L',
-    bio: 'Drops one down the line about as often as he is asked to and no less.' },
-  { id: 'balB3', name: 'Fells Point Ozturk', build: 'human', trait: 'reader', power: 1.0, contact: 1.21, vision: 1.15, clutch: 1.25, bunt: 1.07, speed: 1.0, bats: 'L',
-    bio: 'Works the corner nobody wants and has never asked to be moved off it.' },
+  h("balB1", "Steamed Hardesty", "human", "grit", 1.43, 0.88, 0.76, 1.32, 0.33, 0.74, "R", "C", "Comes out red and loud and there is not much of him left afterwards.", ["1B"]),
+  h("balB2", "Soft Shell Kirwan", "human", "utility", 0.74, 1.08, 1.1, 1.21, 1.24, 1.36, "L", "2B", "Drops one down the line about as often as he is asked to and no less.", ["3B","SS"]),
+  h("balB3", "Fells Point Ozturk", "human", "speedster", 1, 1.21, 1.15, 1.25, 1.07, 1, "L", "CF", "Works the corner nobody wants and has never asked to be moved off it.", ["LF","RF"]),
 ];
 
 const BUF_BENCH: readonly Player[] = [
-  { id: 'bufB1', name: 'Lake Effect Zagorski', build: 'human', trait: 'slugger', power: 1.48, contact: 0.85, vision: 0.73, clutch: 1.33, bunt: 0.29, speed: 0.71, bats: 'R',
-    bio: 'Arrives sideways, all at once, and buries whatever was in the way.' },
-  { id: 'bufB2', name: 'Salt Truck Nowak', build: 'human', trait: 'grit', power: 0.75, contact: 1.04, vision: 1.09, clutch: 1.22, bunt: 1.18, speed: 1.33, bats: 'R',
-    bio: 'Out before anybody else and the reason the rest of them get anywhere.' },
-  { id: 'bufB3', name: 'Skyway Pelkey', build: 'human', trait: 'precision', power: 1.02, contact: 1.2, vision: 1.13, clutch: 1.23, bunt: 1.0, speed: 1.02, bats: 'L',
-    bio: 'Goes up and over the whole argument and lands on the other side of it.' },
+  h("bufB1", "Lake Effect Zagorski", "human", "grit", 1.48, 0.85, 0.73, 1.33, 0.29, 0.71, "R", "C", "Arrives sideways, all at once, and buries whatever was in the way.", ["1B"]),
+  h("bufB2", "Salt Truck Nowak", "human", "utility", 0.75, 1.04, 1.09, 1.22, 1.18, 1.33, "R", "2B", "Out before anybody else and the reason the rest of them get anywhere.", ["3B","SS"]),
+  h("bufB3", "Skyway Pelkey", "human", "speedster", 1.02, 1.2, 1.13, 1.23, 1, 1.02, "L", "CF", "Goes up and over the whole argument and lands on the other side of it.", ["LF","RF"]),
 ];
 
 const CIN_BENCH: readonly Player[] = [
-  { id: 'cinB1', name: 'Smokehouse Bracken', build: 'human', trait: 'slugger', power: 1.51, contact: 0.83, vision: 0.72, clutch: 1.34, bunt: 0.28, speed: 0.7, bats: 'R',
-    bio: 'Low and slow all week for about four seconds of everybody paying attention.' },
-  { id: 'cinB2', name: 'Riverfront Delahoy', build: 'human', trait: 'precision', power: 0.73, contact: 1.05, vision: 1.07, clutch: 1.18, bunt: 1.15, speed: 1.39, bats: 'R',
-    bio: 'Turns first the way water turns a bend, which is to say without slowing down.' },
-  { id: 'cinB3', name: 'Over-The-Rhine Kessel', build: 'human', trait: 'reader', power: 0.99, contact: 1.23, vision: 1.16, clutch: 1.26, bunt: 1.02, speed: 0.99, bats: 'L',
-    bio: 'Old neighbourhood, old approach, and neither one is going anywhere.' },
+  h("cinB1", "Smokehouse Bracken", "human", "grit", 1.51, 0.83, 0.72, 1.34, 0.28, 0.7, "R", "C", "Low and slow all week for about four seconds of everybody paying attention.", ["1B"]),
+  h("cinB2", "Riverfront Delahoy", "human", "utility", 0.73, 1.05, 1.07, 1.18, 1.15, 1.39, "R", "2B", "Turns first the way water turns a bend, which is to say without slowing down.", ["3B","SS"]),
+  h("cinB3", "Over-The-Rhine Kessel", "human", "speedster", 0.99, 1.23, 1.16, 1.26, 1.02, 0.99, "L", "CF", "Old neighbourhood, old approach, and neither one is going anywhere.", ["LF","RF"]),
 ];
 
 const CLE_BENCH: readonly Player[] = [
-  { id: 'cleB1', name: 'Hot Rivet Sczepanski', build: 'augmented', trait: 'slugger', power: 1.53, contact: 0.81, vision: 0.71, clutch: 1.32, bunt: 0.27, speed: 0.73, bats: 'R',
-    bio: 'Thrown across the gap glowing and caught in a bucket. Usually.' },
-  { id: 'cleB2', name: 'Flats Lonardo', build: 'human', trait: 'grit', power: 0.76, contact: 1.06, vision: 1.1, clutch: 1.2, bunt: 1.17, speed: 1.34, bats: 'R',
-    bio: 'Everything down there is flat and he still finds a way to go downhill.' },
-  { id: 'cleB3', name: 'Lift Bridge Mancini', build: 'human', trait: 'precision', power: 1.03, contact: 1.19, vision: 1.14, clutch: 1.24, bunt: 1.01, speed: 1.0, bats: 'L',
-    bio: 'Stops everything for as long as he needs and nobody may complain.' },
+  h("cleB1", "Hot Rivet Sczepanski", "augmented", "grit", 1.53, 0.81, 0.71, 1.32, 0.27, 0.73, "R", "C", "Thrown across the gap glowing and caught in a bucket. Usually.", ["1B"]),
+  h("cleB2", "Flats Lonardo", "human", "utility", 0.76, 1.06, 1.1, 1.2, 1.17, 1.34, "R", "2B", "Everything down there is flat and he still finds a way to go downhill.", ["3B","SS"]),
+  h("cleB3", "Lift Bridge Mancini", "human", "speedster", 1.03, 1.19, 1.14, 1.24, 1.01, 1, "L", "CF", "Stops everything for as long as he needs and nobody may complain.", ["LF","RF"]),
 ];
 
 const DEN_BENCH: readonly Player[] = [
-  { id: 'denB1', name: 'Thin Air Ballantyne', build: 'human', trait: 'slugger', power: 1.55, contact: 0.8, vision: 0.7, clutch: 1.3, bunt: 0.26, speed: 0.75, bats: 'R',
-    bio: 'Everything he hits goes further than it deserves and he takes the credit.' },
-  { id: 'denB2', name: 'Switchback Ferrer', build: 'human', trait: 'precision', power: 0.71, contact: 1.07, vision: 1.09, clutch: 1.19, bunt: 1.16, speed: 1.4, bats: 'R',
-    bio: 'Never runs in a straight line and gets there first anyway.' },
-  { id: 'denB3', name: 'Timberline Vachon', build: 'human', trait: 'reader', power: 1.0, contact: 1.21, vision: 1.15, clutch: 1.22, bunt: 1.03, speed: 1.01, bats: 'L',
-    bio: 'Stops exactly where the growing stops and does not try for one foot more.' },
+  h("denB1", "Thin Air Ballantyne", "human", "grit", 1.55, 0.8, 0.7, 1.3, 0.26, 0.75, "R", "C", "Everything he hits goes further than it deserves and he takes the credit.", ["1B"]),
+  h("denB2", "Switchback Ferrer", "human", "utility", 0.71, 1.07, 1.09, 1.19, 1.16, 1.4, "R", "2B", "Never runs in a straight line and gets there first anyway.", ["3B","SS"]),
+  h("denB3", "Timberline Vachon", "human", "speedster", 1, 1.21, 1.15, 1.22, 1.03, 1.01, "L", "CF", "Stops exactly where the growing stops and does not try for one foot more.", ["LF","RF"]),
 ];
 
 const DET_BENCH: readonly Player[] = [
-  { id: 'detB1', name: 'Second Shift Kaczmarek', build: 'augmented', trait: 'slugger', power: 1.5, contact: 0.83, vision: 0.72, clutch: 1.35, bunt: 0.28, speed: 0.71, bats: 'R',
-    bio: 'Clocks in at eight in the evening and the line does not slow down.' },
-  { id: 'detB2', name: 'Cass Corridor Whitfield', build: 'human', trait: 'grit', power: 0.74, contact: 1.05, vision: 1.08, clutch: 1.21, bunt: 1.15, speed: 1.37, bats: 'R',
-    bio: 'Grew up where you had to be quick and never worked out how to switch it off.' },
-  { id: 'detB3', name: 'Piquette Ave Sobieski', build: 'human', trait: 'precision', power: 1.01, contact: 1.2, vision: 1.13, clutch: 1.23, bunt: 1.0, speed: 0.98, bats: 'L',
-    bio: 'From the first plant anybody built, and mentions that it was the first.' },
+  h("detB1", "Second Shift Kaczmarek", "augmented", "grit", 1.5, 0.83, 0.72, 1.35, 0.28, 0.71, "R", "C", "Clocks in at eight in the evening and the line does not slow down.", ["1B"]),
+  h("detB2", "Cass Corridor Whitfield", "human", "utility", 0.74, 1.05, 1.08, 1.21, 1.15, 1.37, "R", "2B", "Grew up where you had to be quick and never worked out how to switch it off.", ["3B","SS"]),
+  h("detB3", "Piquette Ave Sobieski", "human", "speedster", 1.01, 1.2, 1.13, 1.23, 1, 0.98, "L", "CF", "From the first plant anybody built, and mentions that it was the first.", ["LF","RF"]),
 ];
 
 const FLA_BENCH: readonly Player[] = [
-  { id: 'flaB1', name: 'Storm Surge Okonkwo', build: 'human', trait: 'slugger', power: 1.47, contact: 0.86, vision: 0.74, clutch: 1.33, bunt: 0.3, speed: 0.78, bats: 'R',
-    bio: 'Arrives after the wind has already gone and does the actual damage.' },
-  { id: 'flaB2', name: 'Sawgrass Peralta', build: 'human', trait: 'precision', power: 0.72, contact: 1.06, vision: 1.08, clutch: 1.18, bunt: 1.14, speed: 1.43, bats: 'R',
-    bio: 'Runs through things that would cut anybody else to ribbons.' },
-  { id: 'flaB3', name: 'Overseas Highway Bonilla', build: 'human', trait: 'reader', power: 0.98, contact: 1.22, vision: 1.16, clutch: 1.24, bunt: 1.02, speed: 1.04, bats: 'L',
-    bio: 'A very long way with water on both sides and no reasonable place to stop.' },
+  h("flaB1", "Storm Surge Okonkwo", "human", "grit", 1.47, 0.86, 0.74, 1.33, 0.3, 0.78, "R", "C", "Arrives after the wind has already gone and does the actual damage.", ["1B"]),
+  h("flaB2", "Sawgrass Peralta", "human", "utility", 0.72, 1.06, 1.08, 1.18, 1.14, 1.43, "R", "2B", "Runs through things that would cut anybody else to ribbons.", ["3B","SS"]),
+  h("flaB3", "Overseas Highway Bonilla", "human", "speedster", 0.98, 1.22, 1.16, 1.24, 1.02, 1.04, "L", "CF", "A very long way with water on both sides and no reasonable place to stop.", ["LF","RF"]),
 ];
 
 const KCF_BENCH: readonly Player[] = [
-  { id: 'kcfB1', name: 'Hump Yard Yarbrough', build: 'human', trait: 'slugger', power: 1.46, contact: 0.87, vision: 0.75, clutch: 1.34, bunt: 0.31, speed: 0.7, bats: 'R',
-    bio: 'Gives it one shove at the top and lets gravity sort out the rest.' },
-  { id: 'kcfB2', name: 'Caboose Mikulski', build: 'human', trait: 'grit', power: 0.75, contact: 1.04, vision: 1.09, clutch: 1.2, bunt: 1.18, speed: 1.35, bats: 'R',
-    bio: 'Last man on and the only one who can see what is coming up behind.' },
-  { id: 'kcfB3', name: 'Burnt Ends Halloran', build: 'human', trait: 'precision', power: 1.02, contact: 1.21, vision: 1.14, clutch: 1.25, bunt: 1.01, speed: 0.99, bats: 'L',
-    bio: 'The part everybody else threw out, and now they queue for him.' },
+  h("kcfB1", "Hump Yard Yarbrough", "human", "grit", 1.46, 0.87, 0.75, 1.34, 0.31, 0.7, "R", "C", "Gives it one shove at the top and lets gravity sort out the rest.", ["1B"]),
+  h("kcfB2", "Caboose Mikulski", "human", "utility", 0.75, 1.04, 1.09, 1.2, 1.18, 1.35, "R", "2B", "Last man on and the only one who can see what is coming up behind.", ["3B","SS"]),
+  h("kcfB3", "Burnt Ends Halloran", "human", "speedster", 1.02, 1.21, 1.14, 1.25, 1.01, 0.99, "L", "CF", "The part everybody else threw out, and now they queue for him.", ["LF","RF"]),
 ];
 
 const MEM_BENCH: readonly Player[] = [
-  { id: 'memB1', name: 'Paddlewheel Ligon', build: 'human', trait: 'slugger', power: 1.49, contact: 0.84, vision: 0.73, clutch: 1.36, bunt: 0.29, speed: 0.72, bats: 'R',
-    bio: 'Slow, loud, and moves an enormous amount of water when he finally goes.' },
-  { id: 'memB2', name: 'Beale Street Fontenot', build: 'human', trait: 'precision', power: 0.73, contact: 1.07, vision: 1.1, clutch: 1.19, bunt: 1.16, speed: 1.38, bats: 'R',
-    bio: 'Never plays the same bag the same way twice and it always works.' },
-  { id: 'memB3', name: 'Cotton Row Aiken', build: 'human', trait: 'reader', power: 1.0, contact: 1.23, vision: 1.15, clutch: 1.23, bunt: 1.04, speed: 1.0, bats: 'L',
-    bio: 'Judges everything by feel, in about a second, and is right.' },
+  h("memB1", "Paddlewheel Ligon", "human", "grit", 1.49, 0.84, 0.73, 1.36, 0.29, 0.72, "R", "C", "Slow, loud, and moves an enormous amount of water when he finally goes.", ["1B"]),
+  h("memB2", "Beale Street Fontenot", "human", "utility", 0.73, 1.07, 1.1, 1.19, 1.16, 1.38, "R", "2B", "Never plays the same bag the same way twice and it always works.", ["3B","SS"]),
+  h("memB3", "Cotton Row Aiken", "human", "speedster", 1, 1.23, 1.15, 1.23, 1.04, 1, "L", "CF", "Judges everything by feel, in about a second, and is right.", ["LF","RF"]),
 ];
 
 const MIL_BENCH: readonly Player[] = [
-  { id: 'milB1', name: 'Barrel Head Stankiewicz', build: 'human', trait: 'slugger', power: 1.48, contact: 0.85, vision: 0.74, clutch: 1.33, bunt: 0.3, speed: 0.7, bats: 'R',
-    bio: 'Built round and thick and takes an enormous amount of pressure without a leak.' },
-  { id: 'milB2', name: 'Stave Mill Brubaker', build: 'human', trait: 'grit', power: 0.76, contact: 1.05, vision: 1.09, clutch: 1.21, bunt: 1.17, speed: 1.34, bats: 'R',
-    bio: 'Cuts everything to length and never once measures twice.' },
-  { id: 'milB3', name: 'Third Ward Novotny', build: 'human', trait: 'precision', power: 0.99, contact: 1.22, vision: 1.14, clutch: 1.24, bunt: 1.02, speed: 1.01, bats: 'L',
-    bio: 'Old warehouse district, old swing, and both have been quietly renovated.' },
+  h("milB1", "Barrel Head Stankiewicz", "human", "grit", 1.48, 0.85, 0.74, 1.33, 0.3, 0.7, "R", "C", "Built round and thick and takes an enormous amount of pressure without a leak.", ["1B"]),
+  h("milB2", "Stave Mill Brubaker", "human", "utility", 0.76, 1.05, 1.09, 1.21, 1.17, 1.34, "R", "2B", "Cuts everything to length and never once measures twice.", ["3B","SS"]),
+  h("milB3", "Third Ward Novotny", "human", "speedster", 0.99, 1.22, 1.14, 1.24, 1.02, 1.01, "L", "CF", "Old warehouse district, old swing, and both have been quietly renovated.", ["LF","RF"]),
 ];
 
 const MIN_BENCH: readonly Player[] = [
-  { id: 'minB1', name: 'Stone Arch Halvorsen', build: 'human', trait: 'slugger', power: 1.44, contact: 0.88, vision: 0.76, clutch: 1.35, bunt: 0.32, speed: 0.71, bats: 'R',
-    bio: 'Been there a hundred years and nobody has found a reason to take him down.' },
-  { id: 'minB2', name: 'Skyway Lindquist', build: 'human', trait: 'grit', power: 0.75, contact: 1.06, vision: 1.11, clutch: 1.22, bunt: 1.19, speed: 1.33, bats: 'R',
-    bio: 'Gets across the whole thing without ever once going outside.' },
-  { id: 'minB3', name: 'Mill City Aaberg', build: 'human', trait: 'precision', power: 1.01, contact: 1.24, vision: 1.16, clutch: 1.23, bunt: 1.05, speed: 0.98, bats: 'L',
-    bio: 'Grinds it fine and does not stop until the whole load is through.' },
+  h("minB1", "Stone Arch Halvorsen", "human", "grit", 1.44, 0.88, 0.76, 1.35, 0.32, 0.71, "R", "C", "Been there a hundred years and nobody has found a reason to take him down.", ["1B"]),
+  h("minB2", "Skyway Lindquist", "human", "utility", 0.75, 1.06, 1.11, 1.22, 1.19, 1.33, "R", "2B", "Gets across the whole thing without ever once going outside.", ["3B","SS"]),
+  h("minB3", "Mill City Aaberg", "human", "speedster", 1.01, 1.24, 1.16, 1.23, 1.05, 0.98, "L", "CF", "Grinds it fine and does not stop until the whole load is through.", ["LF","RF"]),
 ];
 
 const MNE_BENCH: readonly Player[] = [
-  { id: 'mneB1', name: 'Bait Barrel Thibodeau', build: 'human', trait: 'slugger', power: 1.45, contact: 0.86, vision: 0.75, clutch: 1.34, bunt: 0.31, speed: 0.73, bats: 'R',
-    bio: 'Nobody wants to sit near him and everybody wants him on the boat.' },
-  { id: 'mneB2', name: 'Nor’easter Pelletier', build: 'human', trait: 'precision', power: 0.74, contact: 1.07, vision: 1.09, clutch: 1.2, bunt: 1.21, speed: 1.36, bats: 'R',
-    bio: 'Comes up the coast without warning and rearranges the whole harbour.' },
-  { id: 'mneB3', name: 'Trap Line Ouellet', build: 'human', trait: 'reader', power: 0.98, contact: 1.23, vision: 1.15, clutch: 1.25, bunt: 1.08, speed: 1.0, bats: 'L',
-    bio: 'Works the same water every day and knows every rock under it.' },
+  h("mneB1", "Bait Barrel Thibodeau", "human", "grit", 1.45, 0.86, 0.75, 1.34, 0.31, 0.73, "R", "C", "Nobody wants to sit near him and everybody wants him on the boat.", ["1B"]),
+  h("mneB2", "Nor’easter Pelletier", "human", "utility", 0.74, 1.07, 1.09, 1.2, 1.21, 1.36, "R", "2B", "Comes up the coast without warning and rearranges the whole harbour.", ["3B","SS"]),
+  h("mneB3", "Trap Line Ouellet", "human", "speedster", 0.98, 1.23, 1.15, 1.25, 1.08, 1, "L", "CF", "Works the same water every day and knows every rock under it.", ["LF","RF"]),
 ];
 
 const NEM_BENCH: readonly Player[] = [
-  { id: 'nemB1', name: 'Powder Horn Stapleton', build: 'human', trait: 'slugger', power: 1.46, contact: 0.87, vision: 0.74, clutch: 1.38, bunt: 0.3, speed: 0.71, bats: 'R',
-    bio: 'Carries one shot and has never wasted it on anything ordinary.' },
-  { id: 'nemB2', name: 'Bell Tower Cabral', build: 'human', trait: 'grit', power: 0.76, contact: 1.05, vision: 1.1, clutch: 1.21, bunt: 1.18, speed: 1.35, bats: 'R',
-    bio: 'One if by land. He is already halfway to second by two.' },
-  { id: 'nemB3', name: 'Stone Wall Prouty', build: 'human', trait: 'precision', power: 1.0, contact: 1.22, vision: 1.16, clutch: 1.24, bunt: 1.03, speed: 0.99, bats: 'L',
-    bio: 'Built out of whatever the field gave up that year and has not moved since.' },
+  h("nemB1", "Powder Horn Stapleton", "human", "grit", 1.46, 0.87, 0.74, 1.38, 0.3, 0.71, "R", "C", "Carries one shot and has never wasted it on anything ordinary.", ["1B"]),
+  h("nemB2", "Bell Tower Cabral", "human", "utility", 0.76, 1.05, 1.1, 1.21, 1.18, 1.35, "R", "2B", "One if by land. He is already halfway to second by two.", ["3B","SS"]),
+  h("nemB3", "Stone Wall Prouty", "human", "speedster", 1, 1.22, 1.16, 1.24, 1.03, 0.99, "L", "CF", "Built out of whatever the field gave up that year and has not moved since.", ["LF","RF"]),
 ];
 
 const NOL_BENCH: readonly Player[] = [
-  { id: 'nolB1', name: 'Second Line Boudreaux', build: 'human', trait: 'slugger', power: 1.5, contact: 0.84, vision: 0.72, clutch: 1.36, bunt: 0.28, speed: 0.74, bats: 'R',
-    bio: 'Turns up behind the parade and somehow ends up leading it.' },
-  { id: 'nolB2', name: 'Bayou Runner Chauvin', build: 'human', trait: 'precision', power: 0.72, contact: 1.06, vision: 1.08, clutch: 1.18, bunt: 1.15, speed: 1.42, bats: 'R',
-    bio: 'Knows every channel through it and has never told anybody which one.' },
-  { id: 'nolB3', name: 'Gaslamp Thibault', build: 'human', trait: 'reader', power: 0.99, contact: 1.23, vision: 1.17, clutch: 1.26, bunt: 1.02, speed: 1.02, bats: 'L',
-    bio: 'Only really visible after dark, which is when they need him anyway.' },
+  h("nolB1", "Second Line Boudreaux", "human", "grit", 1.5, 0.84, 0.72, 1.36, 0.28, 0.74, "R", "C", "Turns up behind the parade and somehow ends up leading it.", ["1B"]),
+  h("nolB2", "Bayou Runner Chauvin", "human", "utility", 0.72, 1.06, 1.08, 1.18, 1.15, 1.42, "R", "2B", "Knows every channel through it and has never told anybody which one.", ["3B","SS"]),
+  h("nolB3", "Gaslamp Thibault", "human", "speedster", 0.99, 1.23, 1.17, 1.26, 1.02, 1.02, "L", "CF", "Only really visible after dark, which is when they need him anyway.", ["LF","RF"]),
 ];
 
 const OKC_BENCH: readonly Player[] = [
-  { id: 'okcB1', name: 'Section Line Yeager', build: 'human', trait: 'slugger', power: 1.47, contact: 0.85, vision: 0.73, clutch: 1.32, bunt: 0.3, speed: 0.72, bats: 'R',
-    bio: 'Draws a straight line across everything and dares the weather to argue.' },
-  { id: 'okcB2', name: 'Sooner Gap Mullen', build: 'human', trait: 'grit', power: 0.75, contact: 1.04, vision: 1.08, clutch: 1.2, bunt: 1.17, speed: 1.39, bats: 'R',
-    bio: 'Left before the gun and has been apologising for it for two generations.' },
-  { id: 'okcB3', name: 'Red Bed Chalfant', build: 'human', trait: 'precision', power: 1.01, contact: 1.2, vision: 1.13, clutch: 1.22, bunt: 1.01, speed: 1.0, bats: 'L',
-    bio: 'The dirt out there stains everything and he has stopped washing it out.' },
+  h("okcB1", "Section Line Yeager", "human", "grit", 1.47, 0.85, 0.73, 1.32, 0.3, 0.72, "R", "C", "Draws a straight line across everything and dares the weather to argue.", ["1B"]),
+  h("okcB2", "Sooner Gap Mullen", "human", "utility", 0.75, 1.04, 1.08, 1.2, 1.17, 1.39, "R", "2B", "Left before the gun and has been apologising for it for two generations.", ["3B","SS"]),
+  h("okcB3", "Red Bed Chalfant", "human", "speedster", 1.01, 1.2, 1.13, 1.22, 1.01, 1, "L", "CF", "The dirt out there stains everything and he has stopped washing it out.", ["LF","RF"]),
 ];
 
 const PHI_BENCH: readonly Player[] = [
-  { id: 'phiB1', name: 'Broad Street Kolodziej', build: 'augmented', trait: 'slugger', power: 1.52, contact: 0.82, vision: 0.71, clutch: 1.33, bunt: 0.27, speed: 0.72, bats: 'R',
-    bio: 'Booed on the way to the plate and booed on the way back, both times loudly.' },
-  { id: 'phiB2', name: 'Navy Yard Tiernan', build: 'human', trait: 'grit', power: 0.74, contact: 1.05, vision: 1.09, clutch: 1.21, bunt: 1.16, speed: 1.34, bats: 'R',
-    bio: 'Everything down there is riveted and so is he.' },
-  { id: 'phiB3', name: 'Fishtown Rzepka', build: 'human', trait: 'precision', power: 1.02, contact: 1.21, vision: 1.14, clutch: 1.24, bunt: 1.0, speed: 0.98, bats: 'L',
-    bio: 'Has an opinion about the swing you just took and you are going to hear it.' },
+  h("phiB1", "Broad Street Kolodziej", "augmented", "grit", 1.52, 0.82, 0.71, 1.33, 0.27, 0.72, "R", "C", "Booed on the way to the plate and booed on the way back, both times loudly.", ["1B"]),
+  h("phiB2", "Navy Yard Tiernan", "human", "utility", 0.74, 1.05, 1.09, 1.21, 1.16, 1.34, "R", "2B", "Everything down there is riveted and so is he.", ["3B","SS"]),
+  h("phiB3", "Fishtown Rzepka", "human", "speedster", 1.02, 1.21, 1.14, 1.24, 1, 0.98, "L", "CF", "Has an opinion about the swing you just took and you are going to hear it.", ["LF","RF"]),
 ];
 
 const PHX_BENCH: readonly Player[] = [
-  { id: 'phxB1', name: 'Dry Heat Todacheene', build: 'human', trait: 'slugger', power: 1.48, contact: 0.85, vision: 0.73, clutch: 1.31, bunt: 0.29, speed: 0.73, bats: 'R',
-    bio: 'It is not so bad, he says, right up until it takes everything you had.' },
-  { id: 'phxB2', name: 'Saguaro Ibarra', build: 'human', trait: 'precision', power: 0.72, contact: 1.06, vision: 1.07, clutch: 1.19, bunt: 1.14, speed: 1.4, bats: 'R',
-    bio: 'Stands very still for a very long time and then takes an enormous stride.' },
-  { id: 'phxB3', name: 'Monsoon Aguirre', build: 'human', trait: 'reader', power: 1.0, contact: 1.22, vision: 1.15, clutch: 1.23, bunt: 1.02, speed: 1.01, bats: 'L',
-    bio: 'Nothing all year and then the whole year in twenty minutes.' },
+  h("phxB1", "Dry Heat Todacheene", "human", "grit", 1.48, 0.85, 0.73, 1.31, 0.29, 0.73, "R", "C", "It is not so bad, he says, right up until it takes everything you had.", ["1B"]),
+  h("phxB2", "Saguaro Ibarra", "human", "utility", 0.72, 1.06, 1.07, 1.19, 1.14, 1.4, "R", "2B", "Stands very still for a very long time and then takes an enormous stride.", ["3B","SS"]),
+  h("phxB3", "Monsoon Aguirre", "human", "speedster", 1, 1.22, 1.15, 1.23, 1.02, 1.01, "L", "CF", "Nothing all year and then the whole year in twenty minutes.", ["LF","RF"]),
 ];
 
 const PIT_BENCH: readonly Player[] = [
-  { id: 'pitB1', name: 'Slag Heap Yancovic', build: 'human', trait: 'slugger', power: 1.49, contact: 0.84, vision: 0.72, clutch: 1.35, bunt: 0.28, speed: 0.7, bats: 'R',
-    bio: 'What is left over after the useful part, and it is still hot enough to matter.' },
-  { id: 'pitB2', name: 'Incline Vukovich', build: 'human', trait: 'grit', power: 0.76, contact: 1.04, vision: 1.1, clutch: 1.22, bunt: 1.18, speed: 1.33, bats: 'R',
-    bio: 'Goes up the side of the hill at a fixed speed and never once slips.' },
-  { id: 'pitB3', name: 'Three Rivers Kubiak', build: 'human', trait: 'precision', power: 1.01, contact: 1.2, vision: 1.14, clutch: 1.23, bunt: 1.02, speed: 1.0, bats: 'L',
-    bio: 'Two go in and one comes out, and he has never explained the arithmetic.' },
+  h("pitB1", "Slag Heap Yancovic", "human", "grit", 1.49, 0.84, 0.72, 1.35, 0.28, 0.7, "R", "C", "What is left over after the useful part, and it is still hot enough to matter.", ["1B"]),
+  h("pitB2", "Incline Vukovich", "human", "utility", 0.76, 1.04, 1.1, 1.22, 1.18, 1.33, "R", "2B", "Goes up the side of the hill at a fixed speed and never once slips.", ["3B","SS"]),
+  h("pitB3", "Three Rivers Kubiak", "human", "speedster", 1.01, 1.2, 1.14, 1.23, 1.02, 1, "L", "CF", "Two go in and one comes out, and he has never explained the arithmetic.", ["LF","RF"]),
 ];
 
 const SEA_BENCH: readonly Player[] = [
-  { id: 'seaB1', name: 'Drydock Halvorson', build: 'human', trait: 'slugger', power: 1.45, contact: 0.87, vision: 0.75, clutch: 1.34, bunt: 0.31, speed: 0.71, bats: 'R',
-    bio: 'Everything gets pulled out of the water and looked at properly before he swings.' },
-  { id: 'seaB2', name: 'Pike Place Okada', build: 'human', trait: 'precision', power: 0.74, contact: 1.07, vision: 1.11, clutch: 1.2, bunt: 1.19, speed: 1.37, bats: 'R',
-    bio: 'Catches everything thrown at him, from any angle, without looking twice.' },
-  { id: 'seaB3', name: 'Low Cloud Bergstrom', build: 'human', trait: 'reader', power: 0.98, contact: 1.24, vision: 1.17, clutch: 1.25, bunt: 1.04, speed: 0.99, bats: 'L',
-    bio: 'Sits on everything all day and lifts for about an hour in the evening.' },
+  h("seaB1", "Drydock Halvorson", "human", "grit", 1.45, 0.87, 0.75, 1.34, 0.31, 0.71, "R", "C", "Everything gets pulled out of the water and looked at properly before he swings.", ["1B"]),
+  h("seaB2", "Pike Place Okada", "human", "utility", 0.74, 1.07, 1.11, 1.2, 1.19, 1.37, "R", "2B", "Catches everything thrown at him, from any angle, without looking twice.", ["3B","SS"]),
+  h("seaB3", "Low Cloud Bergstrom", "human", "speedster", 0.98, 1.24, 1.17, 1.25, 1.04, 0.99, "L", "CF", "Sits on everything all day and lifts for about an hour in the evening.", ["LF","RF"]),
 ];
 
 const SFO_BENCH: readonly Player[] = [
-  { id: 'sfoB1', name: 'Cable Car Mazzola', build: 'human', trait: 'slugger', power: 1.44, contact: 0.88, vision: 0.76, clutch: 1.33, bunt: 0.32, speed: 0.74, bats: 'R',
-    bio: 'Grabs hold of the thing under the street and lets it drag him up the hill.' },
-  { id: 'sfoB2', name: 'Karl The Fog Quan', build: 'human', trait: 'precision', power: 0.73, contact: 1.06, vision: 1.09, clutch: 1.18, bunt: 1.2, speed: 1.38, bats: 'R',
-    bio: 'Rolls in over the wall and nobody can see the ball for an inning and a half.' },
-  { id: 'sfoB3', name: 'Barbary Coast Doyle', build: 'human', trait: 'reader', power: 1.0, contact: 1.23, vision: 1.16, clutch: 1.24, bunt: 1.06, speed: 1.01, bats: 'L',
-    bio: 'Woke up on a different club twice and does not talk about either time.' },
+  h("sfoB1", "Cable Car Mazzola", "human", "grit", 1.44, 0.88, 0.76, 1.33, 0.32, 0.74, "R", "C", "Grabs hold of the thing under the street and lets it drag him up the hill.", ["1B"]),
+  h("sfoB2", "Karl The Fog Quan", "human", "utility", 0.73, 1.06, 1.09, 1.18, 1.2, 1.38, "R", "2B", "Rolls in over the wall and nobody can see the ball for an inning and a half.", ["3B","SS"]),
+  h("sfoB3", "Barbary Coast Doyle", "human", "speedster", 1, 1.23, 1.16, 1.24, 1.06, 1.01, "L", "CF", "Woke up on a different club twice and does not talk about either time.", ["LF","RF"]),
 ];
 
 const STL_BENCH: readonly Player[] = [
-  { id: 'stlB1', name: 'Levee Board Krumholz', build: 'human', trait: 'slugger', power: 1.46, contact: 0.86, vision: 0.74, clutch: 1.36, bunt: 0.3, speed: 0.71, bats: 'R',
-    bio: 'Decides where the water goes and has never once been thanked for it.' },
-  { id: 'stlB2', name: 'Towboat Escalante', build: 'human', trait: 'grit', power: 0.75, contact: 1.05, vision: 1.09, clutch: 1.21, bunt: 1.17, speed: 1.36, bats: 'R',
-    bio: 'Pushes a great deal more than himself and never appears to be trying.' },
-  { id: 'stlB3', name: 'Soulard Wysocki', build: 'human', trait: 'precision', power: 1.02, contact: 1.21, vision: 1.15, clutch: 1.23, bunt: 1.03, speed: 0.98, bats: 'L',
-    bio: 'Been at the same market stall since before the club and outlasts managers.' },
+  h("stlB1", "Levee Board Krumholz", "human", "grit", 1.46, 0.86, 0.74, 1.36, 0.3, 0.71, "R", "C", "Decides where the water goes and has never once been thanked for it.", ["1B"]),
+  h("stlB2", "Towboat Escalante", "human", "utility", 0.75, 1.05, 1.09, 1.21, 1.17, 1.36, "R", "2B", "Pushes a great deal more than himself and never appears to be trying.", ["3B","SS"]),
+  h("stlB3", "Soulard Wysocki", "human", "speedster", 1.02, 1.21, 1.15, 1.23, 1.03, 0.98, "L", "CF", "Been at the same market stall since before the club and outlasts managers.", ["LF","RF"]),
 ];
 
 const TEX_BENCH: readonly Player[] = [
-  { id: 'texB1', name: 'Caliche Road Duplantis', build: 'human', trait: 'slugger', power: 1.51, contact: 0.83, vision: 0.71, clutch: 1.32, bunt: 0.27, speed: 0.73, bats: 'R',
-    bio: 'Hard, white, and rattles everything that goes across him at speed.' },
-  { id: 'texB2', name: 'Pumpjack Salinas', build: 'human', trait: 'precision', power: 0.72, contact: 1.05, vision: 1.07, clutch: 1.19, bunt: 1.14, speed: 1.41, bats: 'R',
-    bio: 'Same motion, all day, all night, and it never once gets tired of itself.' },
-  { id: 'texB3', name: 'Stockyard Renteria', build: 'human', trait: 'reader', power: 0.99, contact: 1.22, vision: 1.14, clutch: 1.25, bunt: 1.01, speed: 1.02, bats: 'L',
-    bio: 'Moves an awful lot of something through a very narrow gate without a fuss.' },
+  h("texB1", "Caliche Road Duplantis", "human", "grit", 1.51, 0.83, 0.71, 1.32, 0.27, 0.73, "R", "C", "Hard, white, and rattles everything that goes across him at speed.", ["1B"]),
+  h("texB2", "Pumpjack Salinas", "human", "utility", 0.72, 1.05, 1.07, 1.19, 1.14, 1.41, "R", "2B", "Same motion, all day, all night, and it never once gets tired of itself.", ["3B","SS"]),
+  h("texB3", "Stockyard Renteria", "human", "speedster", 0.99, 1.22, 1.14, 1.25, 1.01, 1.02, "L", "CF", "Moves an awful lot of something through a very narrow gate without a fuss.", ["LF","RF"]),
 ];
 
 const TOR_BENCH: readonly Player[] = [
-  { id: 'torB1', name: 'Red Eye Fitzgibbon', build: 'human', trait: 'slugger', power: 1.47, contact: 0.85, vision: 0.74, clutch: 1.34, bunt: 0.29, speed: 0.72, bats: 'R',
-    bio: 'Lands at six, sleeps until four, and hits one out at nine.' },
-  { id: 'torB2', name: 'Layover Sivakumar', build: 'human', trait: 'grit', power: 0.75, contact: 1.06, vision: 1.1, clutch: 1.2, bunt: 1.18, speed: 1.36, bats: 'R',
-    bio: 'Has been through more airports than parks and prefers it that way.' },
-  { id: 'torB3', name: 'Customs Line Charbonneau', build: 'human', trait: 'precision', power: 1.0, contact: 1.23, vision: 1.16, clutch: 1.24, bunt: 1.02, speed: 1.0, bats: 'L',
-    bio: 'Nothing gets past him and everybody resents how long it takes.' },
+  h("torB1", "Red Eye Fitzgibbon", "human", "grit", 1.47, 0.85, 0.74, 1.34, 0.29, 0.72, "R", "C", "Lands at six, sleeps until four, and hits one out at nine.", ["1B"]),
+  h("torB2", "Layover Sivakumar", "human", "utility", 0.75, 1.06, 1.1, 1.2, 1.18, 1.36, "R", "2B", "Has been through more airports than parks and prefers it that way.", ["3B","SS"]),
+  h("torB3", "Customs Line Charbonneau", "human", "speedster", 1, 1.23, 1.16, 1.24, 1.02, 1, "L", "CF", "Nothing gets past him and everybody resents how long it takes.", ["LF","RF"]),
 ];
 
 // -------------------------------------------------------------- the clubs

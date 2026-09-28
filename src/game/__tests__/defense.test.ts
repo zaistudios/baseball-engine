@@ -117,6 +117,31 @@ describe('the alignment', () => {
     expect(assignPositions(withGlove).SS!.id).toBe(slowest.id);
     expect(gloveOf({ ...slowest, glove: 3 })).toBe(3);
   });
+
+  it('respects primary position assignments', () => {
+    const custom = HOME.lineup.map((p, i) => (i === 0 ? { ...p, pos: '3B' as Position } : p));
+    const aligned = assignPositions(custom);
+    expect(aligned['3B']!.id).toBe(custom[0]!.id);
+  });
+
+  it('respects secondary positions when primary is unavailable or unset', () => {
+    const custom = HOME.lineup.map((p, i) => {
+      if (i === 0) return { ...p, pos: 'SS' as Position };
+      if (i === 1) return { ...p, secondaryPos: ['SS', '2B'] as Position[] };
+      return p;
+    });
+    const aligned = assignPositions(custom);
+    expect(aligned.SS!.id).toBe(custom[0]!.id);
+    expect(aligned['2B']!.id).toBe(custom[1]!.id);
+  });
+
+  it('uses utility trait to fill open positions before glove fallback', () => {
+    const utilityPlayer = { ...HOME.lineup[0]!, trait: 'utility' as const };
+    const custom = [utilityPlayer, ...HOME.lineup.slice(1)];
+    const aligned = assignPositions(custom);
+    expect(aligned).toBeDefined();
+    expect(Object.values(aligned).filter(Boolean)).toHaveLength(9);
+  });
 });
 
 describe('who the ball goes to', () => {
@@ -288,6 +313,12 @@ describe('the catcher matters', () => {
     const strong = { ...alignment, C: { ...alignment.C!, speed: 1.5, build: 'machine' } as Player };
     expect(catcherArm(strong)).toBeGreaterThan(catcherArm(weak));
     expect(chanceFor(g, op, strong)).toBeLessThan(chanceFor(g, op, weak));
+  });
+
+  it('a catcher with the cannon trait boosts arm strength', () => {
+    const regular = { ...alignment, C: { ...alignment.C!, speed: 1.0, build: 'human' } as Player };
+    const cannon = { ...alignment, C: { ...alignment.C!, speed: 1.0, build: 'human', trait: 'cannon' } as Player };
+    expect(catcherArm(cannon)).toBeGreaterThan(catcherArm(regular));
   });
 });
 

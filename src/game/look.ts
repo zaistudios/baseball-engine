@@ -185,9 +185,20 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'tall', w: 0.9, h: 1.09 },
       { name: 'squat', w: 1.1, h: 0.92 },
       { name: 'enormous', w: 1.3, h: 1.04 },
+      { name: 'athletic', w: 1.05, h: 1.04 },
+      { name: 'stocky', w: 1.15, h: 0.94 },
     ],
-    heads: ['round', 'square', 'narrow'],
-    crests: ['bare', 'cap', 'cap over hair', 'long hair', 'batting helmet'],
+    heads: ['round', 'square', 'narrow', 'weathered', 'chiseled'],
+    crests: [
+      'bare',
+      'cap',
+      'cap over hair',
+      'long hair',
+      'batting helmet',
+      'high fade',
+      'ponytail',
+      'backward cap',
+    ],
     tones: HUMAN_TONES,
   },
   augmented: {
@@ -197,9 +208,19 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'reinforced', w: 1.22, h: 1.0 },
       { name: 'lanky', w: 0.96, h: 1.12 },
       { name: 'grafted', w: 1.34, h: 1.06 },
+      { name: 'cyber-heavy', w: 1.28, h: 1.05 },
+      { name: 'streamlined', w: 0.95, h: 1.06 },
     ],
-    heads: ['round', 'square', 'narrow'],
-    crests: ['half-visor', 'port', 'braced cap', 'plated crown'],
+    heads: ['round', 'square', 'narrow', 'scanner jaw', 'augmented ocular'],
+    crests: [
+      'half-visor',
+      'port',
+      'braced cap',
+      'plated crown',
+      'full-visor',
+      'cranial port',
+      'neural fins',
+    ],
     tones: HUMAN_TONES,
   },
   machine: {
@@ -208,9 +229,19 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'heavy chassis', w: 1.2, h: 1.03 },
       { name: 'spire', w: 0.88, h: 1.14 },
       { name: 'foundry unit', w: 1.42, h: 1.08 },
+      { name: 'scout frame', w: 0.92, h: 1.02 },
+      { name: 'titan chassis', w: 1.35, h: 1.12 },
     ],
-    heads: ['optic slit', 'single lens'],
-    crests: ['flat crown', 'vent stack', 'antenna', 'sensor rail'],
+    heads: ['optic slit', 'single lens', 'dual optic', 'matrix array'],
+    crests: [
+      'flat crown',
+      'vent stack',
+      'antenna',
+      'sensor rail',
+      'cooling fins',
+      'twin antennae',
+      'exhaust array',
+    ],
     tones: [
       { name: 'steel', hex: '#9aa2aa' },
       { name: 'chrome', hex: '#c0c4c8' },
@@ -220,6 +251,51 @@ export const PARTS: Record<Build, PartSet> = {
     ],
   },
 };
+
+/** Base part set lengths to preserve deterministic default rolls. */
+const BASE_COUNTS: Record<Build, { frames: number; heads: number; crests: number; tones: number }> = {
+  human: { frames: 6, heads: 3, crests: 5, tones: 6 },
+  augmented: { frames: 5, heads: 3, crests: 4, tones: 6 },
+  machine: { frames: 4, heads: 2, crests: 4, tones: 5 },
+};
+
+export const ACCESSORIES: Record<Build, readonly string[]> = {
+  human: [
+    'none',
+    'eye black',
+    'wristbands',
+    'elbow guard',
+    'eye black & wristbands',
+    'high socks',
+  ],
+  augmented: [
+    'none',
+    'ocular reticle',
+    'bionic elbow brace',
+    'wrist power modules',
+    'reinforced knee chassis',
+    'overclocked core',
+  ],
+  machine: [
+    'none',
+    'core reactor',
+    'exhaust flare ports',
+    'reinforced plating',
+    'dual optic glow',
+    'hazard stripes',
+  ],
+};
+
+export const STANCE_NAMES: readonly string[] = [
+  'standard',
+  'crouch',
+  'upright',
+  'open',
+];
+
+export function accessoryNames(build: Build): readonly string[] {
+  return ACCESSORIES[build];
+}
 
 /** The four picked parts, in the order a screen should offer them. */
 export const PART_KEYS = ['frame', 'head', 'crest', 'tone'] as const;
@@ -401,9 +477,9 @@ export function clubBuild(team: Team): Build {
  * lean → huge, so the bias is a position rather than a lookup table.
  */
 function rollLook(seedText: string, build: Build, heft: number): Look {
-  const set = partsFor(build);
+  const base = BASE_COUNTS[build];
   const rng = makeRng(seedFromString(seedText));
-  const span = set.frames.length - 1;
+  const span = base.frames - 1;
   // Two thirds from the biased position, one third rolled, so a slugger is
   // usually big and occasionally is not.
   const frame = Math.max(
@@ -412,9 +488,9 @@ function rollLook(seedText: string, build: Build, heft: number): Look {
   );
   return {
     frame,
-    head: rng.int(0, set.heads.length - 1),
-    crest: rng.int(0, set.crests.length - 1),
-    tone: rng.int(0, set.tones.length - 1),
+    head: rng.int(0, base.heads - 1),
+    crest: rng.int(0, base.crests - 1),
+    tone: rng.int(0, base.tones - 1),
     number: rng.int(1, 99),
     wear: rng.next(),
   };
@@ -432,6 +508,7 @@ export function safeLook(look: Look, build: Build): Look {
   const set = partsFor(build);
   const fit = (v: unknown, n: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(n - 1, Math.floor(v))) : 0;
+  const accList = accessoryNames(build);
   return {
     frame: fit(look.frame, set.frames.length),
     head: fit(look.head, set.heads.length),
@@ -439,6 +516,8 @@ export function safeLook(look: Look, build: Build): Look {
     tone: fit(look.tone, set.tones.length),
     number: Math.max(0, Math.min(99, Math.floor(Number(look.number) || 0))),
     wear: Math.max(0, Math.min(1, Number(look.wear) || 0)),
+    ...(look.accessory !== undefined ? { accessory: fit(look.accessory, accList.length) } : {}),
+    ...(look.stance !== undefined ? { stance: fit(look.stance, STANCE_NAMES.length) } : {}),
   };
 }
 
@@ -527,8 +606,11 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   // A crouch folds the legs away and drops everything. One number, applied to
   // the two heights that matter, rather than a second set of proportions.
   const crouch = o.stance === 'crouch';
-  const legTop = crouch ? -h * 0.18 : -h * 0.46;
-  const torsoTop = crouch ? -h * 0.62 : -h * 0.80;
+  const stanceIdx = o.stance === 'bat' ? (look.stance ?? 0) : 0;
+  // Stances: 0: standard, 1: crouch/low, 2: upright, 3: open
+  const stanceY = stanceIdx === 1 ? h * 0.03 : stanceIdx === 2 ? -h * 0.02 : 0;
+  const legTop = crouch ? -h * 0.18 : (-h * 0.46 + stanceY);
+  const torsoTop = crouch ? -h * 0.62 : (-h * 0.80 + stanceY);
   // ⚠️ THE HEAD IS DAMPED AGAINST THE FRAME, NOT SCALED WITH IT. At a flat
   // h * 0.115 the head was 77% of the shoulder width — a bobblehead — and worse,
   // it ignored `f.w` entirely, so `enormous` widened the body and left the head
@@ -627,11 +709,28 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   // robot, which is the one place the kit should stop and the chassis start.
   const legW = w * 0.34;
   const legFill = machine ? tone : u.secondary;
+  const backLegX = stanceIdx === 3 ? -w * 0.52 : -w * 0.44;
+  const frontLegX = stanceIdx === 3 ? w * 0.18 : w * 0.1;
   // ⚠️ THE HIP IS THE PIVOT, WHICH IS WHY THE SHADOW IS DRAWN ABOVE AND NOT
   // BELOW. A swinging leg lifts its own foot off the ground; the shadow stays
   // where the man is, because what casts it is him and not his shoe.
-  limb(-w * 0.44, legTop, legW, -legTop, legFill, o.legBack);
-  limb(w * 0.1, legTop, legW, -legTop, legFill, o.legFront);
+  limb(backLegX, legTop, legW, -legTop, legFill, o.legBack);
+  limb(frontLegX, legTop, legW, -legTop, legFill, o.legFront);
+
+  // Lower body accessories (high socks, knee chassis)
+  if (o.build === 'human' && look.accessory === 5 && !crouch) {
+    const sockTop = legTop + (-legTop) * 0.45;
+    const sockH = -legTop * 0.55;
+    box(backLegX, sockTop, legW, sockH, u.primary);
+    box(frontLegX, sockTop, legW, sockH, u.primary);
+    box(backLegX, sockTop + sockH * 0.2, legW, Math.max(1, h * 0.015), u.trim);
+    box(frontLegX, sockTop + sockH * 0.2, legW, Math.max(1, h * 0.015), u.trim);
+  }
+  if (o.build === 'augmented' && look.accessory === 4 && !crouch) {
+    const kneeY = legTop + (-legTop) * 0.42;
+    box(backLegX - w * 0.03, kneeY, legW * 1.2, Math.max(2, h * 0.04), '#78909c');
+    box(frontLegX - w * 0.03, kneeY, legW * 1.2, Math.max(2, h * 0.04), '#78909c');
+  }
 
   // ---- ⚠️ THE TURN STARTS HERE, AT THE BELT, AND NOT AT THE FEET.
   //
@@ -690,6 +789,44 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     box(w * 0.16, torsoTop + torsoH * 0.06, w * 0.34, torsoH * 0.34, '#9aa2aa');
   }
 
+  // ---- torso accessories (reactors, flare ports, reinforced plating, hazard stripes, overclocked core)
+  if (machine && look.accessory === 1) {
+    ctx.fillStyle = '#00e5ff';
+    ctx.beginPath();
+    ctx.arc(0, torsoTop + torsoH * 0.5, h * 0.035, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, torsoTop + torsoH * 0.5, h * 0.018, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (machine && look.accessory === 2) {
+    ctx.fillStyle = '#ff5722';
+    ctx.fillRect(-w * 0.52, torsoTop + torsoH * 0.15, w * 0.14, Math.max(2, h * 0.03));
+    ctx.fillRect(-w * 0.52, torsoTop + torsoH * 0.28, w * 0.14, Math.max(2, h * 0.03));
+  }
+  if (machine && look.accessory === 3) {
+    ctx.fillStyle = '#374151';
+    ctx.fillRect(-w * 0.52, torsoTop + torsoH * 0.18, w * 1.04, Math.max(2, h * 0.04));
+    ctx.fillStyle = '#9ca3af';
+    ctx.fillRect(-w * 0.42, torsoTop + torsoH * 0.2, 2, 2);
+    ctx.fillRect(w * 0.38, torsoTop + torsoH * 0.2, 2, 2);
+  }
+  if (machine && look.accessory === 5) {
+    const bY = hem - Math.max(2, h * 0.04);
+    ctx.fillStyle = '#eab308';
+    ctx.fillRect(-w / 2, bY, w, Math.max(2, h * 0.04));
+    ctx.fillStyle = '#18181b';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(-w / 2 + i * (w / 3.5), bY, w * 0.12, Math.max(2, h * 0.04));
+    }
+  }
+  if (o.build === 'augmented' && look.accessory === 5) {
+    ctx.fillStyle = '#00e5ff';
+    ctx.fillRect(-w * 0.15, torsoTop + torsoH * 0.28, w * 0.3, Math.max(1, h * 0.015));
+    ctx.fillRect(-w * 0.05, torsoTop + torsoH * 0.22, w * 0.1, Math.max(2, h * 0.04));
+  }
+
   // ---- the number, on the back. ⚠️ ONLY ON A FIGURE BIG ENOUGH TO READ IT.
   // The gate was 40, which let the 42px pitcher through, and two digits across
   // a twelve-pixel chest is noise that looks like a glyph bug.
@@ -731,6 +868,32 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     limb(w * 0.3, torsoTop + torsoH * 0.18, armW, torsoH * 0.55, skin, o.armFront);
   }
 
+  // ---- arm accessories (wristbands, elbow guard, bionic elbow brace, power modules)
+  if (o.build === 'human' && (look.accessory === 2 || look.accessory === 4)) {
+    ctx.fillStyle = u.primary;
+    ctx.fillRect(w * 0.27, torsoTop + torsoH * 0.52, armW * 1.3, Math.max(2, h * 0.025));
+    ctx.fillStyle = u.trim;
+    ctx.fillRect(w * 0.27, torsoTop + torsoH * 0.53, armW * 1.3, Math.max(1, h * 0.008));
+  }
+  if (o.build === 'human' && look.accessory === 3) {
+    ctx.fillStyle = '#222224';
+    ctx.fillRect(w * 0.25, torsoTop + torsoH * 0.33, armW * 1.5, Math.max(2, h * 0.04));
+    ctx.fillStyle = u.trim;
+    ctx.fillRect(w * 0.27, torsoTop + torsoH * 0.34, armW * 1.1, Math.max(1, h * 0.015));
+  }
+  if (o.build === 'augmented' && look.accessory === 2) {
+    ctx.fillStyle = '#b0bec5';
+    ctx.fillRect(w * 0.23, torsoTop + torsoH * 0.32, armW * 1.6, Math.max(2, h * 0.045));
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillRect(w * 0.26, torsoTop + torsoH * 0.34, armW * 1.0, Math.max(1, h * 0.015));
+  }
+  if (o.build === 'augmented' && look.accessory === 3) {
+    ctx.fillStyle = '#37474f';
+    ctx.fillRect(w * 0.26, torsoTop + torsoH * 0.50, armW * 1.4, Math.max(2, h * 0.035));
+    ctx.fillStyle = '#ff9100';
+    ctx.fillRect(w * 0.28, torsoTop + torsoH * 0.51, armW * 1.0, Math.max(1, h * 0.015));
+  }
+
   // ---- the mitt. A crouched man with nothing in his hand is a man squatting.
   if (crouch) {
     ctx.fillStyle = '#5a3a1c';
@@ -755,33 +918,86 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     // nothing: the drawing is the head.
   } else if (machine) {
     box(-headR, headY - headR, headR * 2, headR * 2, tone);
-    // The optic: a slit, or a single lens.
+    // The optic: a slit, single lens, dual optic, or matrix array.
     ctx.fillStyle = '#c4574a';
-    if (look.head === 0) box(-headR * 0.75, headY - headR * 0.25, headR * 1.5, headR * 0.42, '#c4574a');
-    else {
+    if (look.head === 0) {
+      box(-headR * 0.75, headY - headR * 0.25, headR * 1.5, headR * 0.42, '#c4574a');
+    } else if (look.head === 1) {
       ctx.beginPath();
       ctx.arc(0, headY, headR * 0.38, 0, Math.PI * 2);
       ctx.fill();
+    } else if (look.head === 2) {
+      // Dual optic lenses
+      ctx.beginPath();
+      ctx.arc(-headR * 0.35, headY, headR * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(headR * 0.35, headY, headR * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Matrix array (green LED sensor grid)
+      ctx.fillStyle = '#10b981';
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 3; c++) {
+          ctx.fillRect(-headR * 0.5 + c * headR * 0.38, headY - headR * 0.25 + r * headR * 0.35, Math.max(1, headR * 0.18), Math.max(1, headR * 0.18));
+        }
+      }
     }
   } else {
-    // ⚠️ `look.head` USED TO DO NOTHING HERE. Only the machine branch above read
-    // it; every other build fell through to one circle, so the editor offered
-    // round / square / narrow and all three drew the same head. A third of the
-    // customization surface was a dropdown that moved no pixels — and the robots
-    // had more face than the people, which is the wrong way round.
     ctx.fillStyle = tone;
     ctx.beginPath();
-    if (look.head === 1) {
-      // Square: a jaw, not a machine's box. The corner radius is what keeps it
-      // on the human side of the line the chassis above already holds.
+    if (look.head === 1 || look.head === 3) {
       ctx.roundRect(-headR, headY - headR, headR * 2, headR * 2, headR * 0.34);
     } else if (look.head === 2) {
       ctx.ellipse(0, headY, headR * 0.76, headR * 1.1, 0, 0, Math.PI * 2);
+    } else if (look.head === 4) {
+      ctx.roundRect(-headR * 0.9, headY - headR, headR * 1.8, headR * 2, headR * 0.2);
     } else {
       ctx.ellipse(0, headY, headR, headR, 0, 0, Math.PI * 2);
     }
     ctx.fill();
     drawFace(ctx, headY, headR);
+
+    // Weathered facial stubble
+    if (look.head === 3 && o.build === 'human' && headR >= 5) {
+      ctx.fillStyle = 'rgba(40,30,20,0.35)';
+      ctx.fillRect(headR * 0.08, headY + headR * 0.38, headR * 0.42, Math.max(1, headR * 0.1));
+    }
+    // Augmented: scanner jaw (head 3) or augmented ocular (head 4)
+    if (o.build === 'augmented') {
+      if (look.head === 3) {
+        ctx.fillStyle = '#78909c';
+        ctx.fillRect(-headR * 0.8, headY + headR * 0.2, headR * 1.6, headR * 0.6);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(headR * 0.1, headY + headR * 0.35, headR * 0.6, Math.max(1, headR * 0.12));
+      } else if (look.head === 4) {
+        ctx.fillStyle = '#455a64';
+        ctx.fillRect(headR * 0.2, headY - headR * 0.1, headR * 0.7, headR * 0.6);
+        ctx.fillStyle = '#00e5ff';
+        ctx.beginPath();
+        ctx.arc(headR * 0.55, headY + headR * 0.2, headR * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // ---- face / optic accessories
+  if (o.build === 'human' && (look.accessory === 1 || look.accessory === 4) && headR >= 5) {
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(headR * 0.28, headY + headR * 0.32, headR * 0.38, Math.max(1, headR * 0.12));
+  }
+  if (o.build === 'augmented' && look.accessory === 1 && headR >= 5) {
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(headR * 0.45, headY + headR * 0.18, headR * 0.32, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (machine && look.accessory === 4) {
+    ctx.fillStyle = 'rgba(255, 23, 68, 0.4)';
+    ctx.beginPath();
+    ctx.arc(0, headY, headR * 0.75, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // ---- crest. The part that most says which league he belongs to, and the one
@@ -884,9 +1100,29 @@ function drawCrest(
         ctx.fillStyle = u.trim;
         ctx.fillRect(-r * 0.09, headY - r * 2.2, px(r * 0.18), r * 1.2);
         break;
-      default: // sensor rail
+      case 3: // sensor rail
         ctx.fillStyle = u.primary;
         ctx.fillRect(-r * 1.25, headY - r * 1.2, r * 2.5, px(r * 0.3));
+        break;
+      case 4: // cooling fins
+        ctx.fillStyle = u.trim;
+        for (let i = 0; i < 3; i++) {
+          ctx.fillRect(-r * 1.1, headY - r * 1.25 - i * r * 0.28, r * 2.2, px(r * 0.16));
+        }
+        break;
+      case 5: // twin antennae
+        ctx.fillStyle = u.trim;
+        ctx.fillRect(-r * 0.5, headY - r * 2.3, px(r * 0.16), r * 1.2);
+        ctx.fillRect(r * 0.4, headY - r * 2.3, px(r * 0.16), r * 1.2);
+        break;
+      default: // exhaust array
+        ctx.fillStyle = '#475569';
+        for (let i = 0; i < 4; i++) {
+          ctx.fillRect(-r * 0.95 + i * r * 0.55, headY - r * 1.8, px(r * 0.32), r * 0.85);
+          ctx.fillStyle = '#f97316';
+          ctx.fillRect(-r * 0.95 + i * r * 0.55, headY - r * 1.9, px(r * 0.32), px(r * 0.15));
+          ctx.fillStyle = '#475569';
+        }
         break;
     }
     return;
@@ -904,13 +1140,34 @@ function drawCrest(
         ctx.arc(-r * 0.6, headY - r * 0.1, r * 0.3, 0, Math.PI * 2);
         ctx.fill();
         break;
-      case 2:
+      case 2: // braced cap
         cap(u.primary);
         ctx.fillStyle = '#9aa2aa';
         ctx.fillRect(-r * 1.1, headY - r * 0.5, r * 0.4, r * 0.9);
         break;
-      default: // plated crown
+      case 3: // plated crown
         cap('#9aa2aa');
+        break;
+      case 4: // full-visor
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(-r * 0.85, headY - r * 0.45, r * 1.85, r * 0.52);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-r * 0.6, headY - r * 0.28, r * 1.3, px(r * 0.14));
+        break;
+      case 5: // cranial port
+        ctx.fillStyle = '#78909c';
+        ctx.fillRect(-r * 0.9, headY - r * 1.0, r * 0.55, r * 0.65);
+        ctx.fillStyle = '#ffb300';
+        ctx.fillRect(-r * 1.2, headY - r * 0.7, r * 0.4, px(r * 0.22));
+        break;
+      default: // neural fins
+        ctx.fillStyle = '#90a4ae';
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.5, headY - r * 1.3);
+        ctx.lineTo(r * 0.5, headY - r * 0.8);
+        ctx.lineTo(-r * 1.1, headY - r * 0.4);
+        ctx.closePath();
+        ctx.fill();
         break;
     }
     return;
@@ -940,10 +1197,31 @@ function drawCrest(
       // his back is -x, which is the only side hair belongs on.
       ctx.fillRect(-r * 1.12, headY, r * 0.72, r * 1.1);
       break;
-    default: // batting helmet — the trim wraps it, which is what makes it read
+    case 4: // batting helmet — the trim wraps it, which is what makes it read
       cap(u.primary);
       ctx.fillStyle = u.trim;
       ctx.fillRect(-r * 1.06, headY - r * 0.14, r * 2.12, px(r * 0.16));
+      break;
+    case 5: // high fade
+      ctx.fillStyle = hair;
+      ctx.fillRect(-r * 0.8, headY - r * 1.25, r * 1.6, r * 0.45);
+      break;
+    case 6: // ponytail
+      ctx.fillStyle = hair;
+      ctx.beginPath();
+      ctx.arc(0, headY, r * 1.05, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = u.trim;
+      ctx.fillRect(-r * 1.2, headY + r * 0.05, r * 0.25, r * 0.25);
+      ctx.fillStyle = hair;
+      ctx.fillRect(-r * 1.5, headY + r * 0.15, r * 0.45, r * 0.95);
+      break;
+    default: // backward cap
+      ctx.fillStyle = u.primary;
+      ctx.beginPath();
+      ctx.arc(0, headY, r * 1.06, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(-r * 1.7, headY - r * 0.22, r * 1.7, r * 0.34);
       break;
   }
 }
@@ -980,6 +1258,9 @@ export interface BatAnchor {
   scale?: number;
   /** Bats left: mirrored about the PLATE, the same as his feet are. */
   flip?: boolean;
+  /** Player build or explicit bat color override. */
+  build?: Build;
+  color?: string;
 }
 
 /**
@@ -1022,9 +1303,17 @@ export function drawBat(ctx: CanvasRenderingContext2D, pose: BatPose, a: BatAnch
   const mx = hx + (tx - hx) * 0.66;
   const my = hy + (ty - hy) * 0.66;
 
+  // Bat material styling by division/build:
+  // - Machine: Chrome / alloy silver (#c0c8d2)
+  // - Augmented: Carbon composite / stealth dark (#373d44)
+  // - Human: Traditional birch/maple wood (#b98a4a)
+  const batColor =
+    a.color ??
+    (a.build === 'machine' ? '#c0c8d2' : a.build === 'augmented' ? '#373d44' : '#b98a4a');
+
   ctx.save();
   ctx.lineCap = 'round';
-  ctx.strokeStyle = '#b98a4a';
+  ctx.strokeStyle = batColor;
   ctx.lineWidth = 4 * k;
   ctx.beginPath();
   ctx.moveTo(hx, hy);

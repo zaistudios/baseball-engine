@@ -27,7 +27,7 @@
  * men, no assists, no scorer deciding hit-or-error.
  */
 
-import type { Player } from '../core/roster.ts';
+import type { Player, Position } from '../core/roster.ts';
 import type { HitResult } from '../core/hit.ts';
 import {
   rollFielding,
@@ -68,7 +68,7 @@ import {
   type Fielder,
 } from './plot.ts';
 
-export type Position = 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF' | 'DH';
+export type { Position };
 
 /** The scorer's numbering, which is what plot.ts's FIELDERS carry. */
 export const POSITION_BY_NUMBER: Record<number, Position> = {
@@ -183,14 +183,63 @@ export function manned(fielders: readonly Fielder[], a: Alignment): readonly Fie
  * its seed and so the player can learn where his own people are.
  */
 export function assignPositions(lineup: readonly Player[]): Alignment {
-  const ranked = [...lineup].sort((a, b) => gloveOf(b) - gloveOf(a));
   const out: Record<Position, Player | null> = {
     P: null, C: null, '1B': null, '2B': null, '3B': null,
     SS: null, LF: null, CF: null, RF: null, DH: null,
   };
-  FILL_ORDER.forEach((pos, i) => {
-    out[pos] = ranked[i] ?? null;
-  });
+  const assigned = new Set<string>();
+
+  // 0. Authored gloves: An authored glove is an explicit rating meant to reach the sim.
+  // The best authored glove in the lineup moves to SS (the premier position), over legs/default pos.
+  const authoredGloves = lineup
+    .filter((p) => p.glove !== undefined)
+    .sort((a, b) => gloveOf(b) - gloveOf(a));
+
+  if (authoredGloves.length > 0) {
+    const bestAuthored = authoredGloves[0]!;
+    const bestOverall = [...lineup].sort((a, b) => gloveOf(b) - gloveOf(a))[0]!;
+    if (bestAuthored.id === bestOverall.id) {
+      out.SS = bestAuthored;
+      assigned.add(bestAuthored.id);
+    }
+  }
+
+  // 1. Primary positions: players who have an explicit preferred position (excluding 'P', which comes from staff)
+  const withPos = [...lineup]
+    .filter((p) => p.pos && p.pos !== 'P' && !assigned.has(p.id))
+    .sort((a, b) => gloveOf(b) - gloveOf(a));
+
+  for (const p of withPos) {
+    if (p.pos && !out[p.pos]) {
+      out[p.pos] = p;
+      assigned.add(p.id);
+    }
+  }
+
+  // 2. Secondary positions or utility trait: unassigned players who can cover open spots
+  for (const pos of FILL_ORDER) {
+    if (out[pos]) continue;
+    const candidate = lineup
+      .filter((p) => !assigned.has(p.id) && (p.secondaryPos?.includes(pos) || p.trait === 'utility'))
+      .sort((a, b) => gloveOf(b) - gloveOf(a))[0];
+    if (candidate) {
+      out[pos] = candidate;
+      assigned.add(candidate.id);
+    }
+  }
+
+  // 3. Fallback: remaining unassigned players filled into remaining spots by gloveOf
+  const remaining = lineup
+    .filter((p) => !assigned.has(p.id))
+    .sort((a, b) => gloveOf(b) - gloveOf(a));
+
+  let remIdx = 0;
+  for (const pos of FILL_ORDER) {
+    if (!out[pos] && remIdx < remaining.length) {
+      out[pos] = remaining[remIdx++]!;
+    }
+  }
+
   return out;
 }
 
@@ -727,10 +776,11 @@ export function fieldBall(
           // The player's throw press is worth what it always was: a better
           // throw is a quicker one. `good` is exactly 1.
           const quick = (opts.throwEffect ?? CLEAN_THROW).dp;
+          const cannon = fielder?.trait === 'cannon' ? 1.25 : 1;
           const play = groundRace({
             cut,
             dirDeg: opts.placement!.dirDeg,
-            arm: glove * quick,
+            arm: glove * quick * cannon,
             armAt: (num) => reachOf(alignment)(num) * quick,
             reachAt: reachOf(alignment),
             batterSpeed: opts.batterSpeed,
@@ -819,10 +869,11 @@ export function fieldBall(
     isHit(hit.outcome) && opts.placement
       ? stretchChance(opts.batterSpeed, opts.placement.gapFt)
       : 0;
+  const cannon = fielder?.trait === 'cannon' ? 1.25 : 1;
   const stretch =
     odds > 0
       ? // The same arm, at the batter's own rate — see STRETCH_THROW.
-        { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove }
+        { odds, roll: rng.next(), armOdds: STRETCH_THROW * glove * cannon }
       : undefined;
 
   const hitClock =
@@ -841,7 +892,7 @@ export function fieldBall(
           inning: opts.inning,
           runDiff: opts.runDiff,
           batterSpeed: opts.batterSpeed,
-          arm: glove,
+          arm: glove * cannon,
           armAt: reachOf(alignment),
           advanceRolls: result.advanceRolls,
           stretch,
@@ -921,7 +972,11 @@ export const reachOf =
  * and because it is the one link that makes putting a bad glove behind the
  * plate cost you something you can see.
  */
-export const catcherArm = (a: Alignment): number => (a.C ? gloveOf(a.C) : 1);
+export const catcherArm = (a: Alignment): number => {
+  if (!a.C) return 1;
+  const mult = a.C.trait === 'cannon' ? 1.25 : 1;
+  return gloveOf(a.C) * mult;
+};
 
 /** For the UI: "SS" and the name standing there. */
 export const describeAlignment = (a: Alignment): string =>

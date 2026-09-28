@@ -452,6 +452,10 @@ describe('every part on offer is one the build actually has', () => {
     for (const build of ['human', 'augmented', 'machine'] as const) {
       for (const f of lookFields(build)) {
         if (f.kind !== 'part') continue;
+        if (f.key === 'accessory' || f.key === 'stance') {
+          expect(f.choices!.length, f.key).toBeGreaterThan(0);
+          continue;
+        }
         expect(f.choices, f.key).toEqual(partNames(build, f.key as (typeof PART_KEYS)[number]));
         expect(f.choices!.length, f.key).toBeGreaterThan(0);
       }
@@ -586,7 +590,7 @@ describe('an arm can be dressed', () => {
  * whatever is written on the record — which for 390 of them is nothing.
  */
 describe('every man in the league has a part vocabulary', () => {
-  it('builds six usable fields for all 780, from what is actually on the record', () => {
+  it('builds eight usable fields for all 780, from what is actually on the record', () => {
     const l = league();
     for (const club of l) {
       for (const g of GROUPS) {
@@ -595,7 +599,7 @@ describe('every man in the league has a part vocabulary', () => {
           const build = buildOf(who as never, club, g.key);
           expect(build, `${club.abbr} ${g.key} ${who.name}`).toBeDefined();
           const fields = lookFields(build);
-          expect(fields.length, `${club.abbr} ${who.name}`).toBe(PART_KEYS.length + 2);
+          expect(fields.length, `${club.abbr} ${who.name}`).toBe(PART_KEYS.length + 4);
           for (const f of fields) {
             if (f.kind !== 'part') continue;
             // The listener does exactly this to coerce the new value. An empty

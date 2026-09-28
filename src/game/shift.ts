@@ -172,7 +172,9 @@ export function fieldersFor(shift: Shift): readonly Fielder[] {
  * entire reason to switch hit.
  */
 export const pullScore = (b: Player): number =>
-  Math.max(0, Math.min(1, (b.power - 0.95) / 0.55 - (b.contact - 1) * 0.6));
+  b.bats === 'S'
+    ? 0
+    : Math.max(0, Math.min(1, (b.power - 0.95) / 0.55 - (b.contact - 1) * 0.6));
 
 /**
  * Shift on a hitter this extreme or worse. Set where the league's genuine

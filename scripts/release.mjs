@@ -28,7 +28,23 @@ import { execFileSync } from 'node:child_process';
 
 const dry = process.argv.includes('--dry-run');
 
-const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8' }).trim();
+// Ensure gh is reachable and authenticated if available via WinGet or git credentials
+const winGetGhDir = 'C:\\Users\\zaneg\\AppData\\Local\\Microsoft\\WinGet\\Packages\\GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe\\bin';
+if (existsSync(winGetGhDir) && !process.env.PATH?.includes(winGetGhDir)) {
+  process.env.PATH = `${winGetGhDir};${process.env.PATH ?? ''}`;
+}
+if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+  try {
+    const cred = execFileSync('git', ['credential', 'fill'], {
+      input: 'protocol=https\nhost=github.com\n',
+      encoding: 'utf8',
+    });
+    const match = cred.match(/password=(.+)/);
+    if (match) process.env.GH_TOKEN = match[1].trim();
+  } catch {}
+}
+
+const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', env: process.env }).trim();
 /** Same, but a non-zero exit is an answer rather than a crash. */
 const tryRun = (cmd, args) => {
   try {

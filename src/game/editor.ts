@@ -36,6 +36,8 @@ import type { Identity } from './identity.ts';
 import { ALL_PITCH_TYPES } from '../core/hitTables.ts';
 import {
   PART_KEYS,
+  STANCE_NAMES,
+  accessoryNames,
   clubBuild,
   lookFor,
   lookForArm,
@@ -47,6 +49,8 @@ import {
   BUILDS,
   TRAITS,
   HANDS,
+  BAT_SIDES,
+  POSITIONS,
   SIGNATURES,
   TELLS,
   BAT_RATINGS,
@@ -180,7 +184,8 @@ export const BLANK_PARK = { name: '', left: 330, center: 410, right: 330, foul: 
 
 export const HITTER_FIELDS: readonly Field[] = [
   { key: 'name', label: 'Name', kind: 'text' },
-  { key: 'bats', label: 'Bats', kind: 'choice', choices: HANDS },
+  { key: 'bats', label: 'Bats', kind: 'choice', choices: BAT_SIDES },
+  { key: 'pos', label: 'Primary Pos', kind: 'choice', choices: POSITIONS, optional: true },
   { key: 'build', label: 'Build', kind: 'choice', choices: BUILDS },
   { key: 'trait', label: 'Trait', kind: 'choice', choices: TRAITS },
   ...BAT_RATINGS.map((k) => rating(k, k)),
@@ -256,6 +261,18 @@ export function lookFields(build: Build): readonly Field[] {
         choices: partNames(build, k),
       }),
     ),
+    {
+      key: 'accessory',
+      label: 'Accessory / Gear',
+      kind: 'part',
+      choices: accessoryNames(build),
+    },
+    {
+      key: 'stance',
+      label: 'Batting Stance',
+      kind: 'part',
+      choices: STANCE_NAMES,
+    },
     { key: 'number', label: 'Number', kind: 'number', min: 0, max: 99, step: 1 },
     { key: 'wear', label: 'Dirt / rust', kind: 'number', min: 0, max: 1, step: 0.05 },
   ];
@@ -514,8 +531,9 @@ export function withRandomLook(
   if (!who) return club;
   const pick = (n: number): number => Math.min(n - 1, Math.floor(roll() * n));
   // buildOf(), not who.build — an arm's is optional and RANDOMIZE on one with
-  // none would call partNames(undefined) and roll him out of an empty list.
-  const counts = PART_KEYS.map((k) => partNames(buildOf(who, club, group), k).length);
+  const build = buildOf(who, club, group);
+  const counts = PART_KEYS.map((k) => partNames(build, k).length);
+  const accs = accessoryNames(build);
   list[index] = {
     ...who,
     look: {
@@ -525,6 +543,8 @@ export function withRandomLook(
       tone: pick(counts[3]!),
       number: 1 + pick(99),
       wear: roll(),
+      accessory: pick(accs.length),
+      stance: pick(STANCE_NAMES.length),
     },
   };
   return put(club, group, list);

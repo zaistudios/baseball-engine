@@ -20,8 +20,10 @@
  */
 
 import type { Rng } from './rng.ts';
-import type { BatterStats, Hand } from './hit.ts';
+import type { BatterStats, BatSide } from './hit.ts';
 import { CATALOG, type PowerUp } from './run.ts';
+
+export type Position = 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF' | 'DH';
 
 /**
  * What a player IS, in a league the machines took over.
@@ -38,7 +40,11 @@ export type Trait =
   | 'slugger' // swings for the fences
   | 'reader' // picks the pitcher apart
   | 'precision' // consistent, no nerves, no soul
-  | 'showman'; // thrives with people on base
+  | 'showman' // thrives with people on base
+  | 'speedster' // burns on basepaths, beats out grounders
+  | 'utility' // plays any position cleanly, ultimate defensive versatility
+  | 'cannon' // rifle arm, shuts down extra base advances
+  | 'ironman'; // immune to slumps and fatigue
 
 export interface Player {
   id: string;
@@ -78,18 +84,15 @@ export interface Player {
    * club's rank on the pre-game card. That is the point of it.
    */
   glove?: number;
+  /** Primary / preferred defensive position. Optional. */
+  pos?: Position;
+  /** Secondary defensive positions for versatile utility players. Optional. */
+  secondaryPos?: readonly Position[];
   /**
    * Which side he hits from. Feeds platoonContact() in hit.ts.
-   *
-   * ponytail: no switch hitters. A third value would need its own rule at
-   * every read site — "S" is not a hand, it is "whichever hand is better right
-   * now" — and the pool is fifteen players deep. Add `bats: 'S'` and resolve it
-   * against the pitcher at the top of the at-bat when somebody is worth it.
-   *
-   * Six of the fifteen bat left, which is roughly the real league share, so a
-   * random three-man opening lineup is usually mixed rather than uniform.
+   * 'S' indicates switch-hitting (always takes platoon advantage).
    */
-  bats: Hand;
+  bats: BatSide;
   /**
    * One line of who he is, for the hover card.
    *
@@ -148,6 +151,10 @@ export interface Look {
   number: number;
   /** 0..1 — dirt on a human, oxide on a machine. */
   wear: number;
+  /** Accessory / gear index (e.g. eye black, wristbands, high socks, cyber visors, reactors). */
+  accessory?: number;
+  /** Batting stance index (0: standard, 1: crouch, 2: upright, 3: open). */
+  stance?: number;
 }
 
 /**

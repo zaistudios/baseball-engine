@@ -966,6 +966,21 @@ export function drawOverhead(
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   ctx.fill();
 
+  // Outfield lawn cut pattern: alternating concentric mowed turf rings
+  ctx.save();
+  ctx.beginPath();
+  fencePath();
+  ctx.closePath();
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+  ctx.lineWidth = 14 * cam.pxPerFt;
+  for (let rFt = 55; rFt <= 460; rFt += 30) {
+    ctx.beginPath();
+    ctx.arc(cam.home.x, cam.home.y, rFt * cam.pxPerFt, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
   // The infield dirt, as a skin around the diamond rather than a square —
   // which is what it looks like from above.
   ctx.fillStyle = opts.dirt;

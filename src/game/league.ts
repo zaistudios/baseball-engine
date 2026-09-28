@@ -61,8 +61,20 @@ export type LeagueCheck =
 // ------------------------------------------------------------ the vocabulary
 
 export const BUILDS = ['human', 'augmented', 'machine'] as const;
-export const TRAITS = ['grit', 'slugger', 'reader', 'precision', 'showman'] as const;
+export const TRAITS = [
+  'grit',
+  'slugger',
+  'reader',
+  'precision',
+  'showman',
+  'speedster',
+  'utility',
+  'cannon',
+  'ironman',
+] as const;
 export const HANDS = ['L', 'R'] as const;
+export const BAT_SIDES = ['L', 'R', 'S'] as const;
+export const POSITIONS = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'] as const;
 export const SIGNATURES = ['none', 'knuckler', 'fireball', 'painter', 'junk'] as const;
 export const TELLS = ['pre_pitch', 'release', 'none'] as const;
 
@@ -183,7 +195,10 @@ function checkHitter(raw: unknown, where: string, r: Report): void {
   if (!isText(p['bio'])) r.add(where, 'needs a bio — one line, it is shown on the card.');
   if (!oneOf(p['build'], BUILDS)) r.add(where, `build must be one of ${BUILDS.join(', ')}.`);
   if (!oneOf(p['trait'], TRAITS)) r.add(where, `trait must be one of ${TRAITS.join(', ')}.`);
-  if (!oneOf(p['bats'], HANDS)) r.add(where, "bats must be 'L' or 'R'.");
+  if (!oneOf(p['bats'], BAT_SIDES)) r.add(where, `bats must be one of ${BAT_SIDES.join(', ')}.`);
+  if (p['pos'] !== undefined && !oneOf(p['pos'], POSITIONS)) {
+    r.add(where, `pos must be one of ${POSITIONS.join(', ')}, or left off entirely.`);
+  }
   for (const k of BAT_RATINGS) {
     if (!isRating(p[k])) r.add(where, `${k} must be a number, zero or above.`);
   }
@@ -196,7 +211,7 @@ function checkHitter(raw: unknown, where: string, r: Report): void {
 }
 
 /**
- * HOW HE LOOKS — six numbers, all optional as a block.
+ * HOW HE LOOKS — numbers specifying parts, accessories, stance, and wear.
  *
  * ⚠️ THE INDICES ARE NOT RANGE-CHECKED HERE, ON PURPOSE. A look points into the
  * part sets in look.ts, and those GROW — a league exported after a new chassis
@@ -216,6 +231,11 @@ function checkLook(raw: unknown, where: string, r: Report): void {
   }
   for (const k of ['frame', 'head', 'crest', 'tone', 'number', 'wear']) {
     if (!isRating(l[k])) r.add(where, `look ${k} must be a number, zero or above.`);
+  }
+  for (const k of ['accessory', 'stance']) {
+    if (l[k] !== undefined && !isRating(l[k])) {
+      r.add(where, `look ${k} must be a number, zero or above, or left off entirely.`);
+    }
   }
 }
 

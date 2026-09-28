@@ -62,6 +62,9 @@ export const ALL_LOCATIONS: readonly PitchLocation[] = [
 /** Which side of the plate. Batters bat it, pitchers throw it. */
 export type Hand = 'L' | 'R';
 
+/** Which side of the plate a hitter bats from. 'S' is a switch hitter. */
+export type BatSide = 'L' | 'R' | 'S';
+
 /**
  * THE RATING CARD. One bag of numbers per hitter, all centred on 1.0.
  *
@@ -127,10 +130,11 @@ export const DEFAULT_STATS: BatterStats = {
  * by pitcher; when one needs its own, give Pitcher a `platoon` scalar and
  * multiply it in here.
  */
-export function platoonContact(batter: Hand, pitcher: Hand, pitch: PitchType): number {
+export function platoonContact(batter: BatSide, pitcher: Hand, pitch: PitchType): number {
   if (pitch === 'knuckleball') return 1.0;
   const breaking = pitch === 'slider' || pitch === 'curveball';
-  return batter === pitcher ? (breaking ? 0.82 : 0.93) : breaking ? 1.08 : 1.04;
+  const effective = batter === 'S' ? (pitcher === 'R' ? 'L' : 'R') : batter;
+  return effective === pitcher ? (breaking ? 0.82 : 0.93) : breaking ? 1.08 : 1.04;
 }
 
 /**
@@ -195,7 +199,7 @@ export interface SwingInput {
    * what the CLI and most unit tests want — passing one hand without the other
    * would be a matchup with half of itself missing.
    */
-  batterHand?: Hand;
+  batterHand?: BatSide;
   pitcherHand?: Hand;
   /**
    * Two strikes on the hitter. Triggers the protective swing — UNLESS he is
@@ -545,7 +549,7 @@ export const SPRAY_DEG = 12;
  */
 export function directionFor(
   offsetMs: number,
-  batterHand: Hand = 'R',
+  batterHand: BatSide = 'R',
   /** Where the pitch was. Defaults to dead centre, which adds nothing. */
   location: PitchLocation = 'middle',
   /** This swing's share of SPRAY_DEG, pre-rolled by the caller. */
@@ -1041,9 +1045,13 @@ export function resolveSwing(input: SwingInput, rng: Rng): HitResult {
       powerVelocity(stats.power) *
       rng.range(EV_SPREAD_LO, EV_SPREAD_HI),
   );
+  const effectiveHand: BatSide =
+    input.batterHand === 'S'
+      ? (input.pitcherHand === 'R' ? 'L' : 'R')
+      : (input.batterHand ?? 'R');
   const fair = directionFor(
     input.offsetMs,
-    input.batterHand,
+    effectiveHand,
     location,
     rng.range(-SPRAY_DEG, SPRAY_DEG),
   );
