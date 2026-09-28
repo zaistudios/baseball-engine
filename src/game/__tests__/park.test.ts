@@ -39,7 +39,7 @@ import {
 } from '../teams.ts';
 import { newGame } from '../game.ts';
 import { simulateGame } from '../sim.ts';
-import { place, stretch } from '../placement.ts';
+import { place } from '../placement.ts';
 import { workingCopy, withParkField, replaceClub, PARK_FIELDS } from '../editor.ts';
 import { WALL_FT, plotBatted } from '../plot.ts';
 import {
@@ -521,7 +521,7 @@ describe('fouls and home runs stay adequate', () => {
    * can reach a fixed 320-foot bar — the "threshold nothing can cross" failure
    * GAP_FT's own header describes, which is why the bar is a share of the fence.
    */
-  it('can still stretch a single into a double in a 302-foot corner', () => {
+  it('a ball into a 302-foot corner plays off the fence, and never past it', () => {
     const porch: Park = { name: 'Porch', left: 400, center: 400, right: 302, foul: 1 };
     const hit = {
       outcome: 'single' as const,
@@ -536,12 +536,17 @@ describe('fouls and home runs stay adequate', () => {
       launchAngle: 24,
       direction: 44,
     };
-    const p = place(hit, porch);
-    expect(p.distFt).toBeLessThan(320);
-    expect(stretch('single', { ...p, inTheGap: true })).toBe('double');
-    // ...and the neutral bowl is unchanged to the foot: 0.8 of 400 is 320.
-    expect(stretch('single', { ...p, inTheGap: true, distFt: 319, wallFt: 400 })).toBe('single');
-    expect(stretch('single', { ...p, inTheGap: true, distFt: 321, wallFt: 400 })).toBe('double');
+    let walls = 0;
+    for (let ev = 90; ev <= 112; ev += 2) {
+      for (let angle = 12; angle <= 30; angle += 2) {
+        const p = place({ ...hit, exitVelocity: ev, launchAngle: angle }, porch);
+        if (!p.pickup) continue;
+        // The roll stops at the fence, and nothing in play is ever past it.
+        expect(p.pickup.alongFt).toBeLessThanOrEqual(p.wallFt - 8 + 1e-6);
+        if (p.pickup.wall) walls++;
+      }
+    }
+    expect(walls).toBeGreaterThan(0);
   });
 
   it('a park-less game is bit-for-bit the game it always was', () => {

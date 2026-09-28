@@ -1,7 +1,7 @@
 /** What placement does to the hit mix. Real MLB: 1B 65%, 2B 20%, 3B 2%, HR 13%. */
 import { makeRng } from '../src/core/rng.ts';
 import { resolveSwing, type SwingInput } from '../src/core/hit.ts';
-import { place, stretch, GAP_FT, AT_HIM_FT } from '../src/game/placement.ts';
+import { place, withPlacement, GAP_FT, LEG_MARGIN_MS, THIRD_MARGIN_MS } from '../src/game/placement.ts';
 import { ALL_PITCH_TYPES, isHit, type Outcome } from '../src/core/hitTables.ts';
 import { FOUL_BOOST } from '../src/game/tuning.ts';
 
@@ -25,7 +25,10 @@ for (let i = 0; i < 120000; i++) {
   if (!isHit(h.outcome)) continue;
   hits++;
   const p = place(h);
-  const s = stretch(h.outcome, p);
+  const placed = withPlacement({ kind: 'in_play', hit: h });
+  const s = placed.result.kind === 'in_play' ? placed.result.hit.outcome : h.outcome;
+  // A table hit the defence caught is not a hit any more; this table is about kinds of hit.
+  if (!isHit(s)) continue;
   before[h.outcome] = (before[h.outcome] ?? 0) + 1;
   after[s] = (after[s] ?? 0) + 1;
   const rank: Record<string, number> = { single: 1, double: 2, triple: 3, home_run: 4 };
@@ -33,9 +36,11 @@ for (let i = 0; i < 120000; i++) {
   if (rank[s]! < rank[h.outcome]!) down++;
 }
 
-const pct = (t: Record<string, number>, k: string) => (((t[k] ?? 0) / hits) * 100).toFixed(1);
+// Each row over its own total: a table hit the defence caught is in `before` and not in `after`.
+const pct = (t: Record<string, number>, k: string) =>
+  (((t[k] ?? 0) / Object.values(t).reduce((a, b) => a + b, 0)) * 100).toFixed(1);
 console.log(`foul rate        ${((fouls / swings) * 100).toFixed(1)}% of swings   (MLB ~35%)`);
-console.log(`GAP_FT ${GAP_FT}  AT_HIM_FT ${AT_HIM_FT}`);
+console.log(`GAP_FT ${GAP_FT}  LEG_MARGIN_MS ${LEG_MARGIN_MS}  THIRD_MARGIN_MS ${THIRD_MARGIN_MS}  (league-average legs, no stretches)`);
 console.log(`upgraded ${((up / hits) * 100).toFixed(1)}%   downgraded ${((down / hits) * 100).toFixed(1)}%`);
 console.log('');
 console.log('          1B     2B     3B     HR');
@@ -54,8 +59,9 @@ console.log(`real     65.0   20.0    2.0   13.0`);
 // deleted every three-bagger in the game), or one shared HOLE_FT that can only
 // ever convert fly balls.
 //
-// The comments on GAP_FT, AT_HIM_FT, TRIPLE_GAP_FT, ROBBED_FT and HOLE_FT all
-// send the reader here. This is the table they mean.
+// AT_HIM_FT, TRIPLE_GAP_FT, ROBBED_FT and HOLE_FT are gone — the bases are run
+// out on the clocks now (legs() in placement.ts). GAP_FT still names "into the
+// gap" in the play-by-play, and this is the table it was set against.
 const seen: Record<string, number[]> = {};
 const rng2 = makeRng(7);
 for (let i = 0; i < 120000; i++) {

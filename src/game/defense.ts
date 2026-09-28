@@ -55,9 +55,7 @@ import {
   bagFeet,
   throwArrivalMs,
   longThrowMs,
-  throwBetweenMs,
-  relayFor,
-  RELAY_OUT,
+  throwsFrom,
   runToFirstMs,
   runnerMs,
   CLEAN_HIT_RUNNING_START,
@@ -393,33 +391,19 @@ export function hitRace(o: {
   if (hit.outcome !== 'single' && hit.outcome !== 'double') return undefined;
 
   const n = hit.outcome === 'single' ? 1 : 2;
+  // ⚠️ THE BALL IS THROWN FROM WHERE HE PICKED IT UP, WHEN HE HAD IT — not from
+  // where it landed, the instant it landed. See pickUp() in placement.ts.
   const pickupMs =
     REPLAY_CUT_MS +
-    (p.cutOff?.fielded
-      ? p.cutOff.ms
-      : plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs);
-  const spot = feetXY(p.distFt, p.dirDeg);
-  // ⚠️ AN OUTFIELDER HITS THE CUT-OFF MAN, HE DOES NOT THROW TO THE BAG. The
-  // throw is two legs and the catch-and-turn between them is the second leg's
-  // MIN_THROW_MS. Every bag goes through him, so a throw he cuts off to the
-  // trailing runner's bag is the same clock as one he relays on.
-  //
-  // ponytail: standard-depth post, like pivotReadyMs() — fieldBall() is not
-  // handed the shift.
-  let relay: HitClock['relay'];
-  const legTo = (bag: number): number => {
-    if (!relay) return pickupMs + longThrowMs(spot, bag, o.arm);
-    return relay.ms + longThrowMs(relay, bag, o.armAt(relay.num));
-  };
-  if (p.fielderNum >= 7) {
-    const num = relayFor({ num: p.fielderNum });
-    const f = FIELDERS.find((x) => x.num === num)!;
-    const post = feetXY(f.distFt, f.dirDeg);
-    const x = post.x + (spot.x - post.x) * RELAY_OUT;
-    const y = post.y + (spot.y - post.y) * RELAY_OUT;
-    relay = { num, x, y, ms: pickupMs + throwBetweenMs(spot, { x, y }, o.arm) };
-  }
-  const throwMs: [number, number, number] = [legTo(2), legTo(3), legTo(4)];
+    (p.pickup
+      ? p.pickup.ms
+      : p.cutOff?.fielded
+        ? p.cutOff.ms
+        : plotBatted(hit.outcome, hit.exitVelocity, hit.launchAngle, hit.direction, p.wallFt).hangMs);
+  const spot = feetXY(p.pickup ? p.pickup.alongFt : p.distFt, p.dirDeg);
+  // An outfielder hits the cut-off man, he does not throw to the bag: every
+  // bag goes through him. See throwsFrom().
+  const { throwMs, relay } = throwsFrom(spot, pickupMs, p.fielderNum, o.arm, o.armAt);
   const barMs = sendBar(o.outs, o.inning, o.runDiff);
 
   const read = (at: 2 | 3 | 4, runnerMs: number, roll: number) => ({
@@ -865,8 +849,11 @@ export function fieldBall(
   // wobble in the balance numbers that had nothing to do with the feature being
   // measured. This fires on the tenth or so of balls that actually land in
   // space, and leaves the rest of the stream exactly where it was.
+  // ⚠️ ONLY A SINGLE IS GAMBLED ON (2026-09-28). The bases are run out on the
+  // clocks now (legs() in placement.ts), and third is only ever taken when it
+  // is sure — a double stretched on a die was most of the game's triples.
   const odds =
-    isHit(hit.outcome) && opts.placement
+    hit.outcome === 'single' && opts.placement
       ? stretchChance(opts.batterSpeed, opts.placement.gapFt)
       : 0;
   const cannon = fielder?.trait === 'cannon' ? 1.25 : 1;

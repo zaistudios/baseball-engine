@@ -19,6 +19,7 @@
  * here — it is in game.ts, ai.ts and the core.
  */
 
+import { venueFor, drawVenue, lightFor, overheadPalette, firstPitch, hourAt, STARTS, type Venue } from './venue.ts';
 import { makeRng } from '../core/rng.ts';
 import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
 import type { Player } from '../core/roster.ts';
@@ -2154,13 +2155,14 @@ function finishAtBat(): void {
   // what the scorer says. The race needs every fielder's glove.
   const align = fieldingAlignment(game);
   const shift = shiftNow();
+  const batter = currentBatter(game);
   const placed = withPlacement(atBat.result!, {
     reachAt: reachOf(align),
     park: game.home.park,
     shift,
+    batterSpeed: batter.speed,
   });
   const result = placed.result;
-  const batter = currentBatter(game);
 
   // ⚠️ THE ONE PLACE THE GAME STOPS FOR YOUR HANDS ON DEFENCE. Only the
   // double-play ball, only while you are the one on the mound, and never in
@@ -2355,6 +2357,8 @@ function completePlay(
           ...(fielding?.hitClock ? { hitClock: fielding.hitClock } : {}),
           ...(fielding?.airClock ? { airClock: fielding.airClock } : {}),
           ...(placed.placement?.airCatch ? { airCatch: placed.placement.airCatch } : {}),
+          // A booted ball keeps the old picture: he gets there and it goes by him.
+          ...(placed.placement?.pickup && !fielding?.error ? { pickup: placed.placement.pickup } : {}),
           // from === -1 is the batter, and he is drawn by the race instead.
           // The scorers go in the same list: a man who came all the way home
           // is a runner who covered more bags, not a different kind of thing.
@@ -3147,8 +3151,6 @@ function dpadOffPre(): void {
 // ⚠️ ONE SCALE FOR EVERY PARK — see makeCam(). Fitted to the deepest fence in
 // the league so a bandbox draws small and The Void draws enormous.
 const OH_CAM = makeCam(canvas.width, canvas.height, undefined, DEEPEST_REACH_FT);
-/** The two field colours, matched to game.html's palette. */
-const OH_PALETTE = { field: '#1d2b1f', dirt: '#3a2e20' };
 
 /**
  * The replay's clock, sped up with everything else. Scaling the CLOCK rather
@@ -3240,6 +3242,7 @@ if (import.meta.env.DEV) {
       wallFt: wallAt(direction, game.home.park),
       ...(cut.cutOff ? { chaserNum: cut.fielderNum, cutOff: cut.cutOff } : {}),
       ...(cut.airCatch ? { chaserNum: cut.fielderNum, airCatch: cut.airCatch } : {}),
+      ...(cut.pickup ? { pickup: cut.pickup } : {}),
       ...extra,
     }), game);
     // ⚠️ AND THE CAPTION, or the hook shows half the thing it exists to show.
@@ -3420,144 +3423,35 @@ const MITT_XY = { x: CATCHER_XY.x + CATCHER_XY.h * 0.23, y: CATCHER_XY.y - CATCH
 const MITT_MS = 140;
 
 /**
- * THE BALLPARK AT DUSK — Retro arcade presentation for the at-bat view.
- *
- * Gives depth to the view behind the plate:
- * twilight sky, stadium floodlight towers with warm halogen glow, grandstand silhouette,
- * outfield wall with yardage markers, centerfield batter's eye, concentric mowing patterns,
- * clay mound with rubber, and chalk batter's boxes.
+ * FIRST PITCH, in hours — 13.08 is 1:05 PM. Presentation only: it is rolled on
+ * Math.random() at kickOff() so the game's seeded stream never sees it, and a
+ * night game plays exactly like a day game. See venue.ts.
  */
-function drawBallparkScenery(c: CanvasRenderingContext2D): void {
-  const w = canvas.width;
-  const h = canvas.height;
+let firstPitchHour: number = STARTS[2];
 
-  // 1. Twilight sky gradient
-  const skyGrad = c.createLinearGradient(0, 0, 0, 44);
-  skyGrad.addColorStop(0, '#090d18');
-  skyGrad.addColorStop(0.7, '#131b2c');
-  skyGrad.addColorStop(1, '#1a2436');
-  c.fillStyle = skyGrad;
-  c.fillRect(0, 0, w, 44);
+/** The clock right now: first pitch plus the innings played, about twenty minutes each. */
+const gameHour = (): number =>
+  hourAt(firstPitchHour, game.inning - 1 + (game.half === 'bottom' ? 0.5 : 0) + game.outs / 6);
 
-  // Distant grandstand & crowd silhouette
-  c.fillStyle = '#101720';
-  c.fillRect(0, 24, w, 18);
-  c.fillStyle = '#2d3d4d';
-  for (let x = 6; x < w - 6; x += 8) {
-    c.fillRect(x, 26 + ((x * 13) % 7), 2, 2);
-    c.fillRect(x + 4, 30 + ((x * 7) % 6), 2, 2);
-  }
-
-  // Floodlight stanchions with warm halogen glow
-  const drawLightTower = (tx: number) => {
-    c.strokeStyle = '#32414c';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.moveTo(tx - 6, 26);
-    c.lineTo(tx, 6);
-    c.lineTo(tx + 6, 26);
-    c.moveTo(tx - 6, 26);
-    c.lineTo(tx + 6, 26);
-    c.stroke();
-
-    c.fillStyle = '#1b252e';
-    c.fillRect(tx - 11, 4, 22, 8);
-
-    c.fillStyle = '#fff9e6';
-    for (let bx = -9; bx <= 6; bx += 5) {
-      c.fillRect(tx + bx, 6, 3, 4);
-    }
-
-    const glow = c.createRadialGradient(tx, 8, 2, tx, 8, 22);
-    glow.addColorStop(0, 'rgba(255, 245, 200, 0.28)');
-    glow.addColorStop(1, 'rgba(255, 245, 200, 0)');
-    c.fillStyle = glow;
-    c.beginPath();
-    c.arc(tx, 8, 22, 0, Math.PI * 2);
-    c.fill();
-  };
-  drawLightTower(32);
-  drawLightTower(w - 32);
-
-  // 2. Outfield wall with retro green padding and top yellow trim
-  c.fillStyle = '#15241b';
-  c.fillRect(0, 38, w, 12);
-  c.fillStyle = '#d4a230';
-  c.fillRect(0, 37, w, 2);
-
-  // Centerfield Batter's Eye screen behind the pitcher
-  c.fillStyle = '#0a120c';
-  c.fillRect(144, 20, 132, 28);
-  c.strokeStyle = '#182b1d';
-  c.lineWidth = 1;
-  c.strokeRect(144, 20, 132, 28);
-
-  // Distance markers on the wall (LF 330, CF 395, RF 335)
-  c.fillStyle = '#8ea194';
-  c.font = '7px ui-monospace, monospace';
-  c.textAlign = 'center';
-  c.fillText('330', 50, 47);
-  c.fillText('395', 210, 47);
-  c.fillText('335', 370, 47);
-  c.textAlign = 'left';
-
-  // 3. Outfield & Infield turf with alternating mowing stripes
-  c.fillStyle = '#182b1e';
-  c.fillRect(0, 49, w, h - 49);
-
-  c.fillStyle = '#1d3324';
-  for (let y = 54; y < h; y += 18) {
-    c.fillRect(0, y, w, 9);
-  }
-
-  // 4. Pitching mound clay
-  c.fillStyle = '#3a2417';
-  c.beginPath();
-  c.ellipse(210, 68, 76, 26, 0, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = '#482e1e';
-  c.beginPath();
-  c.ellipse(210, 66, 60, 18, 0, 0, Math.PI * 2);
-  c.fill();
-
-  // Pitching rubber
-  c.fillStyle = '#1e140d';
-  c.fillRect(202, 58, 16, 4);
-  c.fillStyle = '#e5e8e0';
-  c.fillRect(202, 57, 16, 3);
-
-  // Home plate clay cutout
-  c.fillStyle = '#3a2417';
-  c.beginPath();
-  c.ellipse(210, 262, 74, 30, 0, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = '#442b1b';
-  c.beginPath();
-  c.ellipse(210, 260, 58, 22, 0, 0, Math.PI * 2);
-  c.fill();
-
-  // Chalk foul lines
-  c.strokeStyle = 'rgba(224, 232, 220, 0.35)';
-  c.lineWidth = 1;
-  c.beginPath();
-  c.moveTo(180, PLATE_Y);
-  c.lineTo(0, 80);
-  c.moveTo(240, PLATE_Y);
-  c.lineTo(w, 80);
-  c.stroke();
-
-  // Chalk Batter's Boxes
-  c.strokeStyle = 'rgba(224, 232, 220, 0.40)';
-  c.lineWidth = 1;
-  c.strokeRect(124, 232, 38, 56);
-  c.strokeRect(258, 232, 38, 56);
-}
+/** The home club's park, dressed. Cached on the club object, which is fixed for a game. */
+let venueCache: { home: Team; venue: Venue } | null = null;
+const venueNow = (): Venue => {
+  if (venueCache?.home !== game.home) venueCache = { home: game.home, venue: venueFor(game.home) };
+  return venueCache.venue;
+};
 
 function drawField(now: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Ballpark at dusk — retro arcade presentation
-  drawBallparkScenery(ctx);
+  // THE HOME CLUB'S PARK, at this hour. See venue.ts.
+  drawVenue(ctx, canvas.width, canvas.height, PLATE_Y, venueNow(), lightFor(venueNow(), gameHour()), now, {
+    away: game.away.abbr,
+    home: game.home.abbr,
+    a: game.awayState.runs,
+    h: game.homeState.runs,
+    inning: game.inning,
+    top: game.half === 'top',
+  });
 
   // Strike zone.
   ctx.strokeStyle = '#3d4a38';
@@ -3624,7 +3518,7 @@ function drawField(now: number): void {
     if (oh > 0) {
       ctx.globalAlpha = oh;
       drawOverhead(ctx, OH_CAM, replay, rn, {
-        ...OH_PALETTE,
+        ...overheadPalette(lightFor(venueNow(), gameHour())),
         wall: (d) => wallAt(d, game.home.park),
         figure: overheadFigure,
         sfx: overheadSfx,
@@ -7115,6 +7009,7 @@ function kickOff(
 ): void {
   YOU = you;
   game = newGame(home, away, 9, starters);
+  firstPitchHour = firstPitch(Math.random());
   lastGameIsStale = false;
   penPick = 0;
   atBat = newAtBat();

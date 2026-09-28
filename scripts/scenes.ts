@@ -26,7 +26,7 @@ import { simulateGame } from '../src/game/sim.ts';
 import { LEAGUE, type Team } from '../src/game/teams.ts';
 import { newGame } from '../src/game/game.ts';
 import { resolveSwingSeeded } from '../src/core/hit.ts';
-import { place, stretch } from '../src/game/placement.ts';
+import { place, withPlacement } from '../src/game/placement.ts';
 import {
   sceneFor,
   sceneForTake,
@@ -71,7 +71,8 @@ for (let k = 0; k < 30000; k++) {
   if (hit.outcome === 'strikeout') continue;
   const p = place(hit, LEAGUE[k % LEAGUE.length]!.park);
   if (p.zone === 'foul-ground') continue;
-  const outcome = stretch(hit.outcome, p) as Outcome;
+  const placed = withPlacement({ kind: 'in_play', hit });
+  const outcome = (placed.result.kind === 'in_play' ? placed.result.hit.outcome : hit.outcome) as Outcome;
   const bucket = POOL.get(outcome) ?? [];
   bucket.push({ p, ev: hit.exitVelocity });
   POOL.set(outcome, bucket);

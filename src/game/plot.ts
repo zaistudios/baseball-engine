@@ -78,47 +78,13 @@ const justOut = (exitVelocityMph: number, wallFt: number): number =>
   wallFt + 2 + Math.max(0, exitVelocityMph - 95) * 0.9;
 
 /**
- * HOW DEEP A TRIPLE IS DRAWN, AT THE LEAST, as a share of the fence.
- *
- * ⚠️ EXACTLY THE SAME RECONCILIATION justOut() DOES, for exactly the same
- * reason, on the other three-base hit. The table calls the triple before any of
- * this runs, and it calls plenty of them on soft liners — measured over 120,000
- * swings, a triple's median plotted distance was 262 FEET against a DOUBLE's
- * 321, and 41% of them landed inside the median SINGLE. So the most exciting
- * hit in the sport was routinely drawn as a bloop, with a runner sprinting
- * three bases on it. Zane, in one line: "Triple when the scene looks like a
- * single."
- *
- * It is a floor and not a shove, so a triple that already carried stays where
- * the physics put it; only the ones the picture would contradict get moved.
- *
- * ⚠️ AND IT SCALES WITH THE EXIT VELOCITY FOR THE REASON justOut() DOES — a
- * FLAT floor just moves the pile, which is the mistake this file has now made
- * twice (the 460 ceiling, then 404 feet on an eighth of all home runs). Tried
- * flat at 0.80 first: it put p5 through p75 of every triple in the game on
- * exactly 320 feet. The table's triples run 78 to 107mph, so the velocity is 29
- * miles an hour of real spread and it is the only honest information here.
- *
- * ⚠️ IT FEEDS BACK INTO THE HIT MIX AND THAT IS NOT A SIDE EFFECT TO IGNORE.
- * place() measures `gapFt` from this distance and stretch() holds a table
- * triple to a double on a small gap, so moving the ball out among the
- * outfielders costs some of them. Measured, not assumed: 2.1% of hits against a
- * real 2.0% and 3.8% off the raw table, so TRIPLE_GAP_FT did NOT need moving.
- * Re-measure with scripts/place.ts after any change here — that constant is the
- * paired knob if it ever does.
- *
- * Where the ball now lands: p5 302ft, p50 353, p95 385, and the most repeated
- * single distance is 13 of 339. Deeper than the median double, which is what a
- * triple is, and no pile anywhere.
+ * ⚠️ THERE IS NO TRIPLE FLOOR ANY MORE (2026-09-28). A table triple used to be
+ * pushed out to three quarters of the fence so the picture agreed with a hit
+ * type the table had already decided. The bases on a hit are now run out on
+ * the clocks (legs() in placement.ts), so a triple is a ball that got deep
+ * enough for the batter to beat the throw, and where it lands is the physics'
+ * answer alone. Only the home run is still reconciled to the fence.
  */
-const TRIPLE_MIN_SHARE = 0.75;
-const TRIPLE_FT_PER_MPH = 2.8;
-const TRIPLE_BASE_MPH = 78;
-
-/** How deep a triple is drawn, at the least. See TRIPLE_MIN_SHARE. */
-const deepEnough = (exitVelocityMph: number, wallFt: number): number =>
-  wallFt * TRIPLE_MIN_SHARE +
-  Math.max(0, exitVelocityMph - TRIPLE_BASE_MPH) * TRIPLE_FT_PER_MPH;
 
 /**
  * Drag, as one number: the share of the vacuum range a real ball keeps.
@@ -281,6 +247,76 @@ export const groundEase = (k: number): number => 1 - (1 - k) ** 2;
 export const groundBallMs = (plot: Plot, d: number): number =>
   plot.hangMs * (1 - Math.sqrt(1 - Math.max(0, Math.min(1, d / plot.distFt))));
 
+/** How a ball nobody caught keeps going once it is down. See rollFor(). */
+export interface Roll {
+  /** Feet it runs on past `fromFt`. */
+  ft: number;
+  /** Ball-clock ms that takes, easing to a stop. */
+  ms: number;
+  /** Where and when the roll takes over from the plot's own path. */
+  fromFt: number;
+  fromMs: number;
+}
+
+const NO_ROLL: Roll = { ft: 0, ms: 0, fromFt: 0, fromMs: 0 };
+
+/**
+ * THE ROLL ON THE GRASS for a ball nobody caught or cut off: a hard low liner
+ * skips a long way, a high fly dies where it lands, and the fence stops both.
+ * Tuned in scripts/balance.ts against the hit mix — with LEG_MARGIN_MS in
+ * placement.ts these are the knobs for doubles and triples.
+ */
+export const ROLL_FT_PER_MPH = 4.5;
+/** Feet per ball-clock ms coming off the first bounce. */
+export const ROLL_SPEED = 0.1;
+/** A grounder through the infield keeps this many feet per mph past the dirt. */
+export const GRASS_FT_PER_MPH = 2.4;
+/**
+ * ⚠️ A GROUNDER THROUGH THE HOLE HAS TO KEEP ROLLING. The plot's ground path
+ * dies around 160 feet — right for the infield, where somebody is always in
+ * front of it, and wrong past it: an outfielder had to sprint in 140 feet to
+ * a dead ball and every single through the infield became a double. So once
+ * it is past the infielders' spots, at GRASS_FROM of the plot's distance, it
+ * keeps its speed and eases out over the grass instead.
+ */
+const GRASS_FROM = 0.9;
+
+export function rollFor(
+  plot: Plot,
+  exitVelocityMph: number,
+  launchAngleDeg: number,
+  wallFt: number,
+): Roll {
+  const room = wallFt - 8;
+  if (plot.ground) {
+    const k = 1 - Math.sqrt(1 - GRASS_FROM);
+    const fromFt = plot.distFt * GRASS_FROM;
+    const fromMs = plot.hangMs * k;
+    const speed = (2 * plot.distFt * (1 - k)) / plot.hangMs;
+    const ft = Math.max(0, Math.min(room - fromFt, plot.distFt - fromFt + (exitVelocityMph - 50) * GRASS_FT_PER_MPH));
+    return ft > 0 ? { ft, ms: (2 * ft) / speed, fromFt, fromMs } : NO_ROLL;
+  }
+  const flat = Math.max(0.15, 1 - launchAngleDeg / 50);
+  const ft = Math.max(0, Math.min(room - plot.distFt, (exitVelocityMph - 55) * ROLL_FT_PER_MPH * flat));
+  // groundEase() starts at twice its average speed, so this is the time that
+  // makes the first bounce leave at ROLL_SPEED.
+  return ft > 0 ? { ft, ms: (2 * ft) / ROLL_SPEED, fromFt: plot.distFt, fromMs: plot.hangMs } : NO_ROLL;
+}
+
+/** Where a rolled ball comes to rest. */
+export const restFt = (plot: Plot, roll: Roll): number => (roll.ms > 0 ? roll.fromFt + roll.ft : plot.distFt);
+
+/**
+ * WHERE THE BALL IS, in feet from home along its line, `t` ball-clock ms after
+ * the cut. One function for the engine that decides who picks it up and the
+ * overhead that draws it rolling there.
+ */
+export function ballAlongFt(plot: Plot, roll: Roll, t: number): number {
+  if (roll.ms > 0 && t > roll.fromMs) return roll.fromFt + roll.ft * groundEase(Math.min(1, (t - roll.fromMs) / roll.ms));
+  if (plot.ground) return plot.distFt * groundEase(Math.max(0, Math.min(1, t / plot.hangMs)));
+  return plot.distFt * Math.max(0, Math.min(1, t / plot.hangMs));
+}
+
 /**
  * Plot one batted ball.
  *
@@ -387,11 +423,7 @@ export function plotBatted(
     // it does not run 200ft the way a fair one down the line does.
     const distFt = foul
       ? Math.max(18, rolled * foulCarry(directionDeg) * 0.6)
-      : // A triple on the ground is a ball in the corner that nobody cut off,
-        // so it has to have got there. See TRIPLE_MIN_SHARE.
-        outcome === 'triple'
-        ? Math.min(wallFt - 8, Math.max(rolled, deepEnough(exitVelocityMph, wallFt)))
-        : rolled;
+      : rolled;
     return { distFt, hangMs: groundHang(distFt, foul), ground: true };
   }
 
@@ -416,11 +448,7 @@ export function plotBatted(
   distFt =
     outcome === 'home_run'
       ? Math.max(distFt, justOut(exitVelocityMph, wallFt))
-      : outcome === 'triple'
-        ? // A triple has to be a ball that got out there — see TRIPLE_MIN_SHARE.
-          // The ceiling still applies: nothing but a home run clears the wall.
-          Math.min(Math.max(distFt, deepEnough(exitVelocityMph, wallFt)), wallFt - 8)
-        : Math.min(distFt, wallFt - 8);
+      : Math.min(distFt, wallFt - 8);
 
   // ⚠️ THE FOUL CLAMP COMES BEFORE THE FAIR ONE, and it has a much lower floor.
   // The 60ft minimum below is right for a ball in play — nothing fair finishes
@@ -746,7 +774,7 @@ export const RUNNING_START = 0.86;
  *    0.64      62%       28%        8%     4.39  ← middle of both bands
  *    0.60      68%       35%        8%     4.41
  */
-export const CLEAN_HIT_RUNNING_START = 0.64;
+export const CLEAN_HIT_RUNNING_START = 0.92;
 
 /**
  * A RUNNER'S CLOCK — ms from contact for a man of `speed` to get from bag
@@ -1083,4 +1111,34 @@ export function playCues(opts: {
     cues.push({ key: 'call', at: Math.min(race.runMs, race.throwMs) + 70 });
   }
   return cues;
+}
+
+/**
+ * THE THROW IN FROM A PICKUP, to second, third and the plate, in ms from
+ * contact on the replay's clock. An outfielder hits the cut-off man and he
+ * relays; anybody else throws straight to the bag. hitRace() in defense.ts
+ * and legs() below read the same numbers, so the runners' reads and the
+ * batter's bases are decided against one throw.
+ *
+ * ponytail: standard-depth post for the cut-off man, like pivotReadyMs().
+ */
+export function throwsFrom(
+  spot: { x: number; y: number },
+  readyMs: number,
+  num: number,
+  arm: number,
+  armAt: (fielderNum: number) => number,
+): { throwMs: [number, number, number]; relay?: { num: number; x: number; y: number; ms: number } } {
+  let relay: { num: number; x: number; y: number; ms: number } | undefined;
+  if (num >= 7) {
+    const cut = relayFor({ num });
+    const f = FIELDERS.find((x) => x.num === cut)!;
+    const post = feetXY(f.distFt, f.dirDeg);
+    const x = post.x + (spot.x - post.x) * RELAY_OUT;
+    const y = post.y + (spot.y - post.y) * RELAY_OUT;
+    relay = { num: cut, x, y, ms: readyMs + throwBetweenMs(spot, { x, y }, arm) };
+  }
+  const legTo = (bag: number): number =>
+    relay ? relay.ms + longThrowMs(relay, bag, armAt(relay.num)) : readyMs + longThrowMs(spot, bag, arm);
+  return { throwMs: [legTo(2), legTo(3), legTo(4)], ...(relay ? { relay } : {}) };
 }

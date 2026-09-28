@@ -284,7 +284,7 @@ export function playAiAtBat(
     runnerOnThird: g.bases[2] !== null,
     late: g.inning >= 7,
   });
-  const contact = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift });
+  const contact = withPlacement(ab.result!, { reachAt: reachOf(align), park: g.home.park, shift, batterSpeed: batter.speed });
   // The defence now has people in it: who the ball was hit at decides how
   // likely it is to be booted. See defense.ts.
   const fielding =
@@ -590,6 +590,10 @@ export interface SimResult {
   outSends: OutSend[];
   /** Home runs, so balance.ts can take them out of BABIP. */
   homeRuns: number;
+  /** Hits by kind. The bases on a hit are run out on the clocks; this is the check. */
+  hitMix: { single: number; double: number; triple: number; home_run: number };
+  /** Where the batter stood when each hit was over, stretches included: 1B, 2B, 3B, HR. */
+  reached: number[];
   /** Every fair ball in the air but a home run. See AtBatLog.air. */
   airBalls: AirBall[];
   /**
@@ -653,6 +657,9 @@ export function simulateGame(
   let stretchSafe = 0;
   let stretchOut = 0;
   let homeRuns = 0;
+  const hitMix = { single: 0, double: 0, triple: 0, home_run: 0 };
+  /** Where the batter stood when a hit was over — first, second, third, home. Stretches included. */
+  const reached = [0, 0, 0, 0];
   const airBalls: AirBall[] = [];
   const extraBases: ExtraBase[] = [];
   const outSendRows: OutSend[] = [];
@@ -699,6 +706,10 @@ export function simulateGame(
     if (out.atBat.sacFly) sacFlies++;
     if (out.atBat.sacFlyOut) sacFlyOuts++;
     if (out.atBat.outcome === 'home_run') homeRuns++;
+    if (out.atBat.outcome && out.atBat.outcome in hitMix) {
+      hitMix[out.atBat.outcome as keyof typeof hitMix]++;
+      if (!out.log.thrownOut?.batter) reached[Math.min(4, out.log.batterTo) - 1]!++;
+    }
     if (out.atBat.air) airBalls.push(out.atBat.air);
     if (out.atBat.extraBase) extraBases.push(...out.atBat.extraBase);
     if (out.atBat.outSends) outSendRows.push(...out.atBat.outSends);
@@ -715,7 +726,7 @@ export function simulateGame(
   return {
     game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls, extraBases, outSends: outSendRows,
+    stretchSafe, stretchOut, homeRuns, hitMix, reached, airBalls, extraBases, outSends: outSendRows,
   };
 }
 

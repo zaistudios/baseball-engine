@@ -41,8 +41,15 @@ import {
   GROUND_ANGLE,
   REACTION_MS,
   INFIELD_RANGE,
+  REPLAY_CUT_MS,
+  runToFirstMs,
+  rollFor,
+  ballAlongFt,
+  restFt,
+  throwsFrom,
   type Fielder,
   type Plot,
+  type Roll,
 } from './plot.ts';
 
 // It lives in plot.ts so defense.ts can run a pivot on it without importing
@@ -78,11 +85,8 @@ export interface Placement {
   /**
    * THE FENCE THIS BALL WAS HIT TOWARD, in feet — 400 in a park-less game.
    *
-   * ⚠️ IT IS ON THE PLACEMENT BECAUSE stretch() NEEDS IT AND HAS NO OTHER WAY
-   * TO GET IT. "Deep enough to stretch" is a different number of feet in a
-   * 302-foot corner than in a 420-foot centre field, and a fixed threshold
-   * would mean the single-to-double upgrade simply never fired in the small
-   * parks — see the note on the upgrade itself.
+   * The zone words and the replay read it; the roll stops at it (rollFor()),
+   * so a 302-foot corner turns a wall ball into a carom sooner than centre.
    */
   wallFt: number;
   /**
@@ -98,6 +102,12 @@ export interface Placement {
    * man, whether he caught it or it dropped in front of him.
    */
   airCatch?: AirCatch;
+  /**
+   * WHO RAN DOWN A BALL NOBODY CAUGHT OR CUT OFF — set on a fair hit that got
+   * into the outfield grass or dropped in, and on nothing else. `fielderNum`
+   * is that man. See pickUp().
+   */
+  pickup?: Pickup;
 }
 
 /**
@@ -122,65 +132,6 @@ export interface Placement {
  * OR SPRAY. All three move where balls land, and this is a distance in feet.
  */
 export const GAP_FT = 100;
-
-/**
- * Inside this, a table-double went more or less straight at somebody and gets
- * held to a single.
- *
- * ⚠️ LOWERED FROM 74 TO 24 WHEN THE SPRAY MODEL LANDED, and leaving it at 74
- * would have quietly deleted the double from the game. 74 was about p35 of the
- * old, tighter gap distribution; with balls actually spread around the field
- * the median double now lands 88ft from the nearest man but the LOW tail came
- * down too, and 74 caught over half of them. Measured: doubles fell to 8.5% of
- * hits against a real 20%.
- *
- * So it is set at roughly p3 of the double population — a ball that genuinely
- * landed on top of somebody, not merely one that landed nearer than average.
- * The downgrade is meant to be the exception that teaches the rule.
- */
-export const AT_HIM_FT = 24;
-
-/**
- * The bar a table-triple has to clear to stay a triple.
- *
- * ⚠️ IT IS NOT `GAP_FT`, AND USING `GAP_FT` HERE KILLED EVERY TRIPLE IN THE
- * GAME. Measured 2026-08-28 after a season came back 2,676 singles, 742
- * doubles, 558 home runs and **zero** three-baggers: the triple branch below
- * asked for `gapFt >= 128`, and across 4,706 balls the table called a triple
- * the gap to the nearest fielder tops out at **128.3ft**. Three of them
- * cleared it. The bar was sitting on the ceiling of the distribution.
- *
- * The 128 above is not wrong for what it measures — p90 of gap distance over
- * ALL HITS really is 145ft. It is the wrong population. The far-from-anybody
- * balls are bloopers and stuff down the line; a ball the table calls a triple
- * carries 183-392ft into the deep outfield, where the fielders are, and its
- * own distribution is p25 52ft, p50 74ft, p75 80ft, p90 93ft, max 128ft.
- *
- * So the bar is set against the triples themselves. A triple is ~1.7% of hits
- * in real baseball and ~4% of them before placement, so roughly half survive.
- *
- * ⚠️ RE-SET FROM 76 TO 51 WHEN THE SPRAY MODEL LANDED, for the same reason
- * AT_HIM_FT moved and by the same method. The triple population's own gap
- * distribution is now p10 20, p50 53, p90 83 — 76 sat up at its p75 and held
- * three-quarters of them, which took triples down to 1.2% of hits. 51 is its
- * median, so about half survive and the rate comes out at 2.0% against a real
- * 2.0%.
- *
- * ⚠️ THE CURVE IS STEEP RIGHT HERE, so this is the calibration knob for the
- * triple rate and a few feet is a big move. Re-measure with scripts/place.ts
- * against TRIPLES, not against all hits.
- */
-export const TRIPLE_GAP_FT = 51;
-
-/**
- * How far out a single has to land, as a share of the fence it went toward,
- * before geometry will stretch it to a double.
- *
- * 0.8 of the neutral 400-foot wall is 320 feet, which is the number this rule
- * was measured at and shipped with. Expressed as a share so that it means the
- * same thing in a park whose corner is 302 feet away. See stretch().
- */
-export const DEEP_SHARE = 0.8;
 
 const feetXY = (distFt: number, dirDeg: number) => {
   const rad = (dirDeg * Math.PI) / 180;
@@ -273,7 +224,7 @@ const foulCatcher = (dirDeg: number): number => {
  * measured to a fielder who is not playing there is a number with nothing
  * behind it. So a foul gets its own short answer: how far, which side, and who
  * would be under it. `inTheGap` is false by construction, which also keeps
- * stretch() from ever looking at one.
+ * stretchChance() from ever looking at one.
  */
 export function place(
   hit: HitResult,
@@ -318,11 +269,17 @@ export function place(
   // A ball in the air is played by whoever gets there. A home run is not on
   // the field to be caught.
   const air = !cut && hit.outcome !== 'home_run' ? catchFly(plot, dirDeg, fielders, reachAt) : undefined;
-  const num = air
-    ? air.num
-    : cut && !cut.past
-      ? cut.num
-      : nearestFielder(plot.distFt, dirDeg, cut ? fielders.filter((f) => f.num >= 7) : fielders).num;
+  const loose = (cut?.past || (air && !air.caught)) && hit.outcome !== 'home_run';
+  const pickup = loose
+    ? pickUp(plot, rollFor(plot, hit.exitVelocity, hit.launchAngle, wallFt), dirDeg, fielders, reachAt, !!cut, wallFt)
+    : undefined;
+  const num = pickup
+    ? pickup.num
+    : air
+      ? air.num
+      : cut && !cut.past
+        ? cut.num
+        : nearestFielder(plot.distFt, dirDeg, cut ? fielders.filter((f) => f.num >= 7) : fielders).num;
   const gapFt = gapTo(plot.distFt, dirDeg, num, fielders);
 
   return {
@@ -335,6 +292,7 @@ export function place(
     wallFt,
     ...(cut ? { cutOff: cut } : {}),
     ...(air ? { airCatch: air } : {}),
+    ...(pickup ? { pickup } : {}),
   };
 }
 
@@ -540,56 +498,119 @@ export function catchFly(
   return { num: best.num, ms: hang, reach: best.reach, caught: diving, how: diving ? 'diving' : null };
 }
 
+// ------------------------------------------------------------ the pickup
+
 /**
- * Extra bases, decided by where it landed.
- *
- * Only ever moves a hit ONE step, and never past a triple — a home run is the
- * table's call and geometry does not get to award one, because "it cleared the
- * wall" is already what `home_run` means.
- *
- * The downgrade is as important as the upgrade: a double that landed on top of
- * the left fielder becomes a single, which is what makes hitting it into space
- * a skill rather than a bonus.
+ * WHO RUNS DOWN A BALL NOBODY CAUGHT OR CUT OFF, where, and when he has it in
+ * his throwing hand. Clocks are ball-clock ms from the cut, like cutOff()'s.
  */
-export function stretch(outcome: Outcome, p: Placement): Outcome {
-  if (outcome === 'single') {
-    // Rare, and it has to be genuinely deep AND genuinely in space.
-    //
-    // ⚠️ THE BAR IS A SHARE OF THE FENCE, NOT 320 FEET, AND IT HAD TO BECOME
-    // ONE. 320 is exactly four fifths of the neutral 400-foot wall, so a
-    // park-less game is unchanged to the foot — but plot.ts clamps every
-    // non-home-run to `wallFt - 8`, and in New England's 302-foot right-field
-    // corner nothing in play can reach 320 at all. A fixed bar would have meant
-    // the upgrade silently never firing in the smallest parks, which is the
-    // "threshold nothing can cross" failure GAP_FT's own header describes.
-    if (p.inTheGap && p.distFt > p.wallFt * DEEP_SHARE) return 'double';
-    return 'single';
+export interface Pickup {
+  num: number;
+  /** Feet from home along the ball's line where he picks it up. */
+  alongFt: number;
+  /** He gets to that spot. */
+  runMs: number;
+  /** He has it and is ready to throw: the ball is there, he is there, he has gathered it. */
+  ms: number;
+  /** It got all the way to the fence and he played it off the wall. */
+  wall: boolean;
+  /** The bounce and roll after it came down. See rollFor(). */
+  roll: Roll;
+}
+
+/** Bend, glove and set. Every pickup pays it. */
+export const GATHER_MS = 150;
+/** Playing it off the fence: the carom, the turn, the search for the cut-off man. */
+export const WALL_MS = 150;
+const PICKUP_STEP_MS = 20;
+
+/**
+ * THE RETRIEVAL RACE. The ball rolls along its line (ballAlongFt()); every
+ * fielder who can get there runs straight at where it will be, at AIR_RANGE ×
+ * his glove, and the first man who can be standing where the ball is, when it
+ * is there, picks it up. A ball that stops before anyone reaches it is picked
+ * up by whoever gets to it first. A grounder that got through the infield is
+ * the outfielders' — the men it got past are behind it.
+ *
+ * Before this the outfielder on a hit ran a fixed share of the way toward
+ * where it landed, chosen by the hit type the table had already rolled, and
+ * the throw left from the landing spot the instant it landed. Nothing here
+ * rolls; it measures.
+ */
+export function pickUp(
+  plot: Plot,
+  roll: Roll,
+  dirDeg: number,
+  fielders: readonly Fielder[],
+  reachAt: (fielderNum: number) => number,
+  groundThrough: boolean,
+  wallFt: number,
+): Pickup {
+  const chasers = fielders.filter((f) => (groundThrough ? f.num >= 7 : f.num >= 3));
+  const posts = chasers.map((f) => ({ num: f.num, at: feetXY(f.distFt, f.dirDeg), speed: AIR_RANGE * reachAt(f.num) }));
+  const arrive = (m: (typeof posts)[number], alongFt: number): number => {
+    const b = feetXY(alongFt, dirDeg);
+    return REACTION_MS + Math.hypot(m.at.x - b.x, m.at.y - b.y) / m.speed;
+  };
+  const restAt = restFt(plot, roll);
+  const stopMs = roll.ms > 0 ? roll.fromMs + roll.ms : plot.hangMs;
+  const wall = restAt >= wallFt - 9;
+  const done = (num: number, alongFt: number, runMs: number, ballMs: number): Pickup => ({
+    num,
+    alongFt,
+    runMs,
+    ms: Math.max(runMs, ballMs) + GATHER_MS + (wall && alongFt >= restAt - 1 ? WALL_MS : 0),
+    wall,
+    roll,
+  });
+  // A ball in the air cannot be picked up before it comes down — catchFly()
+  // already said nobody caught it.
+  for (let t = plot.ground ? 0 : plot.hangMs; t < stopMs; t += PICKUP_STEP_MS) {
+    const along = ballAlongFt(plot, roll, t);
+    for (const m of posts) {
+      const runMs = arrive(m, along);
+      if (runMs <= t) return done(m.num, along, runMs, t);
+    }
   }
-  if (outcome === 'double') {
-    // ⚠️ THERE IS NO DOUBLE-TO-TRIPLE UPGRADE, and it was removed rather than
-    // tuned. Gap distance clumps hard at the top — p90 is 145ft and p97 is
-    // 149ft — so any threshold high enough to be "exceptional" still catches a
-    // big slice of a population that is far more numerous than triples are.
-    // With it in, three-baggers went UP to 6.6% against a real 2%.
-    //
-    // Geometry holds runners to fewer bases here; it does not award more. A
-    // triple is mostly a fact about the RUNNER's legs, and speed already earns
-    // the extra base in inning.ts.
-    if (p.gapFt < AT_HIM_FT) return 'single';
-    return 'double';
+  const first = posts
+    .map((m) => ({ num: m.num, runMs: arrive(m, restAt) }))
+    .sort((a, b) => a.runMs - b.runMs)[0]!;
+  return done(first.num, restAt, first.runMs, stopMs);
+}
+
+/**
+ * HOW MUCH DAYLIGHT THE BATTER WANTS before he takes the next bag without
+ * being waved: he gets there this many ms before the throw would. Anything
+ * closer is the gamble stretchChance() rolls for, raced in hitRace().
+ */
+export const LEG_MARGIN_MS = 250;
+/**
+ * ...and for third, where he wants it far surer: the old rule, never make
+ * the first or the third out at third base. Without its own number a ball
+ * slow enough to be a double was usually slow enough to be a triple, and
+ * three-baggers came out at a third of the doubles against a real tenth.
+ */
+export const THIRD_MARGIN_MS = 800;
+
+/**
+ * THE BASES ON A HIT, RUN OUT. He takes second if he beats the throw there by
+ * LEG_MARGIN_MS, then third by THIRD_MARGIN_MS. He sees the ball in front of him,
+ * so it is the true clock, not a read. Single, double or triple is what the
+ * legs and the throw say, not what the table rolled.
+ */
+export function legs(
+  p: Placement,
+  batterSpeed: number,
+  reachAt: (fielderNum: number) => number,
+): 1 | 2 | 3 {
+  if (!p.pickup) return 1;
+  const readyMs = REPLAY_CUT_MS + p.pickup.ms;
+  const { throwMs } = throwsFrom(feetXY(p.pickup.alongFt, p.dirDeg), readyMs, p.pickup.num, reachAt(p.pickup.num), reachAt);
+  let n: 1 | 2 | 3 = 1;
+  while (n < 3 && REPLAY_CUT_MS + runToFirstMs(batterSpeed) * (n + 1) + (n === 1 ? LEG_MARGIN_MS : THIRD_MARGIN_MS) < throwMs[n - 1]!) {
+    n = (n + 1) as 2 | 3;
   }
-  if (outcome === 'triple') {
-    // THE MAIN JOB OF THIS FUNCTION. The ported tables give ~4.3% triples
-    // against a real ~1.7%, so most of them are held to two bases because
-    // somebody was in position to cut the ball off.
-    //
-    // ⚠️ THE BAR IS TRIPLE_GAP_FT, NOT GAP_FT. See the header on that constant:
-    // GAP_FT is measured over all hits and no table-triple can reach it, so
-    // this line used to hold ALL of them and the game had no triples at all.
-    if (p.gapFt < TRIPLE_GAP_FT) return 'double';
-    return 'triple';
-  }
-  return outcome;
+  return n;
 }
 
 // ------------------------------------------------------------- the verdict
@@ -617,8 +638,7 @@ export type Verdict = 'robbed' | 'dropped' | null;
  * THE GROUND BALL'S VERDICT, from the cut-off.
  *
  * Fielded by an infielder is a ground out, whatever the table said. Through
- * every infielder, an out becomes a single and a table hit stays that hit —
- * stretch() still gets its say. A ball that died in the dirt before anybody
+ * every infielder, an out becomes a hit — legs() decides how many bases. A ball that died in the dirt before anybody
  * reached it is the same infield single, told as one rather than as a hole.
  */
 function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Verdict } {
@@ -631,8 +651,8 @@ function cutOffVerdict(o: Outcome, cut: CutOff): { outcome: Outcome; verdict: Ve
  * THE FLY BALL'S VERDICT, from catchFly(). The mirror of cutOffVerdict().
  *
  * Caught is an out, typed by the ball's shape; a table hit caught is `robbed`.
- * Not caught, an out becomes a single that `dropped` and a table hit stays that
- * hit — stretch() still gets its say.
+ * Not caught, an out becomes a hit that `dropped` — legs() decides how many
+ * bases.
  */
 function airVerdict(o: Outcome, c: AirCatch, launchAngle: number): { outcome: Outcome; verdict: Verdict } {
   if (c.caught) return { outcome: outKindFor(launchAngle), verdict: isHit(o) ? 'robbed' : null };
@@ -641,7 +661,7 @@ function airVerdict(o: Outcome, c: AirCatch, launchAngle: number): { outcome: Ou
 }
 
 /**
- * Plot a finished at-bat, race for it, apply the stretch, and hand back all of
+ * Plot a finished at-bat, race for it, run the bases out, and hand back all of
  * it.
  *
  * Both callers — the sim and the live screen — go through this one function so
@@ -673,6 +693,8 @@ export function withPlacement(
      * every caller written before 2026-09-08. See game/shift.ts.
      */
     shift?: Shift;
+    /** The batter's legs, for legs(). Omitted is league average. */
+    batterSpeed?: number;
   } = {},
 ): {
   result: AtBatResult;
@@ -697,7 +719,14 @@ export function withPlacement(
         ? airVerdict(result.hit.outcome, p.airCatch, result.hit.launchAngle)
         : { outcome: result.hit.outcome, verdict: null as Verdict };
 
-  const outcome = stretch(contested, p);
+  // ⚠️ THE TABLE SAYS HIT OR OUT AND NOTHING ELSE ANY MORE (2026-09-28). Which
+  // hit it is comes off the clocks: a ball that died in the infield dirt is a
+  // single, one somebody had to run down is as many bases as the batter beats
+  // the throw to. The home run is still the table's call.
+  const outcome: Outcome =
+    !live || !isHit(contested) || contested === 'home_run'
+      ? contested
+      : (['single', 'double', 'triple'] as const)[legs(p, opts.batterSpeed ?? 1, opts.reachAt ?? (() => 1)) - 1]!;
   const hit =
     outcome === result.hit.outcome
       ? result.hit

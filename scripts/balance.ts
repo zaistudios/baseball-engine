@@ -17,6 +17,8 @@ const PAIRS = LEAGUE.flatMap((h) => LEAGUE.filter((a) => a !== h).map((a) => [h,
 const N = Number(process.argv[2] ?? 500);
 let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfinished = 0;
 let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
+const mix = { single: 0, double: 0, triple: 0, home_run: 0 };
+const stood = [0, 0, 0, 0];
 let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0, hrs = 0, inPlay = 0;
 const caught: { how: string | null; glove: number }[] = [];
 const bags: ExtraBase[] = [];
@@ -31,7 +33,7 @@ for (let i = 0; i < N; i++) {
   const {
     game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
-    stretchSafe, stretchOut, homeRuns, airBalls, extraBases, outSends,
+    stretchSafe, stretchOut, homeRuns, hitMix, reached, airBalls, extraBases, outSends,
   } = simulateGame(
     i * 7919 + 13, 9, home, away,
     { home: { index: i % home.rotation.length }, away: { index: (i + 1) % away.rotation.length } },
@@ -52,6 +54,8 @@ for (let i = 0; i < N; i++) {
   leads += leadForces;
   strSafe += stretchSafe;
   strOut += stretchOut;
+  for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] += hitMix[k];
+  reached.forEach((n, i) => (stood[i]! += n));
   dps += doublePlays;
   leadDps += leadDoublePlays;
   tps += triplePlays;
@@ -109,6 +113,16 @@ for (const [label, kind, from] of [['tag 2nd→3rd', 'tag', 1], ['gb 2nd→3rd',
 }
 // ⚠️ BALLS IN PLAY INCLUDES FOUL OUTS AND BUNTS, so this runs a little under
 // a scorer's BABIP. It is for before-and-after, not for the back of a card.
+{
+  const all = mix.single + mix.double + mix.triple + mix.home_run;
+  const pct = (n: number) => `${((100 * n) / Math.max(1, all)).toFixed(1)}%`;
+  console.log(
+    `hit mix          1B ${pct(mix.single)}  2B ${pct(mix.double)}  3B ${pct(mix.triple)}  HR ${pct(mix.home_run)}   (MLB ~65 / 20 / 2 / 13)`,
+  );
+  const on = stood.reduce((a, b) => a + b, 0);
+  const at = (n: number) => `${((100 * n) / Math.max(1, on)).toFixed(1)}%`;
+  console.log(`  ...stood on     1B ${at(stood[0]!)}  2B ${at(stood[1]!)}  3B ${at(stood[2]!)}  HR ${at(stood[3]!)}   (stretches made count up)`);
+}
 console.log(`BABIP            ${((hits - hrs) / Math.max(1, inPlay - hrs)).toFixed(3)}   (MLB ~.290)`);
 const byGlove = [...caught].sort((a, b) => a.glove - b.glove);
 const q = Math.floor(byGlove.length / 4);

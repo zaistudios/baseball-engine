@@ -970,6 +970,58 @@ notch in centre are on the screen. The camera is fixed at one scale for every
 building, which is the point — rescaling per park so each one filled the canvas
 would draw them all the same size and the layout would be invisible.
 
+### Every park looks like its town, at its hour — 2026-09-28
+
+*"Every field looks the same."* The view behind the plate was one hardcoded
+dusk in every building, with 330 / 395 / 335 painted on the wall whatever
+the fences were. `venue.ts` now draws it from the home club:
+
+- **A skyline for the town**, one of nine painters keyed by abbr (`SKYLINE`):
+  towers in New York, stacks in Detroit, the bay and a bridge in San
+  Francisco, snow on the peaks in Denver, mesas and saguaros in Phoenix,
+  palms in LA, a grain elevator on the plains. A custom club gets one by hash.
+- **The club's colours** on the wall, the seats and the crowd, from its kit.
+  The Trellis wall is ivy. The wall reads the park's real fences.
+- **The hour.** First pitch is 1:05 (30%), 5:10 (15%) or 7:05, rolled at
+  `kickOff()` on `Math.random()` so the seeded game never sees it. The clock
+  runs about twenty minutes an inning. A 1:05 game stays in the sun, a 5:10
+  game plays into the sunset and ends at dusk, and a 7:05 game starts at
+  sunset and is dark by the third. The towers come on as the light goes, and
+  the overhead replay's grass follows the same light.
+
+**And a landmark of its own** (`landmarks.ts`), read off each park's note in
+`teams.ts`. The league is a century on and still has its old yards in it,
+so the backdrop takes from both ends:
+
+- **Landmarks.** Examples by era:
+  - Old: a barn and silo past the Grange, the Wharf's brick warehouse in
+    right, a flour sign and water wheel at the Mill, meeting-house steeples
+    over the Common, a paddle-wheeler on the river at the Sty, the Arch at
+    the Crossing, a lighthouse sweeping the Pound.
+  - Future: a space-elevator tether climbing out of the Void, a robot arm
+    feeding the Foundry Yard's furnace, fish in the Tank's aquarium under
+    its dome, a maglev along the shore at the Terminal, the Aqueducts'
+    channel glowing after dark.
+  - Every one of the thirty is different.
+- **Era, off the lineup** (`eraOf()`: machine 1, augmented 0.6, human 0).
+  - The Holdouts' nine humans get a hand-turned green scoreboard, pennants on
+    a wire and painted signs on the wall.
+  - The Foundry's nine machines get a holographic board, flickering holo
+    panels, a lit wall trim and camera drones over the lights at night.
+  - The middle of the league gets a bulb board and a dirigible.
+  - The board over centre shows the real score.
+- **Weather.** Fog rolls through the Cloudbank, the Horn and the Pound.
+  Lake snow falls on the Drift. Dust blows through the Section. River haze
+  hangs over the Quarter, the Sty, the Landing and the Basin. Heat shimmers
+  off the Kiln and the Skillet.
+- **Roofs.** The Tank is a dome, with one indoor light all game. The
+  Cooperage and the Terminal have their roofs rolled back over the corners.
+  The Cooperage sets off fireworks after dark.
+
+Presentation only: nothing here touches the engine, and a night game plays
+exactly like a day game. All of it is drawn, no images; the whole backdrop
+costs about 19 kB of the single file.
+
 ### The pen gets tired too
 
 The rotation work left one gap open and said so: **a reliever was always fresh.**
@@ -1585,6 +1637,51 @@ second-to-third 51% → 70% of the chances (37 thrown out, about 3% of sends),
 grounder second-to-third 36% → 30%, grounder third-to-home 35% → 25%. Hit
 rates didn't move (60% from second, 26% first to third). `node scripts/balance.ts`
 prints all three lines.
+
+### The bases on a hit are run out — 2026-09-28
+
+*"Triple when the scene looks like a single."* The table rolled single,
+double or triple. `stretch()` nudged that by gap distance, the replay pushed a
+table triple out to three quarters of the fence so the picture agreed, and
+the outfielder ran `chaseReach(outcome)` of the way to the ball: 58% of the
+way on a triple, 84% on a single. The throw left from where the ball landed,
+the instant it landed.
+
+Now the table says **hit or out** and nothing else. On every fair hit nobody
+caught or cut off:
+
+- **The ball rolls.** A ball in the air bounces on along its line
+  (`rollFor()`, harder and flatter goes further), stopped by the fence. A
+  grounder through the infield keeps its speed onto the grass instead of
+  dying at 160 feet. `ballAlongFt()` in `plot.ts` is the one curve the engine
+  and the overhead both read.
+- **Somebody runs it down.** `pickUp()` in `placement.ts` sends every
+  fielder at where the ball will be, at `AIR_RANGE × glove`. The first man who
+  can be standing where it is, when it is there, has it. He pays `GATHER_MS`,
+  plus `WALL_MS` to play it off the fence.
+- **The batter takes what he beats the throw to.** `legs()` times the throw
+  in from the pickup, through the cut-off man (`throwsFrom()`, the same clock
+  `hitRace()` gives the runners). He takes second with `LEG_MARGIN_MS` to
+  spare and third only with `THIRD_MARGIN_MS`. The stretch gamble is for
+  second only.
+
+The replay draws the same numbers. The ball rolls to the pickup and stops in
+his glove, he arrives when the engine says he did, the throw leaves from
+there, and the camera holds until he has it (`PICKUP_HOLD_MS`). The triple
+floor, `AT_HIM_FT`, `TRIPLE_GAP_FT` and `DEEP_SHARE` are gone.
+`CLEAN_HIT_RUNNING_START` went 0.64 → 0.92, because the crutch for an
+outfielder who had the ball on landing is no longer needed.
+
+At 1000 games, before → after: runs 4.58 → 4.64, hits 9.18 → 9.06. Where the
+batter stood when a hit was over went from 1B 70.8 / 2B 12.5 / 3B 2.2 to
+**62.5 / 20.5 / 2.0** (MLB ~65 / 20 / 2). Scored from second on a single held
+at 58%, first to third went 26% → 28%, and DP was 0.83 → 0.82.
+`node scripts/balance.ts` prints the mix, and `node scripts/sanity.ts` hunts
+single plays that break baseball logic: a man scoring from second on a ground
+out, a runner moving up on a popup.
+
+**Still not simulated:** errors are still a roll after the fact, and a runner
+who reads "go" on a grounder is still never thrown at.
 
 ### ⚠️ The third trap: a search that overfits
 

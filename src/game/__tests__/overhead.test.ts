@@ -643,3 +643,42 @@ describe('a ball in the air is drawn the way the engine caught it', () => {
     expect(caught.rotated).toBe(false);
   });
 });
+
+describe('a hit is drawn being run down where the engine picked it up', () => {
+  const gapper = () => {
+    const hit = {
+      outcome: 'single', isOut: false, isHit: true, exitVelocity: 100, launchAngle: 16,
+      direction: -16, timing: 'good', pitchType: 'fastball', platoon: 1, stance: 'normal', clutchApplied: false,
+    } as const;
+    const placed = withPlacement({ kind: 'in_play', hit });
+    const p = placed.placement!;
+    const out = placed.result.kind === 'in_play' ? placed.result.hit.outcome : 'single';
+    return {
+      p,
+      r: newReplay({
+        now: 0, outcome: out, exitVelocity: 100, launchAngle: 16, direction: -16,
+        speed: 1, safe: true, chaserNum: p.fielderNum, airCatch: p.airCatch!, pickup: p.pickup!,
+      }),
+    };
+  };
+
+  it('rolls on after it lands, stops in his glove, and never passes him', () => {
+    const { p, r } = gapper();
+    expect(p.pickup).toBeDefined();
+    let last = 0;
+    for (let t = 0; t <= 6000; t += 50) {
+      const ft = ballShare(r, t) * r.plot.distFt;
+      expect(ft).toBeGreaterThanOrEqual(last - 1e-6);
+      expect(ft).toBeLessThanOrEqual(p.pickup!.alongFt + 1e-6);
+      last = ft;
+    }
+    expect(last).toBeCloseTo(p.pickup!.alongFt, 6);
+  });
+
+  it('the throw leaves when the engine says he has it', () => {
+    const { p, r } = gapper();
+    const race = raceFor(r);
+    expect(race.chaser.num).toBe(p.pickup!.num);
+    expect(race.fieldedAt).toBe(REPLAY_CUT_MS + p.pickup!.ms);
+  });
+});

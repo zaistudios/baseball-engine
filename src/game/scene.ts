@@ -317,7 +317,7 @@ export function sceneFor(f: SceneFacts): Scene {
     /**
      * ⚠️ THE HEADLINE IS READ OFF THE ZONE, NOT OFF `inTheGap`, and using the
      * flag was the first draft's mistake. `inTheGap` means "a long way from the
-     * nearest man" — a FIELDER distance, which is what stretch() needs and what
+     * nearest man" — a FIELDER distance, which is what stretchChance() reads and what
      * GAP_FT was measured against. It is deliberately the top fifth of doubles.
      * Measured over 8,983 balls in play, keying the caption off it fired INTO
      * THE GAP on 0.2% of them against a bare DOUBLE on 9.3%: the one caption on

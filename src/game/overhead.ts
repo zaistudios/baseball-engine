@@ -36,6 +36,7 @@ import {
   REACTION_MS,
   SHADE,
   groundEase,
+  ballAlongFt,
   REPLAY_CUT_MS,
   MIN_THROW_MS,
   type Plot,
@@ -44,7 +45,7 @@ import {
 } from './plot.ts';
 import { SPRITE_SPECS } from './sprites.ts';
 import { LINER_BREAK, type AirClock, type GroundClock } from './defense.ts';
-import type { AirCatch, CutOff } from './placement.ts';
+import type { AirCatch, CutOff, Pickup } from './placement.ts';
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -390,6 +391,13 @@ export interface Replay {
    */
   airCatch?: AirCatch;
   /**
+   * WHO RAN DOWN A HIT NOBODY CAUGHT OR CUT OFF, where and when — pickUp() in
+   * placement.ts. The ball rolls there on the engine's own curve and he
+   * arrives when the engine says he did; the throw leaves from there. Absent,
+   * the chaser is drawn the old way, on chaseReach().
+   */
+  pickup?: Pickup;
+  /**
    * EXTRA MILLISECONDS THE BALL SITS before the cut back — the beat a big play
    * earns. Absent is the ordinary hold, which is what a foul and a routine
    * grounder get.
@@ -457,6 +465,8 @@ export function newReplay(o: {
   clock?: GroundClock;
   /** Who got to a ball in the air. See Replay.airCatch. */
   airCatch?: AirCatch;
+  /** Who ran down a hit. See Replay.pickup. */
+  pickup?: Pickup;
   /** The engine's arrival times on a throw after a catch. See Replay.airClock. */
   airClock?: AirClock;
   /**
@@ -500,6 +510,7 @@ export function newReplay(o: {
     ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
     ...(o.airCatch === undefined ? {} : { airCatch: o.airCatch }),
+    ...(o.pickup === undefined ? {} : { pickup: o.pickup }),
     ...(o.airClock === undefined ? {} : { airClock: o.airClock }),
     ...(o.holdMs === undefined ? {} : { holdMs: o.holdMs }),
     cued: new Set(),
@@ -578,6 +589,8 @@ export { REPLAY_CUT_MS };
 export const REPLAY_FADE_MS = 200;
 /** How long the ball sits where it finished before cutting back. */
 export const REPLAY_HOLD_MS = 900;
+/** How long a hit stays on screen once the man running it down has it. */
+export const PICKUP_HOLD_MS = 450;
 /** How long after the throw resolves the call stays up. */
 export const REPLAY_CALL_MS = 700;
 
@@ -621,7 +634,9 @@ export function raceFor(r: Replay): { chaser: Fielder; fieldedAt: number } & Rac
     nearestFielder(r.plot.distFt, r.direction);
   // A grounder somebody cut off is fielded when the ball reaches HIM, not when
   // it would have stopped — the engine's own time, on the engine's own clock.
-  const fieldedAt = REPLAY_CUT_MS + (r.cutOff?.fielded ? r.cutOff.ms : r.plot.hangMs);
+  // A hit somebody had to run down is in his hand at the pickup's time.
+  const fieldedAt =
+    REPLAY_CUT_MS + (r.pickup ? r.pickup.ms : r.cutOff?.fielded ? r.cutOff.ms : r.plot.hangMs);
   // ⚠️ A RACED GROUNDER IS DRAWN FROM THE ENGINE'S NUMBERS, NOT RE-TIMED. The
   // stretch in raceTiming() exists to make the picture agree with a die; here
   // the clocks decided the play, so they already agree.
@@ -738,6 +753,9 @@ export const replayLength = (r: Replay): number => {
     // A throw after a catch lands long after the ball came down. Hold for its call.
     r.airClock ? Math.max(r.airClock.throwMs, r.airClock.runnerMs) + REPLAY_CALL_MS + extra : 0,
     r.throwClock ? Math.max(r.throwClock.throwMs, r.throwClock.runnerMs) + REPLAY_CALL_MS + extra : 0,
+    // A hit somebody had to run down is not over until he has it. Cutting away
+    // with the ball still rolling to the fence is the scripted look again.
+    r.pickup ? race.fieldedAt + PICKUP_HOLD_MS + extra : 0,
   );
 };
 
@@ -1037,7 +1055,7 @@ export function drawOverhead(
   // Where the ball is played: in the glove of the man who cut it off, or where
   // it finished.
   const landing = overheadPoint(
-    r.cutOff?.fielded ? r.cutOff.alongFt : r.plot.distFt,
+    r.pickup ? r.pickup.alongFt : r.cutOff?.fielded ? r.cutOff.alongFt : r.plot.distFt,
     r.direction,
     cam.home,
     cam.pxPerFt,
@@ -1071,6 +1089,11 @@ export function drawOverhead(
     if (beaten?.num === f.num && role !== 'chase' && role !== 'relay') {
       to = overheadPoint(beaten.alongFt, r.direction, cam.home, cam.pxPerFt);
       k2 = beaten.reach * leg(REPLAY_CUT_MS + beaten.ms);
+    } else if (role === 'chase' && r.pickup) {
+      // THE ENGINE'S RUN: straight at where he meets the ball, there when
+      // pickUp() says he was. No share of the way chosen by the hit type.
+      to = landing;
+      k2 = leg(REPLAY_CUT_MS + r.pickup.runMs);
     } else if (role === 'chase' && r.airCatch && !r.error) {
       // THE ENGINE'S RUN, NOT A RIGGED ONE. He gets `reach` of the way by the
       // time he got there — early if he camped — and a diving man lays out for
@@ -1174,7 +1197,8 @@ export function drawOverhead(
   // sliding across the dirt at a fixed size is the one thing on this field that
   // looks like a cursor rather than a baseball. Real ground balls bounce, each
   // hop lower than the last, and that shape is legible even at four pixels.
-  const lift = r.plot.ground ? hop(kBall) : Math.sin(k * Math.PI);
+  // A ball rolling on past the plot's own distance is on the grass: no hop.
+  const lift = r.plot.ground ? hop(Math.min(1, kBall)) : Math.sin(Math.min(1, k) * Math.PI);
   const ballR = 3.5 + lift * 4.5;
   if (lift > 0.05) {
     // Its shadow stays on the grass, so the arc is legible from overhead.
@@ -1207,6 +1231,11 @@ export function drawOverhead(
  * the man who should have had it, which is the whole picture of an error.
  */
 export function ballShare(r: Replay, t: number): number {
+  // ⚠️ A HIT SOMEBODY RAN DOWN ROLLS ON THE ENGINE'S CURVE and stops in his
+  // glove, where pickUp() put it. See ballAlongFt() in plot.ts.
+  if (r.pickup && !r.error) {
+    return Math.min(ballAlongFt(r.plot, r.pickup.roll, t), r.pickup.alongFt) / r.plot.distFt;
+  }
   const k = Math.max(0, Math.min(1, t / r.plot.hangMs));
   let kBall = k;
   const over = (t - r.plot.hangMs) / 900;

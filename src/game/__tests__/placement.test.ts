@@ -5,15 +5,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   place,
-  stretch,
+  legs,
   withPlacement,
   describePlay,
   scorecard,
   creditsFor,
   type PlayShape,
-  GAP_FT,
-  AT_HIM_FT,
-  TRIPLE_GAP_FT,
+  GATHER_MS,
+  LEG_MARGIN_MS,
+  THIRD_MARGIN_MS,
   catchFly,
   AIR_RANGE,
   DIVE_REACH,
@@ -162,81 +162,97 @@ describe('placing the ball', () => {
   });
 });
 
-describe('the stretch', () => {
-  const inSpace = { gapFt: GAP_FT + 10, inTheGap: true, distFt: 340, dirDeg: -10, zone: 'left-center' as const, fielderNum: 7, wallFt: 400 };
-  const atHim = { gapFt: 5, inTheGap: false, distFt: 250, dirDeg: -10, zone: 'left' as const, fielderNum: 7, wallFt: 400 };
+/**
+ * THE BASES ON A HIT ARE RUN OUT (2026-09-28). The table says hit or out; the
+ * ball rolls, somebody runs it down, and the batter takes what his legs beat
+ * the throw to. Playtest: "Triple when the scene looks like a single."
+ */
+describe('the bases are run out, not rolled', () => {
+  const inPlay = (h: HitResult) => ({ kind: 'in_play' as const, hit: h });
+  /** A table hit nobody catches: a 100mph liner into the left-center gap. */
+  const gapper = hit({ outcome: 'single', exitVelocity: 100, launchAngle: 16, direction: -16 });
 
-  it('a deep single in space becomes a double', () => {
-    expect(stretch('single', inSpace)).toBe('double');
+  it('somebody runs down every fair hit that got to the grass, after it came down', () => {
+    const rng = makeRng(8);
+    let seen = 0;
+    for (let i = 0; i < 600; i++) {
+      const h = hit({ exitVelocity: rng.range(60, 110), launchAngle: rng.range(-10, 40), direction: rng.range(-44, 44) });
+      const p = place(h);
+      if (!p.pickup) continue;
+      seen++;
+      expect(p.fielderNum).toBe(p.pickup.num);
+      expect(p.pickup.ms).toBeGreaterThanOrEqual(p.pickup.runMs + GATHER_MS - 1e-6);
+      // It is picked up on its line, no nearer home than the infield dirt.
+      expect(p.pickup.alongFt).toBeGreaterThan(100);
+      if (h.launchAngle >= GROUND_ANGLE) expect(p.pickup.alongFt).toBeGreaterThanOrEqual(p.distFt - 1e-6);
+    }
+    expect(seen).toBeGreaterThan(50);
   });
 
-  it('a single hit right at somebody stays a single', () => {
-    expect(stretch('single', atHim)).toBe('single');
+  it('a grounder through the infield is the outfielders\' ball, and a single for an average runner', () => {
+    const p = place(hit({ outcome: 'single', exitVelocity: 100, launchAngle: -2, direction: 8 }));
+    expect(p.cutOff?.past).toBe(true);
+    expect(p.pickup!.num).toBeGreaterThanOrEqual(7);
+    expect(legs(p, 1, () => 1)).toBe(1);
   });
 
-  it('a double hit right at somebody is held to a single', () => {
-    expect(stretch('double', atHim)).toBe('single');
+  it('ignores the hit type the table rolled: same ball, same bases', () => {
+    const kinds = (['single', 'double', 'triple'] as const).map((outcome) => {
+      const r = withPlacement(inPlay({ ...gapper, outcome }));
+      return r.result.kind === 'in_play' ? r.result.hit.outcome : null;
+    });
+    expect(new Set(kinds).size).toBe(1);
   });
 
-  it('⚠️ geometry NEVER awards a triple', () => {
-    for (const dist of [200, 340, 420]) {
-      for (const gap of [0, 80, 150, 300]) {
-        const p = { ...inSpace, distFt: dist, gapFt: gap, inTheGap: gap >= GAP_FT };
-        expect(stretch('double', p)).not.toBe('triple');
-        expect(stretch('single', p)).not.toBe('triple');
-      }
+  it('never touches a home run or an out the defence made', () => {
+    const hr = withPlacement(inPlay(hit({ outcome: 'home_run', exitVelocity: 108, launchAngle: 28 })));
+    expect(hr.result.kind === 'in_play' && hr.result.hit.outcome).toBe('home_run');
+    const rng = makeRng(3);
+    for (let i = 0; i < 300; i++) {
+      const h = hit({ outcome: 'line_out', isHit: false, isOut: true, exitVelocity: rng.range(60, 105), launchAngle: rng.range(12, 60), direction: rng.range(-40, 40) });
+      const r = withPlacement(inPlay(h));
+      if (r.placement?.airCatch?.caught) expect(r.result.kind === 'in_play' && r.result.hit.isOut).toBe(true);
     }
   });
 
-  it('a triple is held to a double unless it is genuinely in space', () => {
-    expect(stretch('triple', { ...inSpace, gapFt: TRIPLE_GAP_FT - 1, inTheGap: false })).toBe('double');
-    expect(stretch('triple', inSpace)).toBe('triple');
-  });
-
-  /**
-   * ⚠️ THE REGRESSION THIS FILE DID NOT HAVE, and the reason the game had no
-   * triples at all for weeks. Every test above builds a Placement by hand, so
-   * all of them passed while the bar sat at a gap distance no real batted ball
-   * could reach: the triple branch asked for 128ft and the balls the table
-   * calls a triple top out at 128.3ft, so three in 4,706 survived.
-   *
-   * The fix is not a number, it is testing the two halves TOGETHER. Nothing
-   * that hand-builds a Placement can catch a bar the geometry cannot clear.
-   */
-  it('⚠️ triples SURVIVE the geometry — the bar has to be reachable', () => {
-    const rng = makeRng(20260828);
-    const stats = { power: 1.0, contact: 1.0, vision: 1.0, clutch: 1.0, bunt: 1.0, speed: 1.0 };
-    let hits = 0;
-    let triples = 0;
-    for (let i = 0; i < 30000; i++) {
-      const res = resolveSwing(
-        {
-          offsetMs: rng.range(-60, 60),
-          pitchType: 'fastball',
-          stats,
-        } as SwingInput,
-        rng,
-      );
-      if (!res.isHit) continue;
-      hits++;
-      if (stretch(res.outcome, place(res)) === 'triple') triples++;
-    }
-    // A triple is ~1.7% of hits in real baseball. The point of the assertion is
-    // the lower bound: it must not be zero.
-    expect(triples).toBeGreaterThan(0);
-    expect(triples / hits).toBeGreaterThan(0.005);
-    expect(triples / hits).toBeLessThan(0.04);
-  });
-
-  it('never touches a home run or an out', () => {
-    for (const o of ['home_run', 'ground_out', 'popup', 'line_out', 'strikeout', 'foul'] as Outcome[]) {
-      expect(stretch(o, inSpace)).toBe(o);
-      expect(stretch(o, atHim)).toBe(o);
+  it('legs buy bases and arms take them away, never the other way round', () => {
+    const rng = makeRng(21);
+    for (let i = 0; i < 400; i++) {
+      const p = place(hit({ exitVelocity: rng.range(80, 112), launchAngle: rng.range(5, 30), direction: rng.range(-40, 40) }));
+      if (!p.pickup) continue;
+      expect(legs(p, 1.3, () => 1)).toBeGreaterThanOrEqual(legs(p, 0.7, () => 1));
+      expect(legs(p, 1, () => 1.2)).toBeLessThanOrEqual(legs(p, 1, () => 0.8));
     }
   });
 
-  it('AT_HIM_FT sits below GAP_FT, or the two rules would contradict', () => {
-    expect(AT_HIM_FT).toBeLessThan(GAP_FT);
+  it('third is taken only with far more to spare than second', () => {
+    expect(THIRD_MARGIN_MS).toBeGreaterThan(LEG_MARGIN_MS);
+  });
+
+  it('makes doubles common and triples rare, the way the game is', () => {
+    const rng = makeRng(77);
+    const n = { single: 0, double: 0, triple: 0 };
+    for (let i = 0; i < 40000; i++) {
+      const h = resolveSwing({
+        offsetMs: rng.range(-90, 90),
+        pitchType: 'fastball',
+        stats: { power: 0.7 + rng.next() * 0.9, contact: 0.7 + rng.next() * 0.6, clutch: 1 },
+        batterHand: rng.next() < 0.4 ? 'L' : 'R',
+        pitcherHand: 'R',
+        foulBoost: FOUL_BOOST,
+      }, rng);
+      if (h.outcome === 'foul' || h.outcome === 'foul_out') continue;
+      const r = withPlacement(inPlay(h));
+      const o = r.result.kind === 'in_play' ? r.result.hit.outcome : null;
+      if (o === 'single' || o === 'double' || o === 'triple') n[o]++;
+    }
+    const all = n.single + n.double + n.triple;
+    // A raw sample: league-average legs and no stretches, both of which add
+    // doubles in a real game. scripts/balance.ts measures the game's own mix.
+    expect(n.double / all).toBeGreaterThan(0.06);
+    expect(n.double / all).toBeLessThan(0.3);
+    expect(n.triple / all).toBeGreaterThan(0.005);
+    expect(n.triple / all).toBeLessThan(0.05);
   });
 });
 
