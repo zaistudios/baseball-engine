@@ -19,6 +19,7 @@ import {
   regularDays,
   resultsOn,
   schedule,
+  series,
   seasonEnd,
   seasonOver,
   seeds,
@@ -105,7 +106,7 @@ describe('the schedule', () => {
    * doubled up, or end the year with more home games than road ones.
    */
   it.each(LENGTHS.map((o) => o.games))('is a whole, balanced schedule at %i games', (n) => {
-    const days = schedule(n, ABBRS);
+    const days = series(n, ABBRS, 12345);
     expect(days).toHaveLength(n);
     for (const [i, day] of days.entries()) {
       expect(day, `day ${i}`).toHaveLength(ABBRS.length / 2);
@@ -114,14 +115,34 @@ describe('the schedule', () => {
     for (const abbr of ABBRS) {
       const games = flat(days).filter((g) => g.home === abbr || g.away === abbr);
       expect(games, abbr).toHaveLength(n);
-      // Even lengths are dealt as whole home-and-away pairs, so the split is
-      // exact — see LENGTHS on why every option is even.
-      expect(games.filter((g) => g.home === abbr).length, abbr).toBe(n / 2);
+      // Greedy, not exact — see series().
+      expect(Math.abs(games.filter((g) => g.home === abbr).length - n / 2), abbr).toBeLessThanOrEqual(2);
     }
+  });
+
+  it('deals a different year from a different seed, in series', () => {
+    const run = (seed: number): string =>
+      series(20, ABBRS, seed).map((d) => d.find((g) => g.home === ABBRS[0] || g.away === ABBRS[0])!).map((g) => g.home + g.away).join();
+    expect(run(1)).not.toBe(run(2));
+    expect(run(1)).toBe(run(1));
+    // Series, not one-offs: most days repeat the day before's opponent.
+    const days = series(60, ABBRS, 1);
+    const repeats = days.slice(1).filter((d, i) => {
+      const was = days[i]!.find((g) => g.home === ABBRS[0] || g.away === ABBRS[0])!;
+      const is = d.find((g) => g.home === ABBRS[0] || g.away === ABBRS[0])!;
+      return new Set([was.home, was.away, is.home, is.away]).size === 2;
+    });
+    expect(repeats.length).toBeGreaterThan(30);
+  });
+
+  it('keeps an old save on the fixtures it was already playing', () => {
+    const { fixtures: _, ...old } = newSeason('ALB', 7, DEFAULT_GAMES);
+    expect(gamesOn(old, 0)).toEqual(DAYS[0]);
   });
 
   it('never asks a club to face itself, even past the rotation wrap', () => {
     for (const g of flat(schedule(MAX_GAMES, ABBRS))) expect(g.home).not.toBe(g.away);
+    for (const g of flat(series(MAX_GAMES, ABBRS, 9))) expect(g.home).not.toBe(g.away);
   });
 });
 

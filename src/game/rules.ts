@@ -35,22 +35,25 @@
 import { TALENT_SPREAD } from './tuning.ts';
 import { FORM_SWING } from './form.ts';
 
-/** How long the regular season runs. See schedule() in franchise.ts. */
+/**
+ * THE LENGTH OF A SEASON SAVED BEFORE LENGTHS WERE PICKED, and nothing else.
+ * Old saves and old career years fall back to it; a new franchise defaults to
+ * DEFAULT_RULES.games.
+ */
 export const DEFAULT_GAMES = 14;
 
 /** The longest year the picker offers, and the ceiling a save is clamped to. */
 export const MAX_GAMES = 162;
 
 /**
- * ⚠️ EVERY LENGTH IS EVEN, and that is a requirement rather than a taste. The
- * schedule is laid down in HOME-AND-AWAY PAIRS, so an odd length would cut the
- * last pair in half and hand one club a home game the other never gets back.
+ * Odd lengths are fine now: series() balances home games greedily rather than
+ * in home-and-away pairs. Only the legacy schedule() needed even.
  */
 export const LENGTHS: readonly { games: number; blurb: string }[] = [
-  { games: DEFAULT_GAMES, blurb: 'an afternoon — seven clubs, home and away' },
-  { games: 28, blurb: 'fourteen rivals, twice each' },
-  { games: 56, blurb: 'almost the whole league, home and away' },
-  { games: 100, blurb: 'everybody twice, and then some' },
+  { games: 20, blurb: 'a quick run — half a dozen series' },
+  { games: 40, blurb: 'a summer — a dozen-odd clubs, some twice' },
+  { games: 60, blurb: 'a short season — the whole league once over' },
+  { games: 81, blurb: 'half the slate — the long way round' },
   { games: MAX_GAMES, blurb: 'the real slate — sim the ones you skip' },
 ];
 
@@ -87,7 +90,7 @@ export interface Rules {
 }
 
 export const DEFAULT_RULES: Rules = {
-  games: DEFAULT_GAMES,
+  games: 20,
   parity: TALENT_SPREAD,
   streak: FORM_SWING,
   offence: 1,
@@ -196,7 +199,7 @@ export function cleanRules(raw: unknown, clubs?: number): Rules {
   ): number => (among.some((c) => c.value === v) ? (v as number) : fallback);
 
   return {
-    games: num(r.games, 2, MAX_GAMES, DEFAULT_GAMES),
+    games: num(r.games, 2, MAX_GAMES, DEFAULT_RULES.games),
     parity: num(r.parity, 0, 1, DEFAULT_RULES.parity),
     streak: num(r.streak, 0, 0.5, DEFAULT_RULES.streak),
     offence: num(r.offence, 0.7, 1.4, DEFAULT_RULES.offence),

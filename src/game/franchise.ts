@@ -69,6 +69,7 @@ import { reliefWork } from './bullpen.ts';
 import { boxScore } from './game.ts';
 import { EMPTY_BOOK, merge, type StatBook } from './stats.ts';
 import type { Pitcher } from '../core/pitcher.ts';
+import { makeRng } from '../core/rng.ts';
 
 export interface Matchup {
   /** Three-letter abbrs, per teams.ts. */
@@ -173,6 +174,12 @@ export interface Season {
   rules?: Rules;
   /** Seeds every headless game, so a reloaded season plays out identically. */
   seed: number;
+  /**
+   * WHICH SCHEDULE BUILDER DEALT THIS YEAR. 2 = seeded series (see series());
+   * absent = the old fixed two-game rotation. Optional so a season saved before
+   * the change resumes on the fixtures it was already playing.
+   */
+  fixtures?: 2;
   /** Every club as this season has them, by abbr. See the header. */
   rosters: Readonly<Record<string, Team>>;
   results: readonly Result[];
@@ -320,6 +327,65 @@ export function schedule(
 }
 
 /**
+ * THE SCHEDULE AS A SEASON ACTUALLY LOOKS: series of two, three or four games,
+ * dealt from the season's seed — so no two
+ * franchises open against the same clubs in the same order, and a long year
+ * does not replay the same twenty-nine-round cycle.
+ *
+ * Still the circle method, so every club plays every day. Each lap of the
+ * rotation is dealt from a fresh shuffle of the clubs, which is what varies
+ * who follows whom when a long season comes round again. The club owed home
+ * games gets as many of the series as it takes to draw level — the whole thing
+ * if it is far enough behind, a split across both parks if the two are even.
+ * That keeps every club within a game or two of even at any length, odd ones
+ * included.
+ *
+ * ponytail: greedy home balance, not an exact one. A solver if anyone ever
+ * counts.
+ */
+export function series(
+  games: number,
+  abbrs: readonly string[],
+  seed: number,
+): readonly (readonly Matchup[])[] {
+  const key = `s${seed}|${games}|${abbrs.join(',')}`;
+  const hit = CACHE.get(key);
+  if (hit) return hit;
+  const rng = makeRng(seed ^ 0x5eed);
+  const n = abbrs.length;
+  const homes = new Map(abbrs.map((a) => [a, 0]));
+  const days: Matchup[][] = [];
+  while (days.length < games) {
+    const order = [...abbrs];
+    for (let i = n - 1; i > 0; i--) {
+      const j = rng.int(0, i);
+      [order[i], order[j]] = [order[j]!, order[i]!];
+    }
+    for (let r = 0; r < n - 1 && days.length < games; r++) {
+      const len = rng.pick([2, 3, 3, 3, 4]);
+      // Each pair: the club owed home games (h) hosts the first k of the
+      // series, k chosen to level the two; the rest are at the other park.
+      const pairs = Array.from({ length: n / 2 }, (_, i) => {
+        const a = order[i]!;
+        const b = order[n - 1 - i]!;
+        const [h, v] = homes.get(a)! < homes.get(b)! || (homes.get(a) === homes.get(b) && rng.next() < 0.5) ? [a, b] : [b, a];
+        const k = Math.min(len, Math.ceil((len + homes.get(v)! - homes.get(h)!) / 2));
+        return { h, v, k };
+      });
+      for (let g = 0; g < len && days.length < games; g++) {
+        const day = pairs.map(({ h, v, k }) => (g < k ? { home: h, away: v } : { home: v, away: h }));
+        days.push(day);
+        for (const m of day) homes.set(m.home, homes.get(m.home)! + 1);
+      }
+      // Rotate everyone but slot 0 — the circle method.
+      order.splice(1, 0, order.pop()!);
+    }
+  }
+  CACHE.set(key, days);
+  return days;
+}
+
+/**
  * THE CLUBS THIS SEASON IS PLAYED BETWEEN, in the order it was built with.
  *
  * ⚠️ NOT SORTED, AND NOT `LEAGUE`. The schedule is dealt off this order, so
@@ -388,6 +454,7 @@ export const newSeason = (
     you,
     day: 0,
     seed,
+    fixtures: 2,
     games,
     rules: r,
     // ⚠️ THE SEASON'S ROSTERS ARE BUILT UNDER ITS OWN RULES, and this is the
@@ -576,7 +643,10 @@ function survivors(s: Season, round: number): string[] {
  * and the majority plus the last game is that.
  */
 export function gamesOn(s: Season, day: number = s.day): readonly Matchup[] {
-  if (day < regularDays(s)) return schedule(regularDays(s), clubsIn(s))[day] ?? [];
+  if (day < regularDays(s)) {
+    const n = regularDays(s);
+    return (s.fixtures === 2 ? series(n, clubsIn(s), s.seed) : schedule(n, clubsIn(s)))[day] ?? [];
+  }
 
   // ⚠️ THERE IS NO BRACKET UNTIL THE SCHEDULE IS PLAYED OUT. seeds() will
   // happily hand back a top four of a table that is all zeroes — sorted on the
@@ -1062,7 +1132,7 @@ export function loadSeason(): Season | null {
     // a franchise saved in a thirty-club world keeps its eight-club bracket
     // even if a four-club league has been imported since.
     const rules = cleanRules(
-      { ...(s.rules ?? {}), games: s.rules?.games ?? s.games },
+      { ...(s.rules ?? {}), games: s.rules?.games ?? s.games ?? DEFAULT_GAMES },
       abbrs.length,
     );
     const games = s.rules?.games ?? s.games ?? DEFAULT_GAMES;
@@ -1110,6 +1180,7 @@ export function loadSeason(): Season | null {
       you: s.you,
       day: s.day,
       seed: s.seed,
+      ...(s.fixtures === 2 ? { fixtures: 2 as const } : {}),
       games,
       rules,
       // Narrowed at the top of this function, where `abbrs` was read off it.
