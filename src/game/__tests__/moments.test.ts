@@ -11,18 +11,36 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { newSeason, regularDays, standings, teamOf, loadSeason, saveSeason, type Season } from '../franchise.ts';
-import { momentOn, decide, valueShift, momentDays, FAIR } from '../moments.ts';
+import { momentOn, decide, valueShift, momentDays, anchorPlan, FAIR, FLOOR_IDS } from '../moments.ts';
 import { clubValue } from '../value.ts';
 import { LEAGUE } from '../teams.ts';
 import { simulateGame } from '../sim.ts';
 
 const GAMES14 = regularDays(newSeason('ALB', 0));
-const DAYS14 = momentDays(newSeason('ALB', 0));
+// ⚠️ THE FLOOR'S DAYS ARE THE SEED'S, so these are read off the same seed at()
+// defaults to. A different seed is a different pair of days.
+const DAYS14 = momentDays(newSeason('ALB', 12345));
 
 const at = (you: string, day: number, seed = 12345): Season => ({
   ...newSeason(you, seed),
   day,
 });
+
+/**
+ * A season, on the day its floor asks `kind`, starting the search at `seed`.
+ * The floor is drawn per season, so a test about the deadline has to go and
+ * find a season whose draw included it.
+ */
+function onFloor(kind: string, you: string, seed: number): Season {
+  for (let k = seed; k < seed + 400; k++) {
+    const plan = anchorPlan(newSeason(you, k));
+    const i = plan.kinds.indexOf(kind);
+    if (i > 1) continue;
+    const s = at(you, plan.days[i]!, k);
+    if (momentOn(s)?.id === kind) return s;
+  }
+  throw new Error(`no season from ${seed} asks ${kind} for ${you}`);
+}
 
 describe('when they fire', () => {
   it('gives exactly two moments, both inside the regular season', () => {
@@ -46,9 +64,23 @@ describe('when they fire', () => {
     }
   });
 
-  it('offers the deadline first and the bench second', () => {
-    expect(momentOn(at('ALB', DAYS14[0]!))!.headline).toBe('THE DEADLINE');
-    expect(momentOn(at('ALB', DAYS14[1]!))!.headline).toBe('THE BENCH');
+  it('draws two different floor questions a season, on days of its own', () => {
+    // ⚠️ THIS REPLACED "the deadline first and the bench second", which was
+    // true of every season ever played and was the complaint.
+    const pairs = new Set<string>();
+    const firsts = new Set<number>();
+    for (let seed = 0; seed < 30; seed++) {
+      const [a, b] = momentDays(newSeason('ALB', seed));
+      const ma = momentOn(at('ALB', a!, seed));
+      const mb = momentOn(at('ALB', b!, seed));
+      expect(ma && FLOOR_IDS.includes(ma.id), `seed ${seed}`).toBe(true);
+      expect(mb && FLOOR_IDS.includes(mb.id), `seed ${seed}`).toBe(true);
+      expect(ma!.id).not.toBe(mb!.id);
+      pairs.add(`${ma!.id}/${mb!.id}`);
+      firsts.add(a!);
+    }
+    expect(pairs.size).toBeGreaterThan(6);
+    expect(firsts.size).toBeGreaterThan(2);
   });
 
   it('is the same offer on a reload — it is drawn from the season seed', () => {
@@ -106,13 +138,12 @@ describe('when they fire', () => {
 });
 
 describe('the deadline keeps the league legal and honest', () => {
-  const day = DAYS14[0]!;
+  const dl = (abbr: string, seed: number): Season => onFloor('deadline', abbr, seed);
 
   it('leaves BOTH clubs with nine hitters and a full staff', () => {
     for (const abbr of LEAGUE.map((t) => t.abbr)) {
-      const s = at(abbr, day, 4242);
-      const m = momentOn(s);
-      if (!m) continue;
+      const s = dl(abbr, 4242);
+      const m = momentOn(s)!;
       for (let i = 0; i < m.choices.length; i++) {
         const after = decide(s, m, i);
         for (const t of LEAGUE) {
@@ -126,9 +157,8 @@ describe('the deadline keeps the league legal and honest', () => {
 
   it('never leaves the same man on two rosters, or on none', () => {
     for (const abbr of ['ALB', 'DET', 'MNE', 'NYE', 'OKC']) {
-      const s = at(abbr, day, 777);
-      const m = momentOn(s);
-      if (!m) continue;
+      const s = dl(abbr, 777);
+      const m = momentOn(s)!;
       for (let i = 0; i < m.choices.length; i++) {
         const after = decide(s, m, i);
         const ids = LEAGUE.flatMap((t) => teamOf(after, t.abbr).lineup.map((p) => p.id));
@@ -140,20 +170,20 @@ describe('the deadline keeps the league legal and honest', () => {
 
   it('moves your roster value by less than FAIR — the whole promise', () => {
     for (const abbr of LEAGUE.map((t) => t.abbr)) {
-      const s = at(abbr, day, 31337);
-      const m = momentOn(s);
-      if (!m) continue;
+      const s = dl(abbr, 31337);
+      const m = momentOn(s)!;
       for (let i = 0; i < m.choices.length; i++) {
         expect(Math.abs(valueShift(s, decide(s, m, i))), `${abbr}/${i}`).toBeLessThanOrEqual(FAIR);
       }
     }
   });
 
-  it('...and moves the OTHER club by the mirror of it, so the league is flat', () => {
-    // The identity from moments.ts's header: with 9 and 3 on both sides the
-    // two deltas are exact negatives. If this breaks, trading became a way to
+  it('...and moves the OTHER club by no more than FAIR either, so the league is flat', () => {
+    // The 2-for-2 gets an exact mirror (see moments.ts's header); a 1-for-1
+    // between staffs of different sizes does not, so oneForOne() prices the
+    // partner's side too. Either way: if this breaks, trading became a way to
     // farm the AI.
-    const s = at('MNE', day, 8080);
+    const s = dl('MNE', 8080);
     const m = momentOn(s)!;
     for (let i = 0; i < m.choices.length; i++) {
       const after = decide(s, m, i);
@@ -163,28 +193,39 @@ describe('the deadline keeps the league legal and honest', () => {
         (a) => a !== 'MNE' && clubValue(teamOf(after, a)) !== clubValue(teamOf(s, a)),
       )!;
       const theirs = clubValue(teamOf(after, partner)) - clubValue(teamOf(s, partner));
-      expect(theirs).toBeCloseTo(-mine, 10);
+      expect(Math.abs(theirs)).toBeLessThanOrEqual(FAIR + 1e-9);
     }
   });
 
   it('actually changes the club — a trade is not a no-op dressed as one', () => {
-    const s = at('ALB', day, 55);
+    const s = dl('ALB', 55);
     const m = momentOn(s)!;
     const trades = m.choices.filter((c) => c.label !== 'STAND PAT');
     expect(trades.length).toBeGreaterThan(0);
-    for (const c of trades) {
-      const before = teamOf(s, 'ALB').lineup.map((p) => p.id).join(',');
-      const after = teamOf(c.apply(s), 'ALB').lineup.map((p) => p.id).join(',');
-      expect(after).not.toBe(before);
+    const names = (x: Season): string => {
+      const t = teamOf(x, 'ALB');
+      return [...t.lineup, ...t.rotation, ...t.bullpen].map((p) => p.name).join(',');
+    };
+    for (const c of trades) expect(names(c.apply(s))).not.toBe(names(s));
+  });
+
+  it('comes in more than one shape across seasons', () => {
+    // ⚠️ IT WAS ALWAYS A BAT-AND-ARM EACH WAY. Now the shapes are drawn.
+    const shapes = new Set<string>();
+    for (const seed of [1, 500, 1000, 1500, 2000, 2500]) {
+      for (const c of momentOn(dl('ALB', seed))!.choices) {
+        if (c.label !== 'STAND PAT') shapes.add(c.detail.includes('straight up') ? 'one' : 'two');
+      }
     }
+    expect(shapes).toEqual(new Set(['one', 'two']));
   });
 });
 
 describe('the bench changes how you play and nothing else', () => {
-  const day = DAYS14[1]!;
+  const bn = (abbr: string, seed: number): Season => onFloor('bench', abbr, seed);
 
   it('does not move a single rating', () => {
-    const s = at('DET', day);
+    const s = bn('DET', 12345);
     const m = momentOn(s)!;
     for (let i = 0; i < m.choices.length; i++) {
       const after = decide(s, m, i);
@@ -196,9 +237,8 @@ describe('the bench changes how you play and nothing else', () => {
 
   it('never offers you the manager you already have', () => {
     for (const abbr of LEAGUE.map((t) => t.abbr)) {
-      const s = at(abbr, day, 606);
-      const m = momentOn(s);
-      if (!m) continue;
+      const s = bn(abbr, 606);
+      const m = momentOn(s)!;
       const current = teamOf(s, abbr).identity!.name;
       const hires = m.choices.filter((c) => c.label !== 'PROMOTE INSIDE');
       for (const c of hires) expect(c.label, abbr).not.toBe(current);
@@ -207,7 +247,7 @@ describe('the bench changes how you play and nothing else', () => {
   });
 
   it('the hire is what the club plays as afterwards', () => {
-    const s = at('DET', day);
+    const s = bn('DET', 12345);
     const m = momentOn(s)!;
     const after = decide(s, m, 0);
     expect(teamOf(after, 'DET').identity!.name).toBe(m.choices[0]!.label);
@@ -215,7 +255,7 @@ describe('the bench changes how you play and nothing else', () => {
 
   it('and the new bench reaches the ball game', () => {
     // End to end: hire a running man in Detroit and the games change.
-    const s = at('DET', day, 2026);
+    const s = bn('DET', 2026);
     const m = momentOn(s)!;
     const after = decide(s, m, 0);
     let differed = 0;

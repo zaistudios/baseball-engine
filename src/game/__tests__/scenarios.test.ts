@@ -19,7 +19,7 @@ import {
   type Result,
   type Season,
 } from '../franchise.ts';
-import { momentOn, decide, momentDays } from '../moments.ts';
+import { momentOn, decide, momentDays, FLOOR_IDS } from '../moments.ts';
 
 import { clubValue } from '../value.ts';
 import type { BatLine, ArmLine } from '../stats.ts';
@@ -220,14 +220,14 @@ describe('asking once, and not every morning', () => {
     expect(momentOn({ ...cold(), decided: [11] })).toBeNull();
   });
 
-  it('gives the dated pair their day however loud the season is', () => {
+  it('gives the floor its day however loud the season is', () => {
     // ⚠️ THE DEADLINE HAS ONE DAY A YEAR AND IT KEPT LOSING IT. The scheduled
     // two used to be the last rows of one list, so a man hitting .164 on the
     // deadline itself took the day and the trade never happened — measured at
     // 18 seasons in 40. They are checked first on their own day now, and ahead
     // of the rest gate, so an earned moment three days earlier cannot eat it
     // either.
-    for (const [i, day] of momentDays(newSeason('ALB', 7, 28)).entries()) {
+    for (const day of momentDays(newSeason('ALB', 4242, 28))) {
       const s = played('ALB', 12);
       const you = teamOf(s, 'ALB');
       // ...and asked yesterday, so the rest gate is against it as well.
@@ -235,7 +235,7 @@ describe('asking once, and not every morning', () => {
         [you.lineup[3]!.name]: bat({ pa: 60, ab: 55, h: 9 }), // .164, slumping
         [(you.bench ?? [])[0]!.name]: bat({ pa: 22, ab: 20, h: 8 }), // .400, sitting
       });
-      expect(kind(momentOn(loud)?.id), `day ${day}`).toBe(['deadline', 'bench'][i]);
+      expect(FLOOR_IDS, `day ${day}`).toContain(momentOn(loud)?.id);
     }
   });
 
@@ -243,8 +243,8 @@ describe('asking once, and not every morning', () => {
     for (let d = 0; d < 14; d++) {
       const fresh = { ...newSeason('ALB', 7, 28), day: d };
       const m = momentOn(fresh, d);
-      // The scheduled two still fire on their days; nothing else may.
-      if (m) expect(['deadline', 'bench']).toContain(m.id);
+      // The floor still fires on its days; nothing else may.
+      if (m) expect(FLOOR_IDS).toContain(m.id);
     }
   });
 });
