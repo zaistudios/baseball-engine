@@ -176,6 +176,12 @@ const HUMAN_TONES: readonly Tone[] = [
   { name: 'dark', hex: '#3a2418' },
 ];
 
+/**
+ * ⚠️ THE TAIL OF EACH LIST IS ART-PACK SLOTS WAITING FOR DRAWINGS (2026-10-03,
+ * the retro spec's taxonomy). Until a file lands they draw the shell the
+ * switch's `default`/`else` already draws — a placeholder, never an error —
+ * and the roll never deals them (BASE_COUNTS), so no saved face changes.
+ */
 export const PARTS: Record<Build, PartSet> = {
   human: {
     frames: [
@@ -187,8 +193,10 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'enormous', w: 1.3, h: 1.04 },
       { name: 'athletic', w: 1.05, h: 1.04 },
       { name: 'stocky', w: 1.15, h: 0.94 },
+      { name: 'wool veteran', w: 1.06, h: 0.98 },
+      { name: 'pinstripe classic', w: 1.0, h: 1.02 },
     ],
-    heads: ['round', 'square', 'narrow', 'weathered', 'chiseled'],
+    heads: ['round', 'square', 'narrow', 'weathered', 'chiseled', 'heavy brow'],
     crests: [
       'bare',
       'cap',
@@ -198,6 +206,8 @@ export const PARTS: Record<Build, PartSet> = {
       'high fade',
       'ponytail',
       'backward cap',
+      'pine-tar helmet',
+      'stirrup flap',
     ],
     tones: HUMAN_TONES,
   },
@@ -210,8 +220,10 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'grafted', w: 1.34, h: 1.06 },
       { name: 'cyber-heavy', w: 1.28, h: 1.05 },
       { name: 'streamlined', w: 0.95, h: 1.06 },
+      { name: 'pneumatic spine', w: 1.1, h: 1.04 },
+      { name: 'carbon chassis', w: 1.0, h: 1.02 },
     ],
-    heads: ['round', 'square', 'narrow', 'scanner jaw', 'augmented ocular'],
+    heads: ['round', 'square', 'narrow', 'scanner jaw', 'augmented ocular', 'monocle HUD', 'bionic optic'],
     crests: [
       'half-visor',
       'port',
@@ -220,6 +232,8 @@ export const PARTS: Record<Build, PartSet> = {
       'full-visor',
       'cranial port',
       'neural fins',
+      'neural uplink',
+      'sensory brow',
     ],
     tones: HUMAN_TONES,
   },
@@ -231,8 +245,11 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'foundry unit', w: 1.42, h: 1.08 },
       { name: 'scout frame', w: 0.92, h: 1.02 },
       { name: 'titan chassis', w: 1.35, h: 1.12 },
+      { name: 'steam boiler', w: 1.38, h: 1.0 },
+      { name: 'tracked base', w: 1.3, h: 0.96 },
+      { name: 'monowheel', w: 0.94, h: 1.06 },
     ],
-    heads: ['optic slit', 'single lens', 'dual optic', 'matrix array'],
+    heads: ['optic slit', 'single lens', 'dual optic', 'matrix array', 'CRT monitor face', 'sensor cluster'],
     crests: [
       'flat crown',
       'vent stack',
@@ -241,6 +258,7 @@ export const PARTS: Record<Build, PartSet> = {
       'cooling fins',
       'twin antennae',
       'exhaust array',
+      'warning siren',
     ],
     tones: [
       { name: 'steel', hex: '#9aa2aa' },
@@ -248,6 +266,7 @@ export const PARTS: Record<Build, PartSet> = {
       { name: 'gunmetal', hex: '#6a7078' },
       { name: 'brass', hex: '#8a7a5c' },
       { name: 'slate', hex: '#5c6068' },
+      { name: 'oxide rust', hex: '#8a4a2c' },
     ],
   },
 };
@@ -934,13 +953,25 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
       ctx.beginPath();
       ctx.arc(headR * 0.35, headY, headR * 0.28, 0, Math.PI * 2);
       ctx.fill();
-    } else {
+    } else if (look.head === 3) {
       // Matrix array (green LED sensor grid)
       ctx.fillStyle = '#10b981';
       for (let r = 0; r < 2; r++) {
         for (let c = 0; c < 3; c++) {
           ctx.fillRect(-headR * 0.5 + c * headR * 0.38, headY - headR * 0.25 + r * headR * 0.35, Math.max(1, headR * 0.18), Math.max(1, headR * 0.18));
         }
+      }
+    } else if (look.head === 4) {
+      // ponytail: placeholder shell until the art pack draws a CRT monitor face.
+      box(-headR * 0.8, headY - headR * 0.6, headR * 1.6, headR * 1.15, '#1f3d2a');
+      box(-headR * 0.6, headY - headR * 0.1, headR * 1.2, Math.max(1, headR * 0.12), '#6fbf62');
+    } else {
+      // ponytail: placeholder shell until the art pack draws a sensor cluster.
+      ctx.fillStyle = '#d8813a';
+      for (const [dx, dy] of [[-0.4, 0.2], [0.4, 0.2], [0, -0.35]] as const) {
+        ctx.beginPath();
+        ctx.arc(headR * dx, headY + headR * dy, Math.max(1, headR * 0.2), 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   } else {
@@ -963,6 +994,11 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
       ctx.fillStyle = 'rgba(40,30,20,0.35)';
       ctx.fillRect(headR * 0.08, headY + headR * 0.38, headR * 0.42, Math.max(1, headR * 0.1));
     }
+    // ponytail: placeholder shell until the art pack draws a heavy brow.
+    if (look.head === 5 && o.build === 'human') {
+      ctx.fillStyle = 'rgba(30,20,14,0.6)';
+      ctx.fillRect(headR * 0.1, headY - headR * 0.12, headR * 0.75, Math.max(1, headR * 0.16));
+    }
     // Augmented: scanner jaw (head 3) or augmented ocular (head 4)
     if (o.build === 'augmented') {
       if (look.head === 3) {
@@ -977,6 +1013,17 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
         ctx.beginPath();
         ctx.arc(headR * 0.55, headY + headR * 0.2, headR * 0.2, 0, Math.PI * 2);
         ctx.fill();
+      } else if (look.head === 5) {
+        // ponytail: placeholder shell until the art pack draws a monocle HUD.
+        ctx.strokeStyle = '#d8b44a';
+        ctx.lineWidth = Math.max(1, headR * 0.1);
+        ctx.beginPath();
+        ctx.arc(headR * 0.45, headY + headR * 0.18, headR * 0.32, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (look.head === 6) {
+        // ponytail: placeholder shell until the art pack draws a bionic optic.
+        ctx.fillStyle = '#e53935';
+        ctx.fillRect(headR * 0.25, headY + headR * 0.02, headR * 0.45, headR * 0.3);
       }
     }
   }
@@ -1115,6 +1162,14 @@ function drawCrest(
         ctx.fillRect(-r * 0.5, headY - r * 2.3, px(r * 0.16), r * 1.2);
         ctx.fillRect(r * 0.4, headY - r * 2.3, px(r * 0.16), r * 1.2);
         break;
+      case 7: // ponytail: placeholder shell until the art pack draws a warning siren.
+        ctx.fillStyle = u.trim;
+        ctx.fillRect(-r * 0.25, headY - r * 1.35, r * 0.5, px(r * 0.2));
+        ctx.fillStyle = '#e53935';
+        ctx.beginPath();
+        ctx.arc(0, headY - r * 1.35, r * 0.4, Math.PI, 0);
+        ctx.fill();
+        break;
       default: // exhaust array
         ctx.fillStyle = '#475569';
         for (let i = 0; i < 4; i++) {
@@ -1159,6 +1214,18 @@ function drawCrest(
         ctx.fillRect(-r * 0.9, headY - r * 1.0, r * 0.55, r * 0.65);
         ctx.fillStyle = '#ffb300';
         ctx.fillRect(-r * 1.2, headY - r * 0.7, r * 0.4, px(r * 0.22));
+        break;
+      case 7: // ponytail: placeholder shell until the art pack draws a neural uplink.
+        ctx.fillStyle = '#9aa2aa';
+        ctx.fillRect(-r * 0.6, headY - r * 1.9, px(r * 0.14), r * 0.9);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(-r * 0.72, headY - r * 2.0, px(r * 0.38), px(r * 0.2));
+        break;
+      case 8: // ponytail: placeholder shell until the art pack draws a sensory brow.
+        ctx.fillStyle = '#78909c';
+        ctx.fillRect(-r * 0.7, headY - r * 0.55, r * 1.7, px(r * 0.22));
+        ctx.fillStyle = '#ffb300';
+        for (let i = 0; i < 3; i++) ctx.fillRect(-r * 0.4 + i * r * 0.5, headY - r * 0.52, px(r * 0.14), px(r * 0.14));
         break;
       default: // neural fins
         ctx.fillStyle = '#90a4ae';
@@ -1215,6 +1282,16 @@ function drawCrest(
       ctx.fillRect(-r * 1.2, headY + r * 0.05, r * 0.25, r * 0.25);
       ctx.fillStyle = hair;
       ctx.fillRect(-r * 1.5, headY + r * 0.15, r * 0.45, r * 0.95);
+      break;
+    case 8: // ponytail: placeholder shell until the art pack draws a pine-tar helmet.
+      cap(u.primary);
+      ctx.fillStyle = '#3a2a1c';
+      ctx.fillRect(-r * 0.9, headY - r * 0.75, r * 0.9, px(r * 0.3));
+      break;
+    case 9: // ponytail: placeholder shell until the art pack draws a stirrup flap.
+      cap(u.primary);
+      ctx.fillStyle = u.trim;
+      ctx.fillRect(-r * 1.06, headY - r * 0.1, r * 0.5, r * 0.9);
       break;
     default: // backward cap
       ctx.fillStyle = u.primary;

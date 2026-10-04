@@ -191,7 +191,7 @@ describe('an illegal look cannot break a pitch', () => {
    * numbers in it; a count would have passed against the bug.
    */
   it('draws a different head for every head part, on every build', () => {
-    const trace = (build: 'human' | 'augmented' | 'machine', head: number): string => {
+    const trace = (build: 'human' | 'augmented' | 'machine', head: number, crest = 0): string => {
       const calls: string[] = [];
       const ctx = new Proxy({} as Record<string, unknown>, {
         get: (_t, k: string) => {
@@ -206,7 +206,7 @@ describe('an illegal look cannot break a pitch', () => {
         },
       }) as unknown as CanvasRenderingContext2D;
       drawFigure(ctx, {
-        look: { frame: 0, head, crest: 0, tone: 0, number: 8, wear: 0 },
+        look: { frame: 0, head, crest, tone: 0, number: 8, wear: 0 },
         uniform: uniformFor(LEAGUE[0]!),
         build,
         x: 100,
@@ -220,6 +220,9 @@ describe('an illegal look cannot break a pitch', () => {
     for (const build of ['human', 'augmented', 'machine'] as const) {
       const drawn = PARTS[build].heads.map((_, i) => trace(build, i));
       expect(new Set(drawn).size, `${build} heads all draw the same`).toBe(drawn.length);
+      // And crests: a new slot waiting on art still needs a shell of its own.
+      const crests = PARTS[build].crests.map((_, i) => trace(build, 0, i));
+      expect(new Set(crests).size, `${build} crests all draw the same`).toBe(crests.length);
     }
   });
 
