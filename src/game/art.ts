@@ -161,10 +161,13 @@ export const slug = (text: string): string =>
  * amount of art" into about fifty files. Without it a cap is one colour forever
  * and every club needs its own.
  *
- * The three steps are the standard canvas tint and the order matters: multiply
- * lays the colour over the greyscale and keeps its shading, then
- * `destination-in` puts the original alpha back so the transparent margin does
- * not come out as a solid rectangle.
+ * ⚠️ IT IS A PALETTE REMAP, NOT A MULTIPLY. Multiply turned dark greys to
+ * sludge and killed every highlight — white chrome came out jersey-coloured.
+ * Retro hardware swapped palettes instead, and so does this: the grey of each
+ * pixel picks a shade off a three-stop ramp built from the kit colour —
+ * black → outline, mid grey → the colour itself, white → a specular near-white.
+ * Strict 4-shade pixel art (clear / #000 / #808080 / #fff) lands exactly on
+ * the stops; any other greyscale blends between them, so old packs still draw.
  *
  * ⚠️ IT IS CACHED BECAUSE THE DRAW PATH RUNS AT 60Hz. Re-tinting eleven figures
  * every frame is eleven offscreen canvases a frame; the GDD's own acceptance
@@ -186,14 +189,12 @@ export function tinted(id: string, colour: string): CanvasImageSource | undefine
   const c = document.createElement('canvas');
   c.width = img.width;
   c.height = img.height;
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', { willReadFrequently: true });
   if (!g) return img;
   g.drawImage(img, 0, 0);
-  g.globalCompositeOperation = 'multiply';
-  g.fillStyle = colour;
-  g.fillRect(0, 0, c.width, c.height);
-  g.globalCompositeOperation = 'destination-in';
-  g.drawImage(img, 0, 0);
+  const px = g.getImageData(0, 0, c.width, c.height);
+  remap(px.data, ramp(colour));
+  g.putImageData(px, 0, 0);
 
   // ponytail: clear the whole cache at the cap rather than evicting least-used.
   // It refills in one frame and an LRU here is bookkeeping for a Map that is
@@ -203,3 +204,33 @@ export function tinted(id: string, colour: string): CanvasImageSource | undefine
   return c;
 }
 
+type RGB = [number, number, number];
+
+/**
+ * The three stops a grey is read against: outline, base, highlight. The
+ * outline is the colour at a quarter strength (a shadow fold, not pure black);
+ * the highlight is 70% of the way to white, so chrome gleams in any kit.
+ * An unreadable colour falls back to plain grey rather than throwing.
+ */
+export function ramp(colour: string): [RGB, RGB, RGB] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(colour.trim());
+  const n = m ? parseInt(m[1]!, 16) : 0x808080;
+  const base: RGB = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return [
+    base.map((v) => Math.round(v * 0.25)) as RGB,
+    base,
+    base.map((v) => Math.round(v + (255 - v) * 0.7)) as RGB,
+  ];
+}
+
+/** Recolour RGBA pixels in place by luminance; alpha is left alone. */
+export function remap(px: Uint8ClampedArray, [lo, mid, hi]: [RGB, RGB, RGB]): void {
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] === 0) continue;
+    const l = (px[i]! * 299 + px[i + 1]! * 587 + px[i + 2]! * 114) / 255000;
+    const [a, b, t] = l < 0.5 ? [lo, mid, l * 2] : [mid, hi, l * 2 - 1];
+    px[i] = a[0] + (b[0] - a[0]) * t;
+    px[i + 1] = a[1] + (b[1] - a[1]) * t;
+    px[i + 2] = a[2] + (b[2] - a[2]) * t;
+  }
+}
