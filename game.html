@@ -8,14 +8,14 @@
       /* Canvas for the pitch, DOM for
          everything that is text. Text in a canvas is a thing you regret. */
       :root {
-        --ink: #e8e8d8;
-        --dim: #7a8a6a;
-        --line: #2f3a2a;
-        --bg: #0d1210;
-        --panel: #141b16;
-        --hot: #d8b44a;
-        --good: #6fbf62;
-        --bad: #c4574a;
+        --ink: #edf0f7;
+        --dim: #8b95a8;
+        --line: #2a3142;
+        --bg: #0b0d13;
+        --panel: #131722;
+        --hot: #f5be38;
+        --good: #38d9a9;
+        --bad: #e84a48;
       }
       * { box-sizing: border-box; margin: 0; }
       body {
@@ -42,18 +42,18 @@
 
       /* ---- scoreboard: styled as vintage stadium LED matrix */
       #scoreboard {
-        background: #080d0a;
-        border: 2px solid #273826;
+        background: #080a0f;
+        border: 2px solid #242a38;
         box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.85), 3px 3px 0 #000;
         padding: 6px 10px;
       }
       table.line { width: 100%; border-collapse: collapse; font-size: 11px; }
       table.line th, table.line td {
-        padding: 3px 5px; text-align: center; border-bottom: 1px solid #1a261c;
+        padding: 3px 5px; text-align: center; border-bottom: 1px solid #1a1e2b;
       }
       table.line th {
         font-family: "Press Start 2P", ui-monospace, monospace;
-        font-size: 8px; letter-spacing: 1px; color: #7f9970; font-weight: 400;
+        font-size: 8px; letter-spacing: 1px; color: #8895ad; font-weight: 400;
       }
       table.line td {
         font-family: ui-monospace, "Cascadia Mono", monospace;
@@ -66,9 +66,9 @@
       }
       table.line td.tot {
         color: var(--hot); font-weight: 700;
-        text-shadow: 0 0 6px rgba(216, 180, 74, 0.45);
+        text-shadow: 0 0 6px rgba(245, 190, 56, 0.45);
       }
-      tr.batting { background: rgba(216, 180, 74, 0.06); }
+      tr.batting { background: rgba(245, 190, 56, 0.08); }
       tr.batting td.team::before {
         content: "\25B8 "; color: var(--hot);
         animation: cursorblink 0.7s steps(1, end) infinite;
@@ -133,8 +133,8 @@
       }
       canvas {
         image-rendering: pixelated;
-        border: 2px solid #2a3828;
-        background: #09120c;
+        border: 2px solid #262c3c;
+        background: #07090f;
         box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.8), 3px 3px 0 #000;
         flex: 1 1 420px;
         max-width: 100%;
@@ -160,7 +160,7 @@
       /* ---- the bullpen, set apart from the pitch call on purpose. It is the
          one control on this screen that cannot be taken back, so it does not
          sit in the row your hand is already in — see penArmed in main.ts. */
-      .pen { margin-top: 14px; border-top: 1px solid #253026; padding-top: 10px; }
+      .pen { margin-top: 14px; border-top: 1px solid #222838; padding-top: 10px; }
       .penhead { font-size: 10px; letter-spacing: 2px; margin-bottom: 6px; }
       .penrow {
         display: grid; grid-template-columns: 84px 1fr auto auto;
@@ -181,7 +181,7 @@
       /* ---- the selected arm, in the pen panel and in the rotation picker.
          One rule for both: they are the same widget asking the same question
          about two different lists. */
-      .penrow.picked { background: #1b241d; }
+      .penrow.picked { background: #202636; }
       .penrow.picked b { color: var(--hot); }
       /* ---- the bench, in the side column while you are hitting. Stacked
          rather than columned: it carries a hand and three ratings, which is one
@@ -189,7 +189,7 @@
          onto three lines. Same picked highlight, so it reads as the same widget. */
       .benchrow { font-size: 11px; padding: 4px 0; line-height: 1.5; }
       .benchrow b { font-weight: 400; }
-      .benchrow.picked { background: #1b241d; }
+      .benchrow.picked { background: #202636; }
       .benchrow.picked b { color: var(--hot); }
       .benchname { display: flex; justify-content: space-between; gap: 8px; }
       #pre .rotation .penrow { grid-template-columns: 80px 1fr auto auto; padding: 5px 0; }
@@ -200,7 +200,7 @@
       button {
         font: inherit;
         color: var(--ink);
-        background: #17241b;
+        background: #171b26;
         border: 2px solid var(--line);
         box-shadow: 2px 2px 0 #000;
         padding: 7px 8px;
@@ -208,13 +208,13 @@
         text-align: left;
         transition: transform 0.04s ease, box-shadow 0.04s ease;
       }
-      button:hover:not(:disabled) { border-color: var(--hot); }
+      button:hover:not(:disabled) { border-color: var(--hot); background: #1f2536; }
       button:active:not(:disabled) {
         transform: translate(1px, 1px);
         box-shadow: 1px 1px 0 #000;
       }
       button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
-      button.on { border-color: var(--hot); color: var(--hot); }
+      button.on { border-color: var(--hot); color: var(--hot); background: #222838; }
       /* A read-out you can click. It is a button so it can be pressed and so a
          keyboard can reach it; it looks like the text it replaced so the strip
          does not suddenly read as five controls instead of four. */
@@ -226,7 +226,7 @@
 
       /* ---- log */
       #log { height: 150px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px; }
-      #log div { border-bottom: 1px solid #1a221c; padding: 2px 0; }
+      #log div { border-bottom: 1px solid #1a1e2b; padding: 2px 0; }
       #log .big { color: var(--hot); }
       #log .out { color: var(--dim); }
       #log .half { color: var(--good); margin-top: 4px; }
@@ -259,7 +259,7 @@
       #pre .club { font-size: 15px; color: var(--hot); letter-spacing: 1px; }
       #pre table.line td.team { text-align: left; }
       #pre tr.you td { color: var(--hot); }
-      #pre .wire div { padding: 2px 0; border-bottom: 1px solid #1a221c; }
+      #pre .wire div { padding: 2px 0; border-bottom: 1px solid #1a1e2b; }
       #pre .wire .roster { color: var(--good); }
       #pre .go { width: 100%; text-align: center; padding: 12px; font-size: 14px; }
       /* ---- the calendar. Every day of the year as one wrapping grid of equal
@@ -301,7 +301,7 @@
          nobody can select from would make the copy step impossible. */
       #start textarea {
         width: 100%; min-height: 210px; padding: 8px; resize: vertical;
-        background: #0a0f0c; color: var(--ink); border: 1px solid var(--line);
+        background: #0c0f17; color: var(--ink); border: 1px solid var(--line);
         font: 11px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
         -webkit-user-select: text; user-select: text;
       }
@@ -312,7 +312,7 @@
          because a slot name is a label and not a document. */
       #start input {
         width: 100%; padding: 8px;
-        background: #0a0f0c; color: var(--ink); border: 1px solid var(--line);
+        background: #0c0f17; color: var(--ink); border: 1px solid var(--line);
         font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
         -webkit-user-select: text; user-select: text;
       }
@@ -354,7 +354,7 @@
       #start .edrow.wide, #start .edform .wide { flex: 1 1 100%; }
       #start .edrow span { font-size: 9px; letter-spacing: 1px; color: var(--dim); }
       #start input[type="text"], #start input[type="number"], #start select {
-        background: #0a0f0c; color: var(--ink); border: 1px solid var(--line);
+        background: #0c0f17; color: var(--ink); border: 1px solid var(--line);
         font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
         padding: 4px 5px; -webkit-user-select: text; user-select: text;
       }
@@ -390,7 +390,7 @@
          attributes are the drawing surface; these are the box. */
       #start canvas.edlook {
         flex: 0 0 auto; width: 120px; height: 150px;
-        border: 1px solid var(--line); background: #101a12;
+        border: 1px solid var(--line); background: #0e111a;
         image-rendering: pixelated; align-self: flex-start;
       }
       /* THE ART PACK'S SLOTS. Thirty-six cells, one per part a drawing can
@@ -402,7 +402,7 @@
         gap: 6px; padding-top: 8px;
       }
       #start .artslot {
-        border: 1px solid var(--line); background: #0a0f0c; padding: 5px;
+        border: 1px solid var(--line); background: #0c0f17; padding: 5px;
         display: flex; flex-direction: column; align-items: center; gap: 3px;
       }
       #start .artslot.on { border-color: var(--hot); }
@@ -419,7 +419,7 @@
       #start .artslot .edtiny { width: 100%; margin-top: 2px; }
       #start .artpic {
         width: 64px; height: 64px; image-rendering: pixelated; flex: 0 0 auto;
-        background: #101a12; border: 1px solid var(--line);
+        background: #0e111a; border: 1px solid var(--line);
       }
       /* THE PIXEL BOX. The pad is a fixed 320 square drawn at whole cells, and
          it shrinks with the screen — the stroke maths reads its real size. */
@@ -444,7 +444,7 @@
       }
       #start input[type="color"] {
         width: 44px; height: 26px; padding: 1px; cursor: pointer;
-        background: #0a0f0c; border: 1px solid var(--line);
+        background: #0c0f17; border: 1px solid var(--line);
       }
       #start .edbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
 
@@ -476,12 +476,13 @@
 
       /* The field, the lights, and the glass in front of them. */
       #start {
-        --dim: #92a680;
+        --dim: #8b95a8;
         background:
+          radial-gradient(ellipse 90% 45% at 50% 0%, rgba(56, 217, 169, 0.07) 0%, transparent 70%),
           repeating-linear-gradient(
-            100deg, transparent 0 46px, rgba(190, 255, 170, 0.016) 46px 92px
+            100deg, transparent 0 46px, rgba(90, 140, 255, 0.018) 46px 92px
           ),
-          radial-gradient(125% 85% at 50% -15%, #17271b 0%, var(--bg) 60%);
+          radial-gradient(125% 85% at 50% -15%, #182033 0%, var(--bg) 65%);
       }
       /* SCANLINES, on the glass rather than on the page — fixed, so they do
          not scroll away under thirty club cards. pointer-events:none, or a
@@ -492,6 +493,22 @@
           to bottom, rgba(0, 0, 0, 0.24) 0 1px, transparent 1px 3px
         );
       }
+
+      /* Vault Specification Hardware Brand Badge */
+      #start .vault-brand {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 8px; letter-spacing: 2px;
+        color: var(--dim);
+        background: rgba(19, 23, 34, 0.85);
+        border: 1px solid var(--line);
+        border-bottom: 2px solid var(--line);
+        padding: 5px 12px; margin-bottom: 4px;
+        box-shadow: 2px 2px 0 #000;
+      }
+      #start .vault-brand .vault-tag { color: var(--hot); }
+      #start .vault-brand .vault-sep { color: var(--bad); }
+      #start .vault-brand .vault-sub { color: var(--ink); opacity: 0.85; }
 
       /* ---- the marquee. Outlined on all eight sides in black so it holds its
          shape at any size, and dropped once into the seam red. No blur: a soft
@@ -510,7 +527,7 @@
          screen and it does more for the theme than anything else here. */
       #start .seam {
         width: 100%; max-width: 300px; height: 18px;
-        position: relative; opacity: 0.8; margin: 8px 0 2px;
+        position: relative; opacity: 0.85; margin: 8px 0 2px;
       }
       /* Two parallel arcs, both bowing the same way — which is how the seam
          actually runs across a ball, and what tells the eye 'baseball' rather
@@ -540,16 +557,28 @@
          selection is a cursor, not an animation. */
       #start button {
         text-align: center; padding: 12px 8px;
-        border: 2px solid var(--line); background: #16201a;
+        border: 2px solid var(--line); background: #141824;
         box-shadow: 3px 3px 0 #000;
         position: relative;
         min-height: 48px;
+      }
+      #start button:hover:not(:disabled) {
+        border-color: var(--hot);
+        background: #1b2133;
       }
       #start button b { color: var(--hot); font-weight: 700; letter-spacing: 1px; }
       #start button:focus {
         border-color: var(--hot);
         outline: 2px solid var(--hot);
         outline-offset: 2px;
+        background: #1c2336;
+      }
+      /* Arcade glyph on mode cards */
+      #start .card-glyph {
+        color: var(--hot);
+        font-style: normal;
+        margin-right: 4px;
+        font-family: ui-monospace, "Press Start 2P", monospace;
       }
       /* Hotkey badges, high-contrast resume & back buttons */
       #start .hk {
@@ -558,19 +587,28 @@
         font-size: 10px;
         font-weight: 700;
         color: var(--hot);
-        background: #0d1510;
+        background: #0f131c;
         border: 1px solid var(--line);
         padding: 1px 5px;
         margin-left: 6px;
         border-radius: 2px;
         vertical-align: 1px;
         letter-spacing: 0.5px;
+        box-shadow: 1px 1px 0 #000;
       }
       #start button.card-resume {
         border-color: var(--good);
-        background: #142419;
+        background: #0f241c;
+      }
+      #start button.card-resume:hover:not(:disabled),
+      #start button.card-resume:focus {
+        background: #153328;
+        border-color: #52f0be;
       }
       #start button.card-resume b {
+        color: var(--good);
+      }
+      #start button.card-resume .card-glyph {
         color: var(--good);
       }
       #start button.card-resume .hk {
@@ -579,13 +617,21 @@
       }
       #start button.card-back {
         border-color: var(--line);
-        background: #121814;
+        background: #151822;
         color: var(--dim);
       }
       #start button.card-back:hover,
       #start button.card-back:focus {
         border-color: var(--hot);
         color: var(--ink);
+        background: #1e2230;
+      }
+      #start button.card-back .card-glyph {
+        color: var(--dim);
+      }
+      #start button.card-back:hover .card-glyph,
+      #start button.card-back:focus .card-glyph {
+        color: var(--hot);
       }
 
       /* THE CURSOR, AND IT BLINKS — which is the whole difference between a
@@ -622,7 +668,7 @@
          has the focus. */
       #start .dial {
         grid-column: 1 / -1; background: var(--panel);
-        border: 2px solid var(--line); border-left: 6px solid #2f3a2a;
+        border: 2px solid var(--line); border-left: 6px solid #2a3346;
         box-shadow: 3px 3px 0 #000;
       }
       #start .dial:hover, #start .dial:focus-within { border-left-color: var(--hot); }
@@ -638,7 +684,7 @@
         font-size: 19px; padding: 0; line-height: 1; cursor: pointer;
       }
       #start .arrow:hover:not(:disabled),
-      #start .arrow:focus { color: var(--hot); background: #1b241d; outline: none; }
+      #start .arrow:focus { color: var(--hot); background: #1c2333; outline: none; }
       #start .arrow:disabled { opacity: 0.2; cursor: default; }
       #start .dialval { text-align: center; padding: 4px 6px 9px; }
       #start .dialval b {
@@ -650,8 +696,8 @@
       /* Where you are in the list, as square lamps rather than bars. Four
          settings deep is not obvious from one value on its own. */
       #start .pips { display: flex; gap: 5px; justify-content: center; padding-bottom: 9px; }
-      #start .pips i { width: 7px; height: 7px; background: #2f3a2a; }
-      #start .pips i.on { background: var(--hot); }
+      #start .pips i { width: 7px; height: 7px; background: #222938; border: 1px solid #2e374a; }
+      #start .pips i.on { background: var(--hot); border-color: var(--hot); box-shadow: 0 0 5px rgba(245, 190, 56, 0.6); }
 
       /* ---- THE CLUB CARDS. A cap patch, the name, and what the club IS —
          which the old grid of thirty identical tiles never said, so picking one
@@ -663,12 +709,12 @@
       #start .patch {
         width: 48px; height: 48px; display: grid;
         place-items: center; font-size: 13px; letter-spacing: 1px;
-        color: #0d1210; font-weight: 700;
+        color: #0b0e14; font-weight: 700;
         /* A CIRCLE THE WAY A SPRITE DRAWS ONE — corners cut off, not rounded
-           off. A 48px anti-aliased circle is the one shape on this screen that
-           would read as CSS rather than as a cap, and an octagon costs the same
-           one line border-radius did. The hard band along the bottom is the
-           shading a two-colour sprite gets. */
+            off. A 48px anti-aliased circle is the one shape on this screen that
+            would read as CSS rather than as a cap, and an octagon costs the same
+            one line border-radius did. The hard band along the bottom is the
+            shading a two-colour sprite gets. */
         clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
         box-shadow: inset 0 -7px 0 rgba(0, 0, 0, 0.3);
       }
@@ -696,22 +742,30 @@
       #start .plate {
         grid-column: 1 / -1; width: 100%; max-width: 340px; margin: 10px auto 0;
         clip-path: polygon(0 0, 100% 0, 100% 58%, 50% 100%, 0 58%);
-        padding: 16px 12px 42px; background: #1e2a1c;
+        padding: 16px 12px 42px; background: #181f2f;
         border: 0; box-shadow: none; color: var(--ink);
         font-size: 15px; letter-spacing: 3px;
-        filter: drop-shadow(4px 4px 0 #000);
+        filter: drop-shadow(0 0 10px rgba(245, 190, 56, 0.22)) drop-shadow(4px 4px 0 #000);
+        transition: background 0.1s ease, filter 0.1s ease;
       }
-      #start .plate:hover, #start .plate:focus { background: #27351f; }
-      #start .plate b { color: var(--hot); }
+      #start .plate:hover, #start .plate:focus {
+        background: #222b3d;
+        filter: drop-shadow(0 0 16px rgba(245, 190, 56, 0.45)) drop-shadow(4px 4px 0 #000);
+        outline: none;
+      }
+      #start .plate b { color: var(--hot); text-shadow: 0 0 8px rgba(245, 190, 56, 0.4); }
       #start .plate .sub {
         display: block; font-size: 10px; letter-spacing: 2px; color: var(--dim); margin-top: 3px;
       }
 
-      /* ---- a heading between groups of cards, chalked on. */
+      /* ---- a heading between groups of cards, chalked on terminal mainframe. */
       #start .chalk {
         grid-column: 1 / -1; font-size: 10px; letter-spacing: 3px; color: var(--dim);
-        text-align: left; padding: 4px 0 0; border-bottom: 1px solid #202a1e;
-        margin-bottom: 2px;
+        text-align: left; padding: 6px 0 2px; border-bottom: 1px solid var(--line);
+        margin-bottom: 3px; display: flex; align-items: center; gap: 6px;
+      }
+      #start .chalk::before {
+        content: "//"; color: var(--hot); font-weight: 700;
       }
 
       /* ---- the line along the bottom of every cartridge's title screen. It
@@ -816,7 +870,7 @@
       /* A day cell: its edge and its number. Today's cell is already outlined
          in the same colour, so the cursor has to be the FILL as well or the two
          would be one picture whenever the cursor is sitting on today. */
-      #pre button.cal:focus { border-color: var(--hot); background: #1b241d; outline: none; }
+      #pre button.cal:focus { border-color: var(--hot); background: #1c2333; outline: none; }
       #pre button.cal:focus .calday { color: var(--hot); }
 
       /* A picker row: a bar down its leading edge. It cannot be the background
@@ -824,7 +878,7 @@
          SELECTED — the cursor and the selection are two different facts and on
          this screen they are usually on two different rows. */
       #pre .penrow[tabindex]:focus {
-        outline: none; box-shadow: inset 3px 0 0 var(--hot); background: #161d18;
+        outline: none; box-shadow: inset 3px 0 0 var(--hot); background: #1b2232;
       }
     </style>
   </head>
@@ -850,6 +904,7 @@
       </div>
     </div>
     <div id="start" role="region" aria-label="Title Screen">
+      <div class="vault-brand" aria-hidden="true"><span class="vault-tag">VAULT SPEC 2126</span><span class="vault-sep">//</span><span class="vault-sub">TACTICAL BASEBALL ENGINE</span></div>
       <h1>BASEDBALL</h1>
       <!-- The ball's stitching, as two dashed rules. See #start .seam. -->
       <div class="seam" aria-hidden="true"><i></i><i></i></div>

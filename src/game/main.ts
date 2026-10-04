@@ -7209,13 +7209,14 @@ function pregame(): void {
     go: string,
     title: string,
     sub: string,
-    opts: { hotkey?: string; className?: string; ariaLabel?: string } = {},
+    opts: { glyph?: string; hotkey?: string; className?: string; ariaLabel?: string } = {},
   ): string => {
+    const glyphHtml = opts.glyph ? `<span class="card-glyph" aria-hidden="true">${opts.glyph} </span>` : '';
     const hkHtml = opts.hotkey ? `<span class="hk" aria-hidden="true">[${opts.hotkey}]</span>` : '';
     const hkAttr = opts.hotkey ? ` data-hotkey="${opts.hotkey}" aria-keyshortcuts="${opts.hotkey}"` : '';
     const cls = opts.className ? ` class="${opts.className}"` : '';
     const label = opts.ariaLabel ? ` aria-label="${escapeText(opts.ariaLabel)}"` : '';
-    return `<button data-go="${go}"${hkAttr}${cls}${label}><b>${title}</b>${hkHtml}<br>${sub}</button>`;
+    return `<button data-go="${go}"${hkAttr}${cls}${label}><b>${glyphHtml}${title}</b>${hkHtml}<br>${sub}</button>`;
   };
 
   /**
@@ -7496,7 +7497,7 @@ function pregame(): void {
       const c2 = el2.getContext('2d');
       if (!who || !c2) continue;
       c2.clearRect(0, 0, el2.width, el2.height);
-      c2.fillStyle = '#101a12';
+      c2.fillStyle = '#0e111a';
       c2.fillRect(0, 0, el2.width, el2.height);
       const arm = groupOf(group).of === 'arm';
       // ⚠️ THE MAN AND HIS BAT ARE SCALED TOGETHER, BY THE BAT.
@@ -7621,7 +7622,7 @@ function pregame(): void {
       const y = (i - x) / n;
       const ink = pix.pad.cells[i]!;
       // Clear cells are a checkerboard, so clear and outline never look alike.
-      g.fillStyle = ink ? grey(ink) : (x + y) % 2 ? '#1c2620' : '#141c17';
+      g.fillStyle = ink ? grey(ink) : (x + y) % 2 ? '#1b2132' : '#131724';
       g.fillRect(x * k, y * k, k, k);
     }
 
@@ -7630,7 +7631,7 @@ function pregame(): void {
     const [build, part, at] = pix.id.split('/') as [Build, ArtPart, string];
     const look = { frame: 0, head: 0, crest: 1, tone: 0, number: 7, wear: 0, [part]: Number(at) };
     const t = test.getContext('2d')!;
-    t.fillStyle = '#101a12';
+    t.fillStyle = '#0e111a';
     t.fillRect(0, 0, test.width, test.height);
     const kit = uniformFor(editing[0]!);
     withDraft(pix.id, padCanvas(pix.pad), () =>
@@ -8090,7 +8091,7 @@ function pregame(): void {
               'resume',
               'CONTINUE',
               `${saved.you} — ${dayLabel(saved).toLowerCase()}`,
-              { hotkey: 'R', className: 'card-resume', ariaLabel: `Continue Season: ${saved.you}, ${dayLabel(saved)}` },
+              { glyph: '▶', hotkey: 'R', className: 'card-resume', ariaLabel: `Continue Season: ${saved.you}, ${dayLabel(saved)}` },
             )
           : '';
       // The book is offered only once there is something in it. A RECORD BOOK
@@ -8102,7 +8103,7 @@ function pregame(): void {
             'RECORD BOOK',
             `${t.seasons} season${t.seasons === 1 ? '' : 's'}` +
               `, ${t.titles} title${t.titles === 1 ? '' : 's'}`,
-            { hotkey: 'B', ariaLabel: `Record Book: ${t.seasons} seasons, ${t.titles} titles` },
+            { glyph: '★', hotkey: 'B', ariaLabel: `Record Book: ${t.seasons} seasons, ${t.titles} titles` },
           )
         : '';
       // The league card says what is loaded rather than what it does, because
@@ -8119,19 +8120,23 @@ function pregame(): void {
         `<div class="chalk" style="grid-column:1/-1">PLAY BALL</div>` +
         resume +
         card('exhibition', 'EXHIBITION', 'one game, you pick both clubs', {
+          glyph: '◆',
           hotkey: 'E',
           ariaLabel: 'Exhibition: one game, you pick both clubs',
         }) +
         card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket', {
+          glyph: '▲',
           hotkey: 'F',
           ariaLabel: 'Franchise: a season of your own length, then a bracket',
         }) +
         `<div class="chalk" style="grid-column:1/-1">CLUBHOUSE &amp; SETTINGS</div>` +
         card('league', 'CUSTOMIZE', leagueSub, {
+          glyph: '⚙',
           hotkey: 'C',
           ariaLabel: `Customize: ${leagueSub}`,
         }) +
         card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half', {
+          glyph: '◈',
           hotkey: 'S',
           ariaLabel: 'Settings: the swing, the ball, and who plays your half',
         }) +
@@ -8172,7 +8177,7 @@ function pregame(): void {
             hotkey: 'Esc',
             ariaLabel: `Back: change your selected club (${mine.abbr})`,
           })
-        : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters', { hotkey: 'C' }) +
+        : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters', { glyph: '⚙', hotkey: 'C' }) +
           card('back', 'BACK', mode === 'franchise' ? 'return to franchise rules' : 'return to mode select', {
             className: 'card-back',
             hotkey: 'Esc',

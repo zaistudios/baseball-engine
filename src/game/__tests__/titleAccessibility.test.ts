@@ -47,7 +47,7 @@ describe('Title Screen Accessibility - Markup & Styles (game.html)', () => {
   });
 
   it('boosts --dim text contrast on #start to meet WCAG AA standards', () => {
-    expect(htmlSrc).toMatch(/#start\s*\{[^}]*--dim:\s*#92a680/);
+    expect(htmlSrc).toMatch(/#start\s*\{[^}]*--dim:\s*#8b95a8/);
   });
 
   it('includes styling for hotkey badges and special action cards', () => {
