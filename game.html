@@ -476,6 +476,7 @@
 
       /* The field, the lights, and the glass in front of them. */
       #start {
+        --dim: #92a680;
         background:
           repeating-linear-gradient(
             100deg, transparent 0 46px, rgba(190, 255, 170, 0.016) 46px 92px
@@ -542,9 +543,50 @@
         border: 2px solid var(--line); background: #16201a;
         box-shadow: 3px 3px 0 #000;
         position: relative;
+        min-height: 48px;
       }
       #start button b { color: var(--hot); font-weight: 700; letter-spacing: 1px; }
-      #start button:focus { border-color: var(--hot); outline: none; }
+      #start button:focus {
+        border-color: var(--hot);
+        outline: 2px solid var(--hot);
+        outline-offset: 2px;
+      }
+      /* Hotkey badges, high-contrast resume & back buttons */
+      #start .hk {
+        display: inline-block;
+        font-family: ui-monospace, "Cascadia Mono", monospace;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--hot);
+        background: #0d1510;
+        border: 1px solid var(--line);
+        padding: 1px 5px;
+        margin-left: 6px;
+        border-radius: 2px;
+        vertical-align: 1px;
+        letter-spacing: 0.5px;
+      }
+      #start button.card-resume {
+        border-color: var(--good);
+        background: #142419;
+      }
+      #start button.card-resume b {
+        color: var(--good);
+      }
+      #start button.card-resume .hk {
+        color: var(--good);
+        border-color: var(--good);
+      }
+      #start button.card-back {
+        border-color: var(--line);
+        background: #121814;
+        color: var(--dim);
+      }
+      #start button.card-back:hover,
+      #start button.card-back:focus {
+        border-color: var(--hot);
+        color: var(--ink);
+      }
 
       /* THE CURSOR, AND IT BLINKS — which is the whole difference between a
          highlighted row and a console menu. steps(1) so it is on or it is off
@@ -807,15 +849,15 @@
         </div>
       </div>
     </div>
-    <div id="start">
+    <div id="start" role="region" aria-label="Title Screen">
       <h1>BASEDBALL</h1>
       <!-- The ball's stitching, as two dashed rules. See #start .seam. -->
-      <div class="seam"><i></i><i></i></div>
-      <h2></h2>
-      <div class="keys"></div>
+      <div class="seam" aria-hidden="true"><i></i><i></i></div>
+      <h2 id="start-prompt" aria-live="polite"></h2>
+      <div class="keys" role="group" aria-labelledby="start-prompt"></div>
       <!-- The cartridge line. The controls half is the only place the d-pad is
            advertised; see the keydown handler in pregame(). -->
-      <div class="copy"><span>ARROWS MOVE &middot; ENTER SELECTS</span><span>&copy; 2026 ZAI STUDIOS</span></div>
+      <div class="copy" aria-label="Controls and Shortcuts"><span id="start-hints">ARROWS MOVE &middot; ENTER SELECTS</span><span>&copy; 2026 ZAI STUDIOS</span></div>
     </div>
     <!-- Filled and shown by showPregame() before every franchise game. Empty
          and hidden in an exhibition, which has no standings to stand on. -->

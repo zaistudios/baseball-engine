@@ -736,7 +736,40 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
   limb(backLegX, legTop, legW, -legTop, legFill, o.legBack);
   limb(frontLegX, legTop, legW, -legTop, legFill, o.legFront);
 
-  // Lower body accessories (high socks, knee chassis)
+  // Lower body accessories and frame detailing (pinstripe pants, tracked base, high socks, knee chassis)
+  if (o.build === 'human' && look.frame === 9 && !crouch) {
+    const stripeCol = u.trim === u.secondary ? '#1a1d1c' : u.trim;
+    box(backLegX + legW * 0.45, legTop, Math.max(1, h * 0.012), -legTop, stripeCol);
+    box(frontLegX + legW * 0.45, legTop, Math.max(1, h * 0.012), -legTop, stripeCol);
+  }
+  if (machine && look.frame === 7 && !crouch) {
+    // Tracked base: heavy continuous industrial caterpillar treads over ground
+    const trackH = Math.max(4, h * 0.075);
+    box(-w * 0.52, -trackH, w * 1.04, trackH, '#27272a');
+    for (let i = 0; i < 4; i++) {
+      box(-w * 0.46 + i * (w * 0.25), -2, w * 0.14, 2, '#71717a');
+    }
+    box(-w * 0.54, legTop + (-legTop) * 0.6, w * 1.08, (-legTop) * 0.4 - trackH, tone);
+    box(-w * 0.54, -trackH - Math.max(1, h * 0.015), w * 1.08, Math.max(1, h * 0.015), u.trim);
+  }
+  if (machine && look.frame === 8 && !crouch) {
+    // Monowheel: gyroscopic drive wheel with central hub motor and side forks
+    const wheelR = Math.max(5, h * 0.12);
+    ctx.fillStyle = '#27272a';
+    ctx.beginPath();
+    ctx.arc(0, -wheelR, wheelR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = tone;
+    ctx.beginPath();
+    ctx.arc(0, -wheelR, wheelR * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#00e5ff';
+    ctx.beginPath();
+    ctx.arc(0, -wheelR, wheelR * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    box(-w * 0.22, legTop, Math.max(2, w * 0.07), -legTop - wheelR * 0.8, '#64748b');
+    box(w * 0.15, legTop, Math.max(2, w * 0.07), -legTop - wheelR * 0.8, '#64748b');
+  }
   if (o.build === 'human' && look.accessory === 5 && !crouch) {
     const sockTop = legTop + (-legTop) * 0.45;
     const sockH = -legTop * 0.55;
@@ -791,6 +824,76 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     box(-w / 2, torsoTop, w, hem - torsoTop, u.primary);
     // The chassis seam — one line, and it is most of what says "not a person".
     box(-w / 2, torsoTop + torsoH * 0.42, w, Math.max(1, h * 0.02), u.trim);
+    if (look.frame === 6) {
+      // steam boiler: rounded rivets, pressure dial, copper pipe
+      for (let i = 0; i < 5; i++) {
+        box(-w * 0.42 + i * w * 0.2, torsoTop + torsoH * 0.08, 2, 2, '#18181b');
+        box(-w * 0.42 + i * w * 0.2, hem - torsoH * 0.1, 2, 2, '#18181b');
+      }
+      ctx.fillStyle = '#d4af37';
+      ctx.beginPath();
+      ctx.arc(0, torsoTop + torsoH * 0.52, Math.max(3, h * 0.045), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(0, torsoTop + torsoH * 0.52, Math.max(2, h * 0.03), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#18181b';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, torsoTop + torsoH * 0.52);
+      ctx.lineTo(h * 0.02, torsoTop + torsoH * 0.50);
+      ctx.stroke();
+      box(w * 0.38, torsoTop + torsoH * 0.18, Math.max(2, w * 0.12), torsoH * 0.65, '#b45309');
+    } else if (look.frame === 3) {
+      // foundry unit: blast plates and vertical molten heat vents
+      box(-w * 0.5, torsoTop + torsoH * 0.1, w * 0.18, torsoH * 0.8, '#1e293b');
+      box(w * 0.32, torsoTop + torsoH * 0.1, w * 0.18, torsoH * 0.8, '#1e293b');
+      for (const ox of [-0.18, 0, 0.18]) {
+        box(w * ox - 1.5, torsoTop + torsoH * 0.22, 3, torsoH * 0.55, '#ea580c');
+        box(w * ox - 0.75, torsoTop + torsoH * 0.28, 1.5, torsoH * 0.42, '#facc15');
+      }
+    } else if (look.frame === 5) {
+      // titan chassis: heavy interlocking armor plates and intake grilles
+      box(-w * 0.52, torsoTop + torsoH * 0.18, w * 1.04, Math.max(2, h * 0.035), '#334155');
+      box(-w * 0.52, torsoTop + torsoH * 0.68, w * 1.04, Math.max(2, h * 0.035), '#334155');
+      for (let i = 0; i < 3; i++) {
+        box(-w * 0.28, torsoTop + torsoH * (0.32 + i * 0.1), w * 0.56, Math.max(1, h * 0.015), '#0f172a');
+      }
+    } else if (look.frame === 4) {
+      // scout frame: lightweight tubular rollcage with internal battery
+      box(-w * 0.46, torsoTop + torsoH * 0.15, Math.max(2, w * 0.08), torsoH * 0.7, '#64748b');
+      box(w * 0.38, torsoTop + torsoH * 0.15, Math.max(2, w * 0.08), torsoH * 0.7, '#64748b');
+      box(-w * 0.18, torsoTop + torsoH * 0.35, w * 0.36, torsoH * 0.3, '#10b981');
+      box(-w * 0.1, torsoTop + torsoH * 0.42, w * 0.2, torsoH * 0.15, '#a7f3d0');
+    } else if (look.frame === 2) {
+      // spire: stacked server ventilation louvers with status LEDs
+      for (let i = 0; i < 3; i++) {
+        box(-w * 0.3, torsoTop + torsoH * (0.2 + i * 0.18), w * 0.6, Math.max(1, h * 0.018), '#1e293b');
+      }
+      box(-w * 0.4, torsoTop + torsoH * 0.22, 2, 2, '#00e5ff');
+      box(-w * 0.4, torsoTop + torsoH * 0.40, 2, 2, '#f59e0b');
+      box(-w * 0.4, torsoTop + torsoH * 0.58, 2, 2, '#ef4444');
+    } else if (look.frame === 1) {
+      // heavy chassis: reinforced cross-bracing
+      box(-w * 0.45, torsoTop + torsoH * 0.15, w * 0.9, Math.max(2, h * 0.025), '#475569');
+      box(-w * 0.45, torsoTop + torsoH * 0.7, w * 0.9, Math.max(2, h * 0.025), '#475569');
+    } else if (look.frame === 7) {
+      // tracked base mount: yellow hazard striping near belt
+      for (let i = 0; i < 3; i++) {
+        box(-w * 0.42 + i * (w * 0.28), hem - Math.max(2, h * 0.035), w * 0.14, Math.max(2, h * 0.035), '#eab308');
+      }
+    } else if (look.frame === 8) {
+      // monowheel gyro housing
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath();
+      ctx.arc(0, torsoTop + torsoH * 0.65, Math.max(3, h * 0.038), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#00e5ff';
+      ctx.beginPath();
+      ctx.arc(0, torsoTop + torsoH * 0.65, Math.max(1, h * 0.018), 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else {
     ctx.fillStyle = u.primary;
     ctx.beginPath();
@@ -800,12 +903,68 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
     ctx.lineTo(w / 2, hem);
     ctx.closePath();
     ctx.fill();
+
+    if (o.build === 'human') {
+      if (look.frame === 8) {
+        // wool veteran: button placket and ivory jersey buttons
+        box(-w * 0.07, torsoTop + torsoH * 0.08, w * 0.14, torsoH * 0.84, 'rgba(0,0,0,0.18)');
+        for (let i = 0; i < 4; i++) {
+          box(-w * 0.03, torsoTop + torsoH * (0.16 + i * 0.22), Math.max(2, w * 0.06), Math.max(2, w * 0.06), '#fef3c7');
+        }
+        box(-w * 0.42, torsoTop + torsoH * 0.12, Math.max(1, h * 0.012), torsoH * 0.3, u.trim);
+        box(w * 0.4, torsoTop + torsoH * 0.12, Math.max(1, h * 0.012), torsoH * 0.3, u.trim);
+      } else if (look.frame === 9) {
+        // pinstripe classic: vertical crisp pinstripes
+        const stripeCol = u.trim === u.primary ? '#111827' : u.trim;
+        for (const sx of [-0.35, -0.18, 0, 0.18, 0.35]) {
+          box(w * sx - 0.5, torsoTop + torsoH * 0.08, Math.max(1, h * 0.012), torsoH * 0.88, stripeCol);
+        }
+      } else if (look.frame === 6) {
+        // athletic: side stripes
+        box(-w * 0.46, torsoTop + torsoH * 0.15, Math.max(1, h * 0.018), torsoH * 0.7, u.trim);
+        box(w * 0.44, torsoTop + torsoH * 0.15, Math.max(1, h * 0.018), torsoH * 0.7, u.trim);
+      } else {
+        // classic v-neck collar
+        box(-w * 0.15, torsoTop + torsoH * 0.02, w * 0.3, Math.max(1, h * 0.015), u.trim);
+      }
+    }
   }
 
   // ---- augmented plating: one squared shoulder over a human silhouette, which
   // is the cheapest thing that reads as "half of him is hardware".
   if (o.build === 'augmented') {
     box(w * 0.16, torsoTop + torsoH * 0.06, w * 0.34, torsoH * 0.34, '#9aa2aa');
+    if (look.frame === 7) {
+      // pneumatic spine: chrome cylinder with cyan conduit glow
+      box(-w * 0.48, torsoTop + torsoH * 0.08, Math.max(2, w * 0.14), torsoH * 0.85, '#94a3b8');
+      box(-w * 0.44, torsoTop + torsoH * 0.25, Math.max(1, w * 0.06), torsoH * 0.5, '#f1f5f9');
+      box(-w * 0.52, torsoTop + torsoH * 0.2, w * 0.22, Math.max(2, h * 0.025), '#475569');
+      box(-w * 0.32, torsoTop + torsoH * 0.22, w * 0.4, Math.max(1, h * 0.012), '#00e5ff');
+      box(-w * 0.32, torsoTop + torsoH * 0.65, w * 0.4, Math.max(1, h * 0.012), '#00e5ff');
+    } else if (look.frame === 8) {
+      // carbon chassis: dark carbon fiber composite plating
+      box(-w * 0.35, torsoTop + torsoH * 0.15, w * 0.7, torsoH * 0.65, '#1e293b');
+      box(-w * 0.3, torsoTop + torsoH * 0.25, w * 0.6, Math.max(1, h * 0.012), '#334155');
+      box(-w * 0.3, torsoTop + torsoH * 0.45, w * 0.6, Math.max(1, h * 0.012), '#334155');
+      box(-w * 0.3, torsoTop + torsoH * 0.65, w * 0.6, Math.max(1, h * 0.012), '#334155');
+      box(w * 0.28, torsoTop + torsoH * 0.2, 2, torsoH * 0.4, '#00e5ff');
+    } else if (look.frame === 5) {
+      // cyber-heavy: dual heavy shoulder pauldrons & neck guard
+      box(-w * 0.52, torsoTop + torsoH * 0.06, w * 0.34, torsoH * 0.34, '#9aa2aa');
+      box(-w * 0.25, torsoTop + torsoH * 0.02, w * 0.5, Math.max(2, h * 0.03), '#64748b');
+    } else if (look.frame === 6) {
+      // streamlined: cyan micro-channels
+      box(-w * 0.2, torsoTop + torsoH * 0.12, w * 0.4, Math.max(1, h * 0.012), '#00e5ff');
+      box(-w * 0.12, torsoTop + torsoH * 0.3, w * 0.24, Math.max(1, h * 0.012), '#00e5ff');
+    } else if (look.frame === 4) {
+      // grafted: hydraulic muscle cables
+      box(w * 0.08, torsoTop + torsoH * 0.4, w * 0.35, Math.max(2, h * 0.025), '#38bdf8');
+      box(w * 0.12, torsoTop + torsoH * 0.55, w * 0.3, Math.max(2, h * 0.025), '#38bdf8');
+    } else if (look.frame === 1) {
+      // braced: titanium ribcage
+      box(-w * 0.35, torsoTop + torsoH * 0.3, w * 0.7, Math.max(1, h * 0.015), '#94a3b8');
+      box(-w * 0.35, torsoTop + torsoH * 0.5, w * 0.7, Math.max(1, h * 0.015), '#94a3b8');
+    }
   }
 
   // ---- torso accessories (reactors, flare ports, reinforced plating, hazard stripes, overclocked core)
@@ -962,17 +1121,29 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
         }
       }
     } else if (look.head === 4) {
-      // ponytail: placeholder shell until the art pack draws a CRT monitor face.
-      box(-headR * 0.8, headY - headR * 0.6, headR * 1.6, headR * 1.15, '#1f3d2a');
-      box(-headR * 0.6, headY - headR * 0.1, headR * 1.2, Math.max(1, headR * 0.12), '#6fbf62');
+      // CRT monitor face: retro curved phosphor tube, scanlines, side knobs, pixel face
+      box(-headR * 0.88, headY - headR * 0.7, headR * 1.76, headR * 1.4, '#1e293b');
+      box(-headR * 0.7, headY - headR * 0.52, headR * 1.4, headR * 1.05, '#052e16');
+      box(-headR * 0.45, headY - headR * 0.15, headR * 0.3, Math.max(1, headR * 0.2), '#4ade80');
+      box(headR * 0.15, headY - headR * 0.15, headR * 0.3, Math.max(1, headR * 0.2), '#4ade80');
+      box(-headR * 0.2, headY + headR * 0.18, headR * 0.4, Math.max(1, headR * 0.1), '#22c55e');
+      box(headR * 0.74, headY - headR * 0.4, Math.max(1, headR * 0.12), Math.max(1, headR * 0.12), '#94a3b8');
+      box(headR * 0.74, headY - headR * 0.1, Math.max(1, headR * 0.12), Math.max(1, headR * 0.12), '#94a3b8');
     } else {
-      // ponytail: placeholder shell until the art pack draws a sensor cluster.
-      ctx.fillStyle = '#d8813a';
-      for (const [dx, dy] of [[-0.4, 0.2], [0.4, 0.2], [0, -0.35]] as const) {
-        ctx.beginPath();
-        ctx.arc(headR * dx, headY + headR * dy, Math.max(1, headR * 0.2), 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // sensor cluster: industrial alloy turret with triple aperture lenses
+      box(-headR * 0.85, headY - headR * 0.55, headR * 1.7, headR * 1.1, '#57534e');
+      ctx.fillStyle = '#0284c7';
+      ctx.beginPath();
+      ctx.arc(headR * 0.2, headY - headR * 0.05, Math.max(1, headR * 0.38), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(-headR * 0.38, headY - headR * 0.2, Math.max(1, headR * 0.22), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(-headR * 0.38, headY + headR * 0.2, Math.max(1, headR * 0.16), 0, Math.PI * 2);
+      ctx.fill();
     }
   } else {
     ctx.fillStyle = tone;
@@ -994,10 +1165,11 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
       ctx.fillStyle = 'rgba(40,30,20,0.35)';
       ctx.fillRect(headR * 0.08, headY + headR * 0.38, headR * 0.42, Math.max(1, headR * 0.1));
     }
-    // ponytail: placeholder shell until the art pack draws a heavy brow.
+    // Heavy brow (head 5)
     if (look.head === 5 && o.build === 'human') {
-      ctx.fillStyle = 'rgba(30,20,14,0.6)';
-      ctx.fillRect(headR * 0.1, headY - headR * 0.12, headR * 0.75, Math.max(1, headR * 0.16));
+      box(headR * 0.08, headY - headR * 0.15, headR * 0.8, Math.max(1, headR * 0.22), 'rgba(28,20,14,0.72)');
+      box(headR * 0.35, headY + headR * 0.05, headR * 0.35, Math.max(1, headR * 0.14), 'rgba(28,20,14,0.35)');
+      box(headR * 0.05, headY + headR * 0.35, headR * 0.55, Math.max(1, headR * 0.16), 'rgba(40,30,20,0.45)');
     }
     // Augmented: scanner jaw (head 3) or augmented ocular (head 4)
     if (o.build === 'augmented') {
@@ -1014,16 +1186,33 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
         ctx.arc(headR * 0.55, headY + headR * 0.2, headR * 0.2, 0, Math.PI * 2);
         ctx.fill();
       } else if (look.head === 5) {
-        // ponytail: placeholder shell until the art pack draws a monocle HUD.
-        ctx.strokeStyle = '#d8b44a';
+        // monocle HUD: polished brass frame with glowing holographic reticle
+        ctx.strokeStyle = '#d4af37';
         ctx.lineWidth = Math.max(1, headR * 0.1);
         ctx.beginPath();
         ctx.arc(headR * 0.45, headY + headR * 0.18, headR * 0.32, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(headR * 0.2, headY + headR * 0.18);
+        ctx.lineTo(headR * 0.7, headY + headR * 0.18);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(headR * 0.45, headY - headR * 0.05);
+        ctx.lineTo(headR * 0.45, headY + headR * 0.4);
+        ctx.stroke();
+        box(headR * 0.55, headY + headR * 0.05, Math.max(1, headR * 0.12), Math.max(1, headR * 0.12), '#f59e0b');
       } else if (look.head === 6) {
-        // ponytail: placeholder shell until the art pack draws a bionic optic.
-        ctx.fillStyle = '#e53935';
-        ctx.fillRect(headR * 0.25, headY + headR * 0.02, headR * 0.45, headR * 0.3);
+        // bionic optic: titanium socket with glowing crimson lens and circuit trace
+        box(headR * 0.2, headY - headR * 0.08, headR * 0.55, headR * 0.42, '#334155');
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(headR * 0.48, headY + headR * 0.12, Math.max(1, headR * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+        box(headR * 0.45, headY + headR * 0.1, Math.max(1, headR * 0.08), Math.max(1, headR * 0.08), '#ffffff');
+        box(headR * 0.1, headY + headR * 0.05, headR * 0.15, Math.max(1, headR * 0.06), '#94a3b8');
+        box(-headR * 0.1, headY + headR * 0.15, headR * 0.22, Math.max(1, headR * 0.06), '#94a3b8');
       }
     }
   }
@@ -1162,15 +1351,22 @@ function drawCrest(
         ctx.fillRect(-r * 0.5, headY - r * 2.3, px(r * 0.16), r * 1.2);
         ctx.fillRect(r * 0.4, headY - r * 2.3, px(r * 0.16), r * 1.2);
         break;
-      case 7: // ponytail: placeholder shell until the art pack draws a warning siren.
-        ctx.fillStyle = u.trim;
-        ctx.fillRect(-r * 0.25, headY - r * 1.35, r * 0.5, px(r * 0.2));
-        ctx.fillStyle = '#e53935';
+      case 7: // warning siren: beacon base, dome, protective cage, top cap
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(-r * 0.35, headY - r * 1.3, r * 0.7, px(r * 0.22));
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(-r * 0.15, headY - r * 1.7, r * 0.3, r * 0.4);
+        ctx.fillStyle = '#ef4444';
         ctx.beginPath();
-        ctx.arc(0, headY - r * 1.35, r * 0.4, Math.PI, 0);
+        ctx.arc(0, headY - r * 1.35, r * 0.45, Math.PI, 0);
         ctx.fill();
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(-r * 0.32, headY - r * 1.75, px(r * 0.1), r * 0.45);
+        ctx.fillRect(r * 0.22, headY - r * 1.75, px(r * 0.1), r * 0.45);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(-r * 0.25, headY - r * 1.85, r * 0.5, px(r * 0.12));
         break;
-      default: // exhaust array
+      default: // exhaust array: quad industrial exhaust pipes with fiery manifold tips
         ctx.fillStyle = '#475569';
         for (let i = 0; i < 4; i++) {
           ctx.fillRect(-r * 0.95 + i * r * 0.55, headY - r * 1.8, px(r * 0.32), r * 0.85);
@@ -1215,17 +1411,23 @@ function drawCrest(
         ctx.fillStyle = '#ffb300';
         ctx.fillRect(-r * 1.2, headY - r * 0.7, r * 0.4, px(r * 0.22));
         break;
-      case 7: // ponytail: placeholder shell until the art pack draws a neural uplink.
+      case 7: // neural uplink: cranial base socket, articulated mast, pulsing telemetry ring node
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(-r * 0.75, headY - r * 1.25, r * 0.4, px(r * 0.25));
         ctx.fillStyle = '#9aa2aa';
-        ctx.fillRect(-r * 0.6, headY - r * 1.9, px(r * 0.14), r * 0.9);
+        ctx.fillRect(-r * 0.6, headY - r * 2.2, px(r * 0.15), r * 1.0);
         ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(-r * 0.72, headY - r * 2.0, px(r * 0.38), px(r * 0.2));
+        ctx.fillRect(-r * 0.85, headY - r * 2.3, r * 0.65, px(r * 0.2));
+        ctx.fillStyle = '#e0f2fe';
+        ctx.fillRect(-r * 0.55, headY - r * 2.6, px(r * 0.1), r * 0.3);
         break;
-      case 8: // ponytail: placeholder shell until the art pack draws a sensory brow.
-        ctx.fillStyle = '#78909c';
-        ctx.fillRect(-r * 0.7, headY - r * 0.55, r * 1.7, px(r * 0.22));
-        ctx.fillStyle = '#ffb300';
-        for (let i = 0; i < 3; i++) ctx.fillRect(-r * 0.4 + i * r * 0.5, headY - r * 0.52, px(r * 0.14), px(r * 0.14));
+      case 8: // sensory brow: wraparound sensor plate with 4-element LED telemetry array
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(-r * 0.75, headY - r * 0.6, r * 1.8, px(r * 0.3));
+        for (let i = 0; i < 4; i++) {
+          ctx.fillStyle = i % 2 === 0 ? '#00e5ff' : '#f59e0b';
+          ctx.fillRect(-r * 0.55 + i * r * 0.45, headY - r * 0.55, px(r * 0.2), px(r * 0.2));
+        }
         break;
       default: // neural fins
         ctx.fillStyle = '#90a4ae';
@@ -1283,22 +1485,38 @@ function drawCrest(
       ctx.fillStyle = hair;
       ctx.fillRect(-r * 1.5, headY + r * 0.15, r * 0.45, r * 0.95);
       break;
-    case 8: // ponytail: placeholder shell until the art pack draws a pine-tar helmet.
-      cap(u.primary);
-      ctx.fillStyle = '#3a2a1c';
-      ctx.fillRect(-r * 0.9, headY - r * 0.75, r * 0.9, px(r * 0.3));
-      break;
-    case 9: // ponytail: placeholder shell until the art pack draws a stirrup flap.
+    case 8: // pine-tar helmet: gloss trim with dark resin stains caked across crown and bill
       cap(u.primary);
       ctx.fillStyle = u.trim;
-      ctx.fillRect(-r * 1.06, headY - r * 0.1, r * 0.5, r * 0.9);
+      ctx.fillRect(-r * 1.02, headY - r * 0.12, r * 2.04, px(r * 0.1));
+      ctx.fillStyle = '#26140b';
+      ctx.fillRect(-r * 0.95, headY - r * 0.8, r * 1.0, px(r * 0.35));
+      ctx.fillRect(-r * 0.15, headY - r * 0.65, r * 0.85, px(r * 0.28));
+      ctx.fillStyle = '#3b1f11';
+      ctx.fillRect(-r * 0.65, headY - r * 0.95, r * 0.6, px(r * 0.22));
+      ctx.fillRect(r * 0.2, headY - r * 0.28, r * 1.2, px(r * 0.18));
       break;
-    default: // backward cap
+    case 9: // stirrup flap: batting helmet with extended jaw protection flap and earhole
+      cap(u.primary);
+      ctx.fillStyle = u.trim;
+      ctx.fillRect(0, headY - r * 0.22, r * 1.7, px(r * 0.1));
+      ctx.fillStyle = u.primary;
+      ctx.fillRect(-r * 1.1, headY - r * 0.15, r * 0.6, r * 1.05);
+      ctx.fillStyle = u.trim;
+      ctx.fillRect(-r * 1.1, headY + r * 0.85, r * 0.6, px(r * 0.12));
+      ctx.fillStyle = '#1a1d1c';
+      ctx.fillRect(-r * 0.85, headY + r * 0.25, px(r * 0.2), px(r * 0.2));
+      break;
+    default: // backward cap: reversed crown and bill with keyhole opening and snapback strap
       ctx.fillStyle = u.primary;
       ctx.beginPath();
       ctx.arc(0, headY, r * 1.06, Math.PI, 0);
       ctx.fill();
       ctx.fillRect(-r * 1.7, headY - r * 0.22, r * 1.7, r * 0.34);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(r * 0.25, headY - r * 0.35, r * 0.55, r * 0.3);
+      ctx.fillStyle = u.trim;
+      ctx.fillRect(r * 0.3, headY - r * 0.25, r * 0.45, px(r * 0.12));
       break;
   }
 }
@@ -1383,6 +1601,9 @@ export function drawBat(ctx: CanvasRenderingContext2D, pose: BatPose, a: BatAnch
     a.color ??
     (a.build === 'machine' ? '#c0c8d2' : a.build === 'augmented' ? '#373d44' : '#b98a4a');
 
+  const gx = hx + (mx - hx) * 0.45;
+  const gy = hy + (my - hy) * 0.45;
+
   ctx.save();
   ctx.lineCap = 'round';
   ctx.strokeStyle = batColor;
@@ -1396,6 +1617,31 @@ export function drawBat(ctx: CanvasRenderingContext2D, pose: BatPose, a: BatAnch
   ctx.moveTo(mx, my);
   ctx.lineTo(tx, ty);
   ctx.stroke();
+
+  // Grip tape on handle:
+  ctx.strokeStyle = a.build === 'machine' ? '#3f3f46' : '#18181b';
+  ctx.lineWidth = 4.5 * k;
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(gx, gy);
+  ctx.stroke();
+
+  // Taper / pine tar transition mark or brand ring:
+  if (a.build === 'human' || !a.build) {
+    ctx.strokeStyle = '#27160c';
+    ctx.lineWidth = 6 * k;
+    ctx.beginPath();
+    ctx.moveTo(mx - (tx - hx) * 0.04, my - (ty - hy) * 0.04);
+    ctx.lineTo(mx + (tx - hx) * 0.04, my + (ty - hy) * 0.04);
+    ctx.stroke();
+  } else if (a.build === 'augmented') {
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 7 * k;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(mx + (tx - hx) * 0.03, my + (ty - hy) * 0.03);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 

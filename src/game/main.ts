@@ -314,6 +314,7 @@ import {
   uniformFor,
 } from './look.ts';
 import { MAX_ART_BYTES, clearArt, exportArt, hasArt, loadArt, putArt, removeArt, sprite, withDraft } from './art.ts';
+import { loadVaultSpecPack } from './starterArt.ts';
 import { INK_NAMES, SHADES, fill, fromRGBA, line, padFor, toRGBA, type Pad } from './pixels.ts';
 import {
   makeCam,
@@ -7204,8 +7205,18 @@ function pregame(): void {
   /** Whether the player has pressed START on that screen. */
   let ruled = false;
 
-  const card = (go: string, title: string, sub: string): string =>
-    `<button data-go="${go}"><b>${title}</b><br>${sub}</button>`;
+  const card = (
+    go: string,
+    title: string,
+    sub: string,
+    opts: { hotkey?: string; className?: string; ariaLabel?: string } = {},
+  ): string => {
+    const hkHtml = opts.hotkey ? `<span class="hk" aria-hidden="true">[${opts.hotkey}]</span>` : '';
+    const hkAttr = opts.hotkey ? ` data-hotkey="${opts.hotkey}" aria-keyshortcuts="${opts.hotkey}"` : '';
+    const cls = opts.className ? ` class="${opts.className}"` : '';
+    const label = opts.ariaLabel ? ` aria-label="${escapeText(opts.ariaLabel)}"` : '';
+    return `<button data-go="${go}"${hkAttr}${cls}${label}><b>${title}</b>${hkHtml}<br>${sub}</button>`;
+  };
 
   /**
    * A SETTING AS A DIAL — ◀ VALUE ▶, the control every baseball game since RBI
@@ -7237,12 +7248,12 @@ function pregame(): void {
     // change shape between a four-club league and a thirty-club one.
     const dead = options.length > 1 ? '' : ' disabled';
     return (
-      `<div class="dial"><div class="dialhead">${title}</div><div class="dialbody">` +
-      `<button class="arrow" data-step="${step}" data-by="-1"${dead}>&#9664;</button>` +
-      `<div class="dialval"><b>${escapeText(cur.name)}</b>` +
+      `<div class="dial" role="group" aria-label="${escapeText(title)}"><div class="dialhead">${title}</div><div class="dialbody">` +
+      `<button class="arrow" data-step="${step}" data-by="-1"${dead} aria-label="Previous ${escapeText(title)}">&#9664;</button>` +
+      `<div class="dialval" aria-live="polite"><b>${escapeText(cur.name)}</b>` +
       `<span>${escapeText(cur.blurb)}</span></div>` +
-      `<button class="arrow" data-step="${step}" data-by="1"${dead}>&#9654;</button>` +
-      `</div><div class="pips">` +
+      `<button class="arrow" data-step="${step}" data-by="1"${dead} aria-label="Next ${escapeText(title)}">&#9654;</button>` +
+      `</div><div class="pips" aria-hidden="true">` +
       options.map((_, i) => `<i class="${i === at ? 'on' : ''}"></i>`).join('') +
       `</div></div>`
     );
@@ -7321,7 +7332,9 @@ function pregame(): void {
         .join('') +
       `<button class="plate" data-go="start"><b>PLAY BALL</b>` +
       `<span class="sub">${rules.games} GAMES · ${rounds} ROUND` +
-      `${rounds === 1 ? '' : 'S'} OF ${rules.series}</span></button>`;
+      `${rounds === 1 ? '' : 'S'} OF ${rules.series}</span></button>` +
+      `<button class="card-back" data-go="back" style="grid-column:1/-1;max-width:340px;margin:8px auto 0" ` +
+      `aria-label="Back: return to mode select"><b>BACK</b><span class="hk" aria-hidden="true">[Esc]</span><br>return to mode select</button>`;
   };
 
   /**
@@ -7707,6 +7720,7 @@ function pregame(): void {
       `<div class="edmix"><span>` +
       `<label class="edtiny" style="cursor:pointer">IMPORT DRAWINGS` +
       `<input type="file" id="artin" accept="image/*" multiple hidden></label>` +
+      `<button class="edtiny" data-ed-go="artvault">LOAD VAULT PACK</button>` +
       `<button class="edtiny" data-ed-go="artclear"${have ? '' : ' disabled'}>REMOVE ALL</button>` +
       `<button class="edtiny" data-ed-go="artpack"${have ? '' : ' disabled'}>EXPORT PACK</button>` +
       `<label class="edtiny" style="cursor:pointer">IMPORT PACK` +
@@ -8043,9 +8057,11 @@ function pregame(): void {
   const clubCard = (c: Team, n: number): string => {
     const label = strengthLabel(strengthRank(c, LEAGUE), LEAGUE.length);
     const who = c.identity?.name ?? '';
+    const parkInfo = c.park ? ` · ${c.park.name} (${c.park.left}/${c.park.center}/${c.park.right})` : '';
+    const desc = `${c.name} (${c.abbr}), ${label}${who ? `, ${who}` : ''}${parkInfo}`;
     return (
-      `<button class="clubcard" data-i="${n}">` +
-      `<span class="patch" style="background:hsl(${clubHue(c.abbr)} 45% 62%)">` +
+      `<button class="clubcard" data-i="${n}" aria-label="${escapeText(desc)}">` +
+      `<span class="patch" style="background:hsl(${clubHue(c.abbr)} 45% 62%)" aria-hidden="true">` +
       `${escapeText(c.abbr)}</span>` +
       `<span class="nm">${escapeText(c.name)}</span>` +
       `<span class="who"><b style="color:${RANK_COLOUR[label] ?? 'var(--dim)'}">` +
@@ -8070,7 +8086,12 @@ function pregame(): void {
       prompt.textContent = 'PICK A MODE';
       const resume =
         saved && !seasonOver(saved)
-          ? card('resume', 'CONTINUE', `${saved.you} — ${dayLabel(saved).toLowerCase()}`)
+          ? card(
+              'resume',
+              'CONTINUE',
+              `${saved.you} — ${dayLabel(saved).toLowerCase()}`,
+              { hotkey: 'R', className: 'card-resume', ariaLabel: `Continue Season: ${saved.you}, ${dayLabel(saved)}` },
+            )
           : '';
       // The book is offered only once there is something in it. A RECORD BOOK
       // card on a fresh install is a door to an empty room.
@@ -8081,6 +8102,7 @@ function pregame(): void {
             'RECORD BOOK',
             `${t.seasons} season${t.seasons === 1 ? '' : 's'}` +
               `, ${t.titles} title${t.titles === 1 ? '' : 's'}`,
+            { hotkey: 'B', ariaLabel: `Record Book: ${t.seasons} seasons, ${t.titles} titles` },
           )
         : '';
       // The league card says what is loaded rather than what it does, because
@@ -8094,16 +8116,26 @@ function pregame(): void {
             ? 'the league you stored will not read'
             : `names, ratings and rosters — ${LEAGUE.length} clubs`;
       grid.innerHTML =
+        `<div class="chalk" style="grid-column:1/-1">PLAY BALL</div>` +
         resume +
-        card('exhibition', 'EXHIBITION', 'one game, you pick both clubs') +
-        card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket') +
-        book +
-        card('league', 'CUSTOMIZE', leagueSub) +
-        // The other door onto the pause screen's settings. Offered here with
-        // no conditions on it: the four knobs decide whether the game is
-        // playable at all for the person reading, and a door to them that
-        // only exists once a game is running is the wrong way round.
-        card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half');
+        card('exhibition', 'EXHIBITION', 'one game, you pick both clubs', {
+          hotkey: 'E',
+          ariaLabel: 'Exhibition: one game, you pick both clubs',
+        }) +
+        card('franchise', 'FRANCHISE', 'a season of your own length, then a bracket', {
+          hotkey: 'F',
+          ariaLabel: 'Franchise: a season of your own length, then a bracket',
+        }) +
+        `<div class="chalk" style="grid-column:1/-1">CLUBHOUSE &amp; SETTINGS</div>` +
+        card('league', 'CUSTOMIZE', leagueSub, {
+          hotkey: 'C',
+          ariaLabel: `Customize: ${leagueSub}`,
+        }) +
+        card('settings', 'SETTINGS', 'the swing, the ball, and who plays your half', {
+          hotkey: 'S',
+          ariaLabel: 'Settings: the swing, the ball, and who plays your half',
+        }) +
+        book;
       return;
     }
     if (mode === 'league') {
@@ -8134,11 +8166,40 @@ function pregame(): void {
         mine ? `WHO ${escapeText(mine.abbr)} PLAYS` : `${LEAGUE.length} CLUBS · ROSTER RANK AND HOW THEY PLAY`
       }</div>` +
       LEAGUE.map((c, n) => (c === mine ? '' : clubCard(c, n))).join('') +
-      // ⚠️ THE SAME data-go THE MODE SCREEN USES. This is the screen where
-      // somebody decides they want a different club rather than a different
-      // one of these thirty, and it was a dead end — the editor was reachable
-      // only from a card two screens back.
-      (mine ? '' : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters'));
+      (mine
+        ? card('unpick', 'BACK', `change your club (currently ${mine.abbr})`, {
+            className: 'card-back',
+            hotkey: 'Esc',
+            ariaLabel: `Back: change your selected club (${mine.abbr})`,
+          })
+        : card('league', 'CUSTOMIZE THE CLUBS', 'names, ratings and rosters', { hotkey: 'C' }) +
+          card('back', 'BACK', mode === 'franchise' ? 'return to franchise rules' : 'return to mode select', {
+            className: 'card-back',
+            hotkey: 'Esc',
+            ariaLabel: mode === 'franchise' ? 'Back: return to franchise rules' : 'Back: return to mode select',
+          }));
+  };
+
+  const updateHints = (): void => {
+    const hintEl = document.getElementById('start-hints');
+    if (!hintEl) return;
+    if (!mode) {
+      hintEl.innerHTML =
+        'ARROWS / TAB MOVE &middot; ENTER SELECTS &middot; [E] EXHIBITION &middot; [F] FRANCHISE &middot; [S] SETTINGS';
+    } else if (mode === 'franchise' && !ruled) {
+      hintEl.innerHTML =
+        '&larr; &rarr; DIALS &middot; &uarr; &darr; MOVE &middot; ENTER STARTS &middot; ESC BACK';
+    } else if (mode === 'franchise') {
+      hintEl.innerHTML =
+        'ARROWS MOVE &middot; ENTER SELECTS &middot; [C] CUSTOMIZE &middot; ESC BACK';
+    } else if (mode === 'exhibition') {
+      hintEl.innerHTML = mine
+        ? 'ARROWS MOVE &middot; ENTER PICKS OPPONENT &middot; ESC BACK'
+        : 'ARROWS MOVE &middot; ENTER PICKS CLUB &middot; [C] CUSTOMIZE &middot; ESC BACK';
+    } else if (mode === 'league') {
+      hintEl.innerHTML =
+        'ARROWS / TAB MOVE &middot; ENTER SELECTS &middot; ESC BACK';
+    }
   };
 
   /**
@@ -8156,11 +8217,113 @@ function pregame(): void {
    */
   const drawn = (): void => {
     draw();
+    updateHints();
     el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+  };
+
+  let teardownDpad: (() => void) | null = null;
+
+  const onKeyDown = (e: KeyboardEvent): void => {
+    const front = document.getElementById('pre');
+    if (front && front.style.display !== 'none') return;
+
+    const active = document.activeElement as HTMLElement | null;
+    const isTyping = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA';
+
+    if (e.key === 'Escape' || e.key === 'Backspace') {
+      if (isTyping) {
+        if (e.key === 'Escape') {
+          active?.blur();
+          el.querySelector<HTMLElement>('button')?.focus();
+          e.preventDefault();
+        }
+        return;
+      }
+      e.preventDefault();
+      if (mode === 'league') {
+        if (editing) {
+          if (editWho !== null) {
+            editWho = null;
+            drawn();
+          } else if (editClub !== null) {
+            editClub = null;
+            drawn();
+          } else {
+            editing = null;
+            mode = null;
+            leagueSays = [];
+            drawn();
+          }
+        } else {
+          mode = null;
+          leagueSays = [];
+          drawn();
+        }
+        return;
+      }
+      if (mode === 'franchise') {
+        if (ruled) {
+          ruled = false;
+          drawn();
+        } else {
+          mode = null;
+          drawn();
+        }
+        return;
+      }
+      if (mode === 'exhibition') {
+        if (mine !== null) {
+          mine = null;
+          drawn();
+        } else {
+          mode = null;
+          drawn();
+        }
+        return;
+      }
+      return;
+    }
+
+    if (isTyping) return;
+
+    if (!mode) {
+      const k = e.key.toLowerCase();
+      if (k === 'e') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="exhibition"]')?.click();
+      } else if (k === 'f') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="franchise"]')?.click();
+      } else if (k === 'c') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="league"]')?.click();
+      } else if (k === 's') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="settings"]')?.click();
+      } else if (k === 'b') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="book"]')?.click();
+      } else if (k === 'r') {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="resume"]')?.click();
+      }
+    } else if (mode === 'franchise' || mode === 'exhibition') {
+      const k = e.key.toLowerCase();
+      if (k === 'c' && !mine) {
+        e.preventDefault();
+        el.querySelector<HTMLButtonElement>('[data-go="league"]')?.click();
+      }
+    }
+  };
+
+  const cleanup = (): void => {
+    teardownDpad?.();
+    removeEventListener('keydown', onKeyDown);
   };
 
   const start = (): void => {
     stopMenuMusic();
+    cleanup();
     el.remove();
     nextGame();
   };
@@ -8420,6 +8583,36 @@ function pregame(): void {
       start();
       return;
     }
+    if (go === 'back') {
+      if (mode === 'franchise') {
+        if (ruled) {
+          ruled = false;
+          drawn();
+          return;
+        }
+        mode = null;
+        drawn();
+        return;
+      }
+      if (mode === 'exhibition') {
+        if (mine !== null) {
+          mine = null;
+          drawn();
+          return;
+        }
+        mode = null;
+        drawn();
+        return;
+      }
+      mode = null;
+      drawn();
+      return;
+    }
+    if (go === 'unpick') {
+      mine = null;
+      drawn();
+      return;
+    }
     if (go === 'exhibition' || go === 'franchise' || go === 'league') {
       mode = go;
       leagueSays = [];
@@ -8608,6 +8801,11 @@ function pregame(): void {
             },
           );
         }, 'image/png');
+      } else if (ed === 'artvault') {
+        void loadVaultSpecPack().then((ok) => {
+          artSays = [`${ok} Vault Spec drawings loaded into the Art Pack.`];
+          drawn();
+        });
       } else if (ed === 'artpack') {
         void exportArt().then((pack) => {
           const a = document.createElement('a');
@@ -8721,12 +8919,13 @@ function pregame(): void {
     }
     // Exhibition: you are the home club, so you bat last.
     stopMenuMusic();
+    cleanup();
     el.remove();
     kickOff(mine, picked, 'home');
   });
 
-  // The title screen owns the whole keyboard while it is up. See installDpad.
-  installDpad(el, { swallow: 'all' });
+  teardownDpad = installDpad(el, { swallow: 'handled' });
+  addEventListener('keydown', onKeyDown);
 
   startMenuMusic();
   drawn();

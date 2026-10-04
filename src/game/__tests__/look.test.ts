@@ -226,6 +226,39 @@ describe('an illegal look cannot break a pitch', () => {
     }
   });
 
+  it('draws a different frame for every frame part, on every build', () => {
+    const traceFrame = (build: 'human' | 'augmented' | 'machine', frame: number): string => {
+      const calls: string[] = [];
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (_t, k: string) => {
+          if (['fillStyle', 'strokeStyle', 'font', 'textAlign', 'textBaseline'].includes(k)) return '';
+          return (...a: unknown[]) => {
+            calls.push(`${k}(${a.join(',')})`);
+          };
+        },
+        set: (_t, k: string, v: unknown) => {
+          calls.push(`${k}=${String(v)}`);
+          return true;
+        },
+      }) as unknown as CanvasRenderingContext2D;
+      drawFigure(ctx, {
+        look: { frame, head: 0, crest: 0, tone: 0, number: 8, wear: 0 },
+        uniform: uniformFor(LEAGUE[0]!),
+        build,
+        x: 100,
+        y: 200,
+        h: 96,
+        stance: 'bat',
+      });
+      return calls.join('|');
+    };
+
+    for (const build of ['human', 'augmented', 'machine'] as const) {
+      const frames = PARTS[build].frames.map((_, i) => traceFrame(build, i));
+      expect(new Set(frames).size, `${build} frames all draw the same`).toBe(frames.length);
+    }
+  });
+
   /**
    * ⚠️ THE OTHER HALF OF THE SAME FAULT. `headR` was a flat fraction of `h`, so
    * the head was 77% of the shoulder width AND `enormous` could not touch it —
