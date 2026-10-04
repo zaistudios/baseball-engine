@@ -22,7 +22,7 @@
 import { venueFor, drawVenue, lightFor, overheadPalette, firstPitch, hourAt, STARTS, type Venue } from './venue.ts';
 import { makeRng } from '../core/rng.ts';
 import { newAtBat, swingAt, takePitch, isOver, type AtBatState } from '../core/atBat.ts';
-import type { Player } from '../core/roster.ts';
+import type { Build, Player } from '../core/roster.ts';
 import { ALL_LOCATIONS, chaseContact, locationOffset } from '../core/hit.ts';
 import type { SwingInput, PitchLocation, HitResult } from '../core/hit.ts';
 import { ballArrivalMs, bandsFor, computeOffsetMs, grade } from '../core/timing.ts';
@@ -301,6 +301,7 @@ import { battedAt, radiusAt, RELEASE_DY } from './flight.ts';
 import {
   armBuild,
   artSlots,
+  type ArtPart,
   clubBuild,
   armPoseAt,
   drawBat,
@@ -312,7 +313,8 @@ import {
   lookForExtra,
   uniformFor,
 } from './look.ts';
-import { MAX_ART_BYTES, clearArt, hasArt, loadArt, putArt, removeArt, sprite } from './art.ts';
+import { MAX_ART_BYTES, clearArt, exportArt, hasArt, loadArt, putArt, removeArt, sprite, withDraft } from './art.ts';
+import { INK_NAMES, SHADES, fill, fromRGBA, line, padFor, toRGBA, type Pad } from './pixels.ts';
 import {
   makeCam,
   newReplay,
@@ -7530,6 +7532,116 @@ function pregame(): void {
   let artSays: readonly string[] = [];
 
   /**
+   * THE PIXEL BOX — the part open for drawing, or null. Spec step 5: drawing a
+   * part in the game instead of in some other program and importing it.
+   */
+  let pix: { id: string; label: string; pad: Pad; ink: number; tool: 'pencil' | 'fill'; mirror: boolean } | null = null;
+
+  const grey = (k: number): string => `rgb(${SHADES[k]},${SHADES[k]},${SHADES[k]})`;
+
+  /** The pad as a real n×n image — what a bake stores and the test draws. */
+  const padCanvas = (pad: Pad): HTMLCanvasElement => {
+    const c = document.createElement('canvas');
+    c.width = c.height = pad.n;
+    c.getContext('2d')!.putImageData(new ImageData(toRGBA(pad), pad.n, pad.n), 0, 0);
+    return c;
+  };
+
+  const openPad = (id: string): void => {
+    const [, part] = id.split('/') as [Build, ArtPart, string];
+    let pad = padFor(part);
+    const img = sprite(id);
+    if (img) {
+      // ponytail: an imported drawing is squashed onto the grid and snapped to
+      // the four greys. Lossy for a big painted file — fine for pixel art, and
+      // nothing is stored until BAKE.
+      const c = document.createElement('canvas');
+      c.width = c.height = pad.n;
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(img, 0, 0, pad.n, pad.n);
+      pad = fromRGBA(g.getImageData(0, 0, pad.n, pad.n).data, pad.n);
+    }
+    const label = artSlots().find((sl) => sl.id === id)?.label ?? id;
+    pix = { id, label, pad, ink: 1, tool: 'pencil', mirror: false };
+  };
+
+  const pixPanel = (): string => {
+    if (!pix) return '';
+    const p = pix;
+    const on = (b: boolean): string => (b ? ' style="border-color:var(--hot);color:var(--hot)"' : '');
+    const inks = INK_NAMES.map(
+      (name, k) =>
+        `<button class="edtiny" data-ed-go="pixink" data-ink="${k}"${on(p.ink === k)}>` +
+        `<span class="pixsw" style="background:${k ? grey(k) : 'transparent'}"></span>${name.toUpperCase()}</button>`,
+    ).join('');
+    return (
+      `<div class="pixbox">` +
+      `<canvas id="pixpad" width="320" height="320"></canvas>` +
+      `<div class="pixside">` +
+      `<b>${escapeText(p.label)}</b>` +
+      `<i>${p.pad.n}×${p.pad.n} · four greys, tinted to each club</i>` +
+      `<div class="pixrow">${inks}</div>` +
+      `<div class="pixrow">` +
+      `<button class="edtiny" data-ed-go="pixtool" data-tool="pencil"${on(p.tool === 'pencil')}>PENCIL</button>` +
+      `<button class="edtiny" data-ed-go="pixtool" data-tool="fill"${on(p.tool === 'fill')}>FILL</button>` +
+      `<button class="edtiny" data-ed-go="pixmirror"${on(p.mirror)}>MIRROR</button>` +
+      `<button class="edtiny" data-ed-go="pixclear">CLEAR</button></div>` +
+      `<canvas id="pixtest" class="edlook" width="120" height="150"></canvas>` +
+      `<div class="pixrow">` +
+      `<button class="edtiny" data-ed-go="pixbake">BAKE TO SLOT</button>` +
+      `<button class="edtiny" data-ed-go="pixclose">CLOSE</button></div>` +
+      '</div></div>'
+    );
+  };
+
+  /** Repaint the pad and the test man. Cheap; called on every stroke. */
+  const paintPix = (): void => {
+    const pad = grid.querySelector<HTMLCanvasElement>('#pixpad');
+    const test = grid.querySelector<HTMLCanvasElement>('#pixtest');
+    if (!pix || !pad || !test || !editing) return;
+    const g = pad.getContext('2d')!;
+    const n = pix.pad.n;
+    const k = pad.width / n;
+    for (let i = 0; i < n * n; i++) {
+      const x = i % n;
+      const y = (i - x) / n;
+      const ink = pix.pad.cells[i]!;
+      // Clear cells are a checkerboard, so clear and outline never look alike.
+      g.fillStyle = ink ? grey(ink) : (x + y) % 2 ? '#1c2620' : '#141c17';
+      g.fillRect(x * k, y * k, k, k);
+    }
+
+    // The test man wears this part and stock everything else, in the first
+    // club's kit, so the drawing is seen tinted the way the game will draw it.
+    const [build, part, at] = pix.id.split('/') as [Build, ArtPart, string];
+    const look = { frame: 0, head: 0, crest: 1, tone: 0, number: 7, wear: 0, [part]: Number(at) };
+    const t = test.getContext('2d')!;
+    t.fillStyle = '#101a12';
+    t.fillRect(0, 0, test.width, test.height);
+    const kit = uniformFor(editing[0]!);
+    withDraft(pix.id, padCanvas(pix.pad), () =>
+      drawFigure(t, { look, uniform: kit, build, x: test.width / 2, y: test.height - 6, h: 130, stance: 'bat' }),
+    );
+  };
+
+  /** A stroke on the pad, from a pointer event. A drag is joined to the last cell. */
+  let lastCell: [number, number] | null = null;
+  const strokePix = (e: PointerEvent, pad: HTMLCanvasElement, drag: boolean): void => {
+    if (!pix) return;
+    const r = pad.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * pix.pad.n);
+    const y = Math.floor(((e.clientY - r.top) / r.height) * pix.pad.n);
+    if (pix.tool === 'fill') fill(pix.pad, x, y, pix.ink);
+    else {
+      const [x0, y0] = drag && lastCell ? lastCell : [x, y];
+      line(pix.pad, x0, y0, x, y, pix.ink, pix.mirror);
+    }
+    lastCell = [x, y];
+    paintPix();
+  };
+
+  /**
    * THE ART PACK — where drawings come in, and the one screen that reports what
    * did not land.
    *
@@ -7573,6 +7685,7 @@ function pregame(): void {
           // art.ts since the pack shipped and nothing ever called it, so the
           // only way out of one bad import was REMOVE ALL and re-importing the
           // other thirty-five.
+          `<button class="edtiny" data-ed-go="artdraw" data-art-id="${escapeText(s.id)}">✎ DRAW</button>` +
           (on
             ? `<button class="edtiny" data-ed-go="artdrop" data-art-id="${escapeText(s.id)}">✕ REMOVE</button>`
             : '') +
@@ -7595,10 +7708,14 @@ function pregame(): void {
       `<label class="edtiny" style="cursor:pointer">IMPORT DRAWINGS` +
       `<input type="file" id="artin" accept="image/*" multiple hidden></label>` +
       `<button class="edtiny" data-ed-go="artclear"${have ? '' : ' disabled'}>REMOVE ALL</button>` +
+      `<button class="edtiny" data-ed-go="artpack"${have ? '' : ' disabled'}>EXPORT PACK</button>` +
+      `<label class="edtiny" style="cursor:pointer">IMPORT PACK` +
+      `<input type="file" id="packin" accept=".bbpack,application/json" hidden></label>` +
       `</span></div>` +
       (artSays.length
         ? `<div class="says">${artSays.map((p) => `<div>${escapeText(p)}</div>`).join('')}</div>`
         : '') +
+      pixPanel() +
       `<div class="artgrid">${cells}</div>` +
       '</div>'
     );
@@ -7998,6 +8115,7 @@ function pregame(): void {
         // Both passes are no-ops on the screen that has none of their canvases.
         paintLookPreviews();
         paintArtSlots();
+        paintPix();
       } else drawLeague();
       return;
     }
@@ -8180,6 +8298,73 @@ function pregame(): void {
    * no dependency, and it works from a `file://` page — which is the whole
    * distribution story. The file never leaves the machine.
    */
+  /**
+   * IMPORTING A PACK. Same rule as importing drawings: every entry that does
+   * not land is named. A pack is untrusted input — only known slots, only
+   * image data URLs, only sprite-sized files get in.
+   */
+  grid.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.id === 'packin' ? input.files?.[0] : undefined;
+    if (!file) return;
+    input.value = '';
+    void (async () => {
+      const said: string[] = [];
+      let ok = 0;
+      let pack: unknown = null;
+      try {
+        pack = JSON.parse(await file.text());
+      } catch {
+        // Reported below as "not an art pack".
+      }
+      if (!pack || typeof pack !== 'object' || Array.isArray(pack)) {
+        artSays = [`${file.name} is not an art pack.`];
+        drawn();
+        return;
+      }
+      const slots = new Set(artSlots().map((sl) => sl.id));
+      for (const [id, url] of Object.entries(pack as Record<string, unknown>)) {
+        if (!slots.has(id)) {
+          said.push(`${id} — no such part in this game.`);
+          continue;
+        }
+        if (typeof url !== 'string' || !url.startsWith('data:image/')) {
+          said.push(`${id} — not an image.`);
+          continue;
+        }
+        try {
+          const blob = await (await fetch(url)).blob();
+          if (blob.size > MAX_ART_BYTES) {
+            said.push(`${id} — too big for a sprite.`);
+            continue;
+          }
+          await putArt(id, blob);
+          ok++;
+        } catch {
+          said.push(`${id} — could not be read as an image.`);
+        }
+      }
+      artSays = [`${ok} drawing${ok === 1 ? '' : 's'} in from ${file.name}.`, ...said];
+      drawn();
+    })();
+  });
+
+  // ⚠️ DRAWING NEVER REDRAWS THE SCREEN, only the pad — a re-render per pixel
+  // would rebuild every slot in the grid at pointer rate.
+  grid.addEventListener('pointerdown', (ev) => {
+    const e = ev as PointerEvent;
+    const pad = e.target as HTMLCanvasElement;
+    if (pad.id !== 'pixpad') return;
+    pad.setPointerCapture(e.pointerId);
+    strokePix(e, pad, false);
+  });
+  grid.addEventListener('pointermove', (ev) => {
+    const e = ev as PointerEvent;
+    const pad = e.target as HTMLCanvasElement;
+    if (pad.id !== 'pixpad' || !(e.buttons & 1) || pix?.tool !== 'pencil') return;
+    strokePix(e, pad, true);
+  });
+
   grid.addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
     if (input.id !== 'artin' || !input.files) return;
@@ -8395,6 +8580,44 @@ function pregame(): void {
             drawn();
           });
         }
+      } else if (ed === 'artdraw') {
+        const id = btn.dataset['artId'];
+        if (id) openPad(id);
+      } else if (ed === 'pixink' && pix) {
+        pix.ink = Number(btn.dataset['ink']) || 0;
+      } else if (ed === 'pixtool' && pix) {
+        pix.tool = btn.dataset['tool'] === 'fill' ? 'fill' : 'pencil';
+      } else if (ed === 'pixmirror' && pix) {
+        pix.mirror = !pix.mirror;
+      } else if (ed === 'pixclear' && pix) {
+        pix.pad.cells.fill(0);
+      } else if (ed === 'pixclose') {
+        pix = null;
+      } else if (ed === 'pixbake' && pix) {
+        const { id, label } = pix;
+        padCanvas(pix.pad).toBlob((blob) => {
+          if (!blob) return;
+          void putArt(id, blob).then(
+            () => {
+              artSays = [`${label} baked. Every man wearing it draws it now.`];
+              drawn();
+            },
+            () => {
+              artSays = [`${label} could not be stored — is site data blocked?`];
+              drawn();
+            },
+          );
+        }, 'image/png');
+      } else if (ed === 'artpack') {
+        void exportArt().then((pack) => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([JSON.stringify(pack)], { type: 'application/json' }));
+          a.download = 'basedball.bbpack';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          artSays = [`${Object.keys(pack).length} drawings exported to basedball.bbpack.`];
+          drawn();
+        });
       } else if (ed === 'artclear') {
         void clearArt().then(() => {
           artSays = ['Every drawing removed. The shells are back.'];

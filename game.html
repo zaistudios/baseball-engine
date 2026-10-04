@@ -421,6 +421,23 @@
         width: 64px; height: 64px; image-rendering: pixelated; flex: 0 0 auto;
         background: #101a12; border: 1px solid var(--line);
       }
+      /* THE PIXEL BOX. The pad is a fixed 320 square drawn at whole cells, and
+         it shrinks with the screen — the stroke maths reads its real size. */
+      #start .pixbox {
+        display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 0;
+        border-top: 1px solid var(--line); margin-top: 8px;
+      }
+      #start #pixpad {
+        width: 320px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated;
+        border: 1px solid var(--hot); cursor: crosshair; touch-action: none;
+      }
+      #start .pixside { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+      #start .pixside i { font-size: 9px; color: var(--dim); font-style: normal; }
+      #start .pixrow { display: flex; flex-wrap: wrap; gap: 4px; }
+      #start .pixsw {
+        display: inline-block; width: 9px; height: 9px; margin-right: 4px;
+        border: 1px solid var(--line); vertical-align: -1px;
+      }
       #start .artpic.empty {
         display: flex; align-items: center; justify-content: center;
         color: var(--line); font-size: 18px;

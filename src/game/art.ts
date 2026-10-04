@@ -57,10 +57,28 @@ export const MAX_ART_BYTES = 4 * 1024 * 1024;
  * draw, which is correct and invisible. An `await` anywhere in the draw would
  * be a frame that renders half a man.
  */
-const live = new Map<string, ImageBitmap>();
+type Pic = ImageBitmap | HTMLCanvasElement;
+const live = new Map<string, Pic>();
 
 /** What is loaded right now. Undefined means "draw the shell". */
-export const sprite = (id: string): ImageBitmap | undefined => live.get(id);
+export const sprite = (id: string): Pic | undefined => live.get(id);
+
+/**
+ * Draw with an unsaved drawing standing in for one part — the pixel box's
+ * TEST ON A MAN. Nothing is stored; the slot is put back however `fn` exits.
+ */
+export function withDraft(id: string, pic: HTMLCanvasElement, fn: () => void): void {
+  const had = live.get(id);
+  live.set(id, pic);
+  tints.clear();
+  try {
+    fn();
+  } finally {
+    if (had) live.set(id, had);
+    else live.delete(id);
+    tints.clear();
+  }
+}
 
 /** How many parts are in the library — the editor prints it. */
 export const artCount = (): number => live.size;
@@ -132,6 +150,28 @@ export async function removeArt(id: string): Promise<void> {
   const db = await open();
   await run(db.transaction(STORE, 'readwrite').objectStore(STORE).delete(id) as IDBRequest<undefined>);
   db.close();
+}
+
+/**
+ * THE PACK — every stored part as `{ id: dataURL }`, which is what a `.bbpack`
+ * file is. JSON with base64 inside: bigger than a zip, and needs no zip.
+ */
+export async function exportArt(): Promise<Record<string, string>> {
+  const db = await open();
+  const store = db.transaction(STORE, 'readonly').objectStore(STORE);
+  const keys = await run(store.getAllKeys());
+  const blobs = (await run(store.getAll())) as Blob[];
+  db.close();
+  const out: Record<string, string> = {};
+  for (let i = 0; i < keys.length; i++) {
+    out[String(keys[i])] = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blobs[i]!);
+    });
+  }
+  return out;
 }
 
 /** Forget all of it. */
