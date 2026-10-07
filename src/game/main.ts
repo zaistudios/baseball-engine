@@ -112,7 +112,6 @@ import {
   fieldingSide,
   currentBatter,
   currentPitcher,
-  onDeck,
   stateOf,
   inningLabel,
   type GameState,
@@ -287,7 +286,6 @@ import {
   travelMs,
   canCheck,
   barrelOf,
-  batSpeedLabel,
   BAT_POSES,
   poseAt,
   isSwinging,
@@ -298,6 +296,8 @@ import {
   ZONE_HALF_H,
 } from './swing.ts';
 import { battedAt, radiusAt, RELEASE_DY } from './flight.ts';
+import { situationHtml } from './hud.ts';
+import { ballOut, beatMs, canQueue, fireQueued, windupTempo, type Tempo } from './beat.ts';
 import {
   armBuild,
   artSlots,
@@ -442,6 +442,7 @@ function resume(): void {
   arriveAt += held;
   deliveryAt += held;
   throwAt += held;
+  resolvedAt += held;
   if (swingStartedAt !== null) swingStartedAt += held;
   if (checkedAt !== null) checkedAt += held;
   if (releasedAt !== null) releasedAt += held;
@@ -867,6 +868,25 @@ let deliveryAt = 0;
 let deliveryPitch: PitchType = 'fastball';
 
 /**
+ * THE TEMPO drawArm() POSES HIM OFF — your graded delivery's, or the windup
+ * of a pitch nobody is timing the release of. See windUp().
+ */
+let armTempo: Tempo = deliveryOf();
+
+/**
+ * WHEN THE LAST PITCH RESOLVED, so a press in the beat after it can tell the
+ * tail of a swing from a request for the next pitch. See canQueue().
+ */
+let resolvedAt = 0;
+
+/**
+ * THE NEXT PITCH, ASKED FOR DURING A ROUTINE BEAT. One press, banked, thrown
+ * the moment the screen is clear — see fireQueued() for what counts as clear.
+ * Never set in watch mode, never set on the pitch that ends an at-bat.
+ */
+let queuedPitch = false;
+
+/**
  * How the last one left the hand, or null before the first pitch of an at-bat.
  *
  * Kept after the release so the bar can show the verdict for the length of the
@@ -1144,6 +1164,25 @@ const elControls = $('controls');
 const elLog = $('log');
 const elBanner = $('banner');
 const elBook = $('book');
+/** The call, for a screen reader. See announce(). */
+const elCall = $('call');
+
+/**
+ * SAY THE CALL ONCE. The canvas is invisible to assistive technology, so the
+ * umpire's word and the broadcast's caption are written to a polite live
+ * region — one write per EVENT, never per frame: `key` is what makes two
+ * identical BALLs in a row two announcements and one BALL held for 600ms one.
+ *
+ * ⚠️ A CAPTION OVER A REPLAY IS SAID WHEN THE REPLAY ENDS. It is built before
+ * the ball is in the air, and reading it out then would be the spoiler the
+ * snapshot in `shown` exists to stop.
+ */
+let announced: unknown = null;
+function announce(key: unknown, text: string): void {
+  if (key === announced) return;
+  announced = key;
+  elCall.textContent = text;
+}
 /** The masthead, which says which mode you are in. */
 const elTitle = document.querySelector('h1')!;
 
@@ -1156,6 +1195,26 @@ function say(text: string, cls = ''): void {
 }
 
 // ------------------------------------------------------------- your at-bat
+
+/**
+ * START A DELIVERY NOBODY IS TIMING, and say when the ball leaves the hand.
+ *
+ * ⚠️ EVERYTHING ABOUT THE PITCH IS STILL DECIDED ON THE PRESS — the call, the
+ * count, the computer's swing, every draw on the seeded stream, in the order
+ * they always were. Only the LAUNCH moves, to the release point of the arm
+ * drawArm() is now posing; the flight, the bat travel and the windows are
+ * measured from there exactly as they were from the press.
+ *
+ * ⚠️ deliveryOf() WITH NO PITCH, ON PURPOSE. The tempo table is a meter for
+ * the man timing his own release; a curveball's slower arm on the computer's
+ * mound would be a tell the hitter reads off the windup before the ball
+ * exists. Every pitch thrown to you comes out of the same motion.
+ */
+function windUp(): number {
+  armTempo = windupTempo(deliveryOf(), flightScale());
+  deliveryAt = performance.now();
+  return deliveryAt + armTempo.releaseAtMs;
+}
 
 /** Throw the next pitch TO you. The computer is on the mound. */
 function deliver(): void {
@@ -1178,7 +1237,9 @@ function deliver(): void {
     organCharge();
   }
 
-  launchAt = performance.now();
+  // ⚠️ THE BALL LEAVES THE HAND, NOT THE PRESS. It used to launch on the
+  // frame you asked for it, out of a man standing perfectly still. See windUp().
+  launchAt = windUp();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
   // readScale() is 1 on every path but your own at-bat, so this is the same
   // expression it has always been everywhere else. See readScale().
@@ -1487,7 +1548,7 @@ function resolvePitch(): void {
     // A bunt is not a swing at a window and has no offset to read out. See
     // SwingRead: the word and the bar must never describe different pitches.
     swingRead = null;
-    flashUntil = pauseFor(1000);
+    flashUntil = pauseFor(beatMs(isOver(atBat)));
     phase = 'resolve';
     return;
   }
@@ -1609,7 +1670,7 @@ function resolvePitch(): void {
   flashUntil =
     replay && replay.outcome === 'foul'
       ? performance.now() + replayLength(replay) / speed()
-      : pauseFor(1000);
+      : pauseFor(beatMs(isOver(atBat)));
   phase = 'resolve';
 }
 
@@ -1723,6 +1784,7 @@ function startDelivery(): void {
   if (game.over || youBat() || phase !== 'calling') return;
   deliveryAt = performance.now();
   deliveryPitch = callType;
+  armTempo = deliveryOf(deliveryPitch);
   releaseGrade = null;
   // The pen is disarmed by anything that changes what you are looking at, and
   // the arm coming set is exactly that. Same rule as throwing the pitch was.
@@ -1791,7 +1853,7 @@ function release(at: number): void {
  *        mode throws. The bar draws a verdict either way and a frozen mark only
  *        when there is a moment to freeze.
  */
-function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): void {
+function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null, windup = false): void {
   if (game.over) return;
   const stats = statsOf(currentBatter(game));
   const tired = fatigue(fieldingStaff(game));
@@ -1839,7 +1901,9 @@ function pitchToThem(graded: ReleaseGrade = 'good', at: number | null = null): v
     organCharge();
   }
 
-  launchAt = performance.now();
+  // A released pitch leaves now. Watch mode's call has an arm to go through
+  // first — the same one the other half's pitches come out of. See windUp().
+  launchAt = windup ? windUp() : performance.now();
   const flight = ballArrivalMs(launchAt, pitch.speedMph) - launchAt;
   // readScale() is 1 on every path but your own at-bat, so this is the same
   // expression it has always been everywhere else. See readScale().
@@ -2020,7 +2084,7 @@ function resolveTheirSwing(): void {
   chart = chart.map((r, i) => (i === chart.length - 1 ? { ...r, result: scored } : r));
 
   theirCall = null;
-  flashUntil = pauseFor(1000);
+  flashUntil = pauseFor(beatMs(isOver(atBat)));
   phase = 'resolve';
 }
 
@@ -2754,7 +2818,7 @@ function autoStep(): void {
     // where you put it until your arm gets tired.
     callType = choice.type;
     callSpot = choice.location;
-    pitchToThem();
+    pitchToThem('good', null, true);
     return;
   }
 
@@ -2778,6 +2842,8 @@ function press(key: string): void {
   if (key === 't') {
     auto = !auto;
     autoSwingAt = null;
+    // A pitch you banked is yours; the computer asks for its own.
+    queuedPitch = false;
     say(auto ? 'AUTO ON — the computer plays your half.' : 'AUTO OFF — you are back in.', 'half');
     return;
   }
@@ -2854,8 +2920,27 @@ function press(key: string): void {
   // Batting: space starts the pitch, then space is the swing.
   if (youBat()) {
     if (key === ' ') {
+      const now = performance.now();
       if (phase === 'idle') deliver();
-      else if (phase === 'windup') swing();
+      // ⚠️ NOT WHILE IT IS STILL IN HIS HAND. A press during the windup is
+      // dropped, not banked: there is no ball yet to be early on. The
+      // computer's bat does not come through here — see ballOut().
+      else if (phase === 'windup') {
+        if (ballOut(now, launchAt)) swing();
+      }
+      // THE NEXT PITCH, BANKED. Only in a routine beat — never under a replay
+      // and never on the pitch that ended the at-bat, whose call is the event.
+      else if (
+        phase === 'resolve' &&
+        !auto &&
+        !queuedPitch &&
+        !replay &&
+        !isOver(atBat) &&
+        canQueue(now, resolvedAt)
+      ) {
+        queuedPitch = true;
+        render();
+      }
     } else if (key === 's') steal();
     else if (key === 'b') toggleBunt();
     else if (key === 'h') pinchHitNow();
@@ -3439,24 +3524,44 @@ const venueNow = (): Venue => {
   return venueCache.venue;
 };
 
+/** Built once — the canvas never changes size. See drawField(). */
+let vignette: CanvasGradient | null = null;
+const edgeShade = (): CanvasGradient => {
+  const g = ctx.createRadialGradient(PLATE_X, 170, 90, PLATE_X, 170, 290);
+  g.addColorStop(0, 'rgba(5,7,12,0)');
+  g.addColorStop(1, 'rgba(5,7,12,0.42)');
+  return g;
+};
+
 function drawField(now: number): void {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // THE HOME CLUB'S PARK, at this hour. See venue.ts.
+  //
+  // ⚠️ ITS SCOREBOARD READS THE SNAPSHOT, like the line score does. It read
+  // the live game, so a home run's runs were up on the board in the outfield
+  // for the whole of the at-bat view the replay opens on. See `shown`.
+  const board = onScreen();
   drawVenue(ctx, canvas.width, canvas.height, PLATE_Y, venueNow(), lightFor(venueNow(), gameHour()), now, {
-    away: game.away.abbr,
-    home: game.home.abbr,
-    a: game.awayState.runs,
-    h: game.homeState.runs,
-    inning: game.inning,
-    top: game.half === 'top',
+    away: board.away.abbr,
+    home: board.home.abbr,
+    a: board.awayState.runs,
+    h: board.homeState.runs,
+    inning: board.inning,
+    top: board.half === 'top',
   });
 
+  // THE LENS. The edges of the frame fall off a little, the lane from the
+  // mound to the plate does not — the one place on this canvas worth looking.
+  vignette ??= edgeShade();
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   // Strike zone.
-  ctx.strokeStyle = '#3d4a38';
+  ctx.strokeStyle = '#3a4560';
   ctx.lineWidth = 1;
   ctx.strokeRect(ZONE.x, ZONE.y, ZONE.w, ZONE.h);
-  ctx.strokeStyle = '#222c20';
+  ctx.strokeStyle = '#1f2636';
   for (let i = 1; i < 3; i++) {
     ctx.beginPath();
     ctx.moveTo(ZONE.x + (ZONE.w / 3) * i, ZONE.y);
@@ -3471,7 +3576,7 @@ function drawField(now: number): void {
   drawArm(now);
 
   // Home plate.
-  ctx.fillStyle = '#cfd6c4';
+  ctx.fillStyle = '#dfe4ee';
   ctx.beginPath();
   ctx.moveTo(180, PLATE_Y);
   ctx.lineTo(240, PLATE_Y);
@@ -3568,22 +3673,22 @@ function drawBreak(now: number): void {
   ctx.globalAlpha = Math.max(0, a);
   // Darker than the moment card: the field behind it is between innings and
   // there is nothing on it worth seeing through the words.
-  ctx.fillStyle = 'rgba(9,13,11,0.92)';
+  ctx.fillStyle = 'rgba(9,11,18,0.92)';
   ctx.fillRect(0, y, canvas.width, h);
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   ctx.fillRect(0, y, canvas.width, 2);
   ctx.fillRect(0, y + h - 2, canvas.width, 2);
 
   ctx.textAlign = 'center';
   const cx = canvas.width / 2;
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   ctx.font = '13px ui-monospace, monospace';
   ctx.fillText(b.label, cx, y + 28);
   // The score is the big thing on the card. It is what the break is for.
-  ctx.fillStyle = '#e8e8d8';
+  ctx.fillStyle = '#edf0f7';
   ctx.font = '26px ui-monospace, monospace';
   ctx.fillText(b.score, cx, y + 62);
-  ctx.fillStyle = '#9aa896';
+  ctx.fillStyle = '#8b95a8';
   ctx.font = '11px ui-monospace, monospace';
   ctx.fillText(b.note, cx, y + 86);
   ctx.restore();
@@ -3616,7 +3721,7 @@ function drawScene(s: Scene, t: number, total: number): void {
 
   ctx.save();
   ctx.globalAlpha *= inK;
-  ctx.fillStyle = 'rgba(9,13,11,0.82)';
+  ctx.fillStyle = 'rgba(9,11,18,0.82)';
   ctx.fillRect(0, y - 24, canvas.width, s.detail ? 62 : 44);
   // A rule in the tier's colour, so the size of the moment reads before the
   // words do — the same trick the pre-game card plays with the rank label.
@@ -3628,7 +3733,7 @@ function drawScene(s: Scene, t: number, total: number): void {
   ctx.font = `${big ? 22 : 16}px ui-monospace, monospace`;
   ctx.fillText(s.title, canvas.width / 2, y);
   if (s.detail) {
-    ctx.fillStyle = '#9aa896';
+    ctx.fillStyle = '#8b95a8';
     ctx.font = '11px ui-monospace, monospace';
     ctx.fillText(s.detail, canvas.width / 2, y + 20);
   }
@@ -3673,9 +3778,9 @@ function drawMoment(now: number): void {
   const a = Math.min(1, t / 140) * Math.min(1, (MOMENT_MS - t) / 420);
   ctx.save();
   ctx.globalAlpha = a;
-  ctx.fillStyle = 'rgba(9,13,11,0.86)';
+  ctx.fillStyle = 'rgba(9,11,18,0.86)';
   ctx.fillRect(0, 96, canvas.width, 46);
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   ctx.fillRect(0, 96, canvas.width, 2);
   ctx.fillRect(0, 140, canvas.width, 2);
   ctx.textAlign = 'center';
@@ -3731,7 +3836,7 @@ function drawArm(now: number): void {
   // one frame, every pitch. `deliveryAt` keeps running after release, and
   // armPoseAt() parks him at rest once the recovery is done — which is the
   // same pose the set is, so the pitch before last cannot leave him crooked.
-  const pose = armPoseAt(now - deliveryAt, deliveryOf(deliveryPitch));
+  const pose = armPoseAt(now - deliveryAt, armTempo);
 
   drawFigure(ctx, {
     look: lookForArm(arm, club),
@@ -3978,6 +4083,18 @@ function drawBall(now: number): void {
   }
 
   if (!pitch) return;
+  // STILL IN HIS HAND. Nothing to draw until the release windUp() scheduled —
+  // except a tell he gives away in the set, which is exactly when it shows.
+  if (now < launchAt) {
+    if (pitch.tell?.timing === 'pre_pitch') {
+      ctx.strokeStyle = TELL_COLOR[pitch.tell.pitch];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(PLATE_X, PLATE_Y + RELEASE_DY, radiusAt(0) + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    return;
+  }
   const flight = arriveAt - launchAt;
   const t = Math.max(0, Math.min(1, (now - launchAt) / flight));
 
@@ -4027,6 +4144,16 @@ function drawBall(now: number): void {
     y += (MITT_XY.y - y) * e;
     // Nearer the camera than the plate is, so a touch bigger.
     r = radiusAt(1 + e * 0.2);
+  }
+
+  // ITS SHADOW ON THE DIRT, mound to plate. The radius alone was carrying all
+  // of the depth; a shadow walking down the lane says where the ball IS in
+  // the sixty feet, not just how big it has got. Gone once it is in the mitt.
+  if (past === 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x, ARM_XY.y + (PLATE_Y + 12 - ARM_XY.y) * t, r * 1.1, r * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   ctx.fillStyle =
@@ -4133,17 +4260,17 @@ function drawThrowBar(now: number): void {
     ctx.fillRect(a, BAR.y, b - a, BAR.h);
   };
 
-  ctx.fillStyle = '#0a0f0c';
+  ctx.fillStyle = '#0b0d13';
   ctx.fillRect(BAR.x, BAR.y, BAR.w, BAR.h);
-  band(throwWindow('good'), '#243320');
-  band(throwWindow('perfect'), '#3d5733');
+  band(throwWindow('good'), '#1d3a33');
+  band(throwWindow('perfect'), '#2a6b5a');
 
-  ctx.strokeStyle = '#2f3a2a';
+  ctx.strokeStyle = '#2a3142';
   ctx.lineWidth = 1;
   ctx.strokeRect(BAR.x + 0.5, BAR.y + 0.5, BAR.w - 1, BAR.h - 1);
 
   const target = x(THROW_AT_MS);
-  ctx.strokeStyle = '#cfd6c4';
+  ctx.strokeStyle = '#dfe4ee';
   ctx.beginPath();
   ctx.moveTo(target, BAR.y - 3);
   ctx.lineTo(target, BAR.y + BAR.h + 3);
@@ -4152,14 +4279,14 @@ function drawThrowBar(now: number): void {
   // The marker, frozen where it was when you let go so the verdict is readable
   // against the mark that earned it. Same as the delivery.
   const at = thrownAt === null ? t : thrownAt - throwAt;
-  ctx.fillStyle = throwGrade ? RELEASE_COLOR[throwGrade] : '#e8e8d8';
+  ctx.fillStyle = throwGrade ? RELEASE_COLOR[throwGrade] : '#edf0f7';
   ctx.fillRect(x(at) - 1, BAR.y - 4, 2, BAR.h + 8);
 
   ctx.font = '10px ui-monospace, monospace';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   ctx.fillText('THROW IT — SPACE', BAR.x, BAR.y + BAR.h + 15);
-  ctx.fillStyle = '#7a8a6a';
+  ctx.fillStyle = '#8b95a8';
   ctx.fillText('two on the line', BAR.x, BAR.y + BAR.h + 27);
 }
 
@@ -4168,11 +4295,11 @@ const barX = (ms: number, tempo: Delivery): number =>
 
 /** What each verdict is painted in. Gold rewards, red costs, dim is the shrug. */
 const RELEASE_COLOR: Record<ReleaseGrade, string> = {
-  perfect: '#d8b44a',
-  good: '#6fbf62',
-  early: '#7a8a6a',
-  late: '#7a8a6a',
-  wild: '#c4574a',
+  perfect: '#f5be38',
+  good: '#38d9a9',
+  early: '#8b95a8',
+  late: '#8b95a8',
+  wild: '#e84a48',
 };
 
 function drawDelivery(now: number): void {
@@ -4187,24 +4314,24 @@ function drawDelivery(now: number): void {
     ctx.fillRect(a, BAR.y, b - a, BAR.h);
   };
 
-  ctx.fillStyle = '#0a0f0c';
+  ctx.fillStyle = '#0b0d13';
   ctx.fillRect(BAR.x, BAR.y, BAR.w, BAR.h);
   // The arm coming forward, drawn hatched-dark so the one stretch of the sweep
   // where a press does nothing at all is a place on the bar rather than a
   // surprise. See ARM_MS.
-  ctx.fillStyle = '#131a14';
+  ctx.fillStyle = '#131722';
   ctx.fillRect(BAR.x, BAR.y, barX(ARM_MS, tempo) - BAR.x, BAR.h);
-  band(releaseWindow('good'), '#243320');
-  band(releaseWindow('perfect'), '#3d5733');
+  band(releaseWindow('good'), '#1d3a33');
+  band(releaseWindow('perfect'), '#2a6b5a');
 
-  ctx.strokeStyle = '#2f3a2a';
+  ctx.strokeStyle = '#2a3142';
   ctx.lineWidth = 1;
   ctx.strokeRect(BAR.x + 0.5, BAR.y + 0.5, BAR.w - 1, BAR.h - 1);
 
   // The release point. One line, and it is the thing you are aiming the press
   // at — the bands either side of it are what that press is worth.
   const rx = barX(tempo.releaseAtMs, tempo);
-  ctx.strokeStyle = '#cfd6c4';
+  ctx.strokeStyle = '#dfe4ee';
   ctx.beginPath();
   ctx.moveTo(rx, BAR.y - 3);
   ctx.lineTo(rx, BAR.y + BAR.h + 3);
@@ -4220,7 +4347,7 @@ function drawDelivery(now: number): void {
         : releasedAt - deliveryAt;
   if (at !== null) {
     ctx.fillStyle =
-      phase === 'winding' ? '#e8e8d8' : RELEASE_COLOR[releaseGrade ?? 'good'];
+      phase === 'winding' ? '#edf0f7' : RELEASE_COLOR[releaseGrade ?? 'good'];
     ctx.fillRect(barX(at, tempo) - 1, BAR.y - 4, 2, BAR.h + 8);
   }
 
@@ -4233,13 +4360,13 @@ function drawDelivery(now: number): void {
     ctx.fillStyle = RELEASE_COLOR[releaseGrade];
     ctx.fillText(RELEASE_LABEL[releaseGrade], BAR.x, BAR.y + BAR.h + 15);
   } else {
-    ctx.fillStyle = '#7a8a6a';
+    ctx.fillStyle = '#8b95a8';
     // ⚠️ TWO SHORT LINES, NOT ONE LONG ONE. drawBases() puts the diamond at
     // canvas x 328-372 on this same row, and appending the tempo to the hint
     // ran the sentence straight through it — 43 characters cleared the bags,
     // 62 did not. Playtested; it is in every screenshot of the mound.
     ctx.fillText('SPACE starts the arm — SPACE again to let go', BAR.x, BAR.y + BAR.h + 15);
-    ctx.fillStyle = '#5f6d54';
+    ctx.fillStyle = '#6b7590';
     ctx.fillText(`${callType} · ${tempoWord(callType)}`, BAR.x, BAR.y + BAR.h + 27);
   }
 }
@@ -4273,27 +4400,27 @@ function drawSwingBar(): void {
   // bar with room to see how far outside it was rather than pinned to the end.
   const scale = half / (bands.contact * 1.25);
 
-  ctx.fillStyle = 'rgba(9,14,11,0.55)';
+  ctx.fillStyle = 'rgba(9,11,18,0.55)';
   ctx.fillRect(BAR.x - 8, BAR.y - 16, BAR.w + 16, BAR.h + 36);
 
   const band = (ms: number, color: string): void => {
     ctx.fillStyle = color;
     ctx.fillRect(mid - ms * scale, BAR.y, ms * 2 * scale, BAR.h);
   };
-  band(bands.contact, '#3a4a30');
-  band(bands.good, '#5e7a3e');
-  band(bands.perfect, '#a8c25a');
+  band(bands.contact, '#1d3a33');
+  band(bands.good, '#2a6b5a');
+  band(bands.perfect, '#38d9a9');
 
   // Dead on, so PERFECT has something to be perfect against.
   ctx.fillStyle = 'rgba(232,232,216,0.35)';
   ctx.fillRect(mid - 0.5, BAR.y - 3, 1, BAR.h + 6);
 
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   const mark = mid + Math.max(-half, Math.min(offsetMs * scale, half));
   ctx.fillRect(mark - 1.5, BAR.y - 5, 3, BAR.h + 10);
 
   ctx.font = '10px ui-monospace, monospace';
-  ctx.fillStyle = '#5f6d54';
+  ctx.fillStyle = '#6b7590';
   ctx.textAlign = 'left';
   ctx.fillText('EARLY', BAR.x, BAR.y - 6);
   ctx.textAlign = 'right';
@@ -4303,7 +4430,7 @@ function drawSwingBar(): void {
   // loud. Signed, in the same convention core/timing.ts states: under zero is
   // in front of it, over zero is behind it.
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#d8b44a';
+  ctx.fillStyle = '#f5be38';
   ctx.fillText(
     // A real minus sign rather than a hyphen: this is a canvas, so what is
     // written here is what is drawn. An HTML entity would render as its own
@@ -4314,7 +4441,7 @@ function drawSwingBar(): void {
   );
 
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#7a8a6a';
+  ctx.fillStyle = '#8b95a8';
   ctx.fillText(
     // The verdict and what it came to, in the order the player experiences
     // them. They are the same two facts the controls panel carries, from the
@@ -4339,14 +4466,14 @@ function drawBases(): void {
     [cx, cy - 22],       // second
     [cx - 22, cy],       // third
   ];
-  ctx.strokeStyle = '#3d4a38';
+  ctx.strokeStyle = '#3a4560';
   ctx.lineWidth = 1;
   bags.forEach(([bx, by], i) => {
     ctx.save();
     ctx.translate(bx, by);
     ctx.rotate(Math.PI / 4);
     if (g.bases[i]) {
-      ctx.fillStyle = '#d8b44a';
+      ctx.fillStyle = '#f5be38';
       ctx.fillRect(-s / 2, -s / 2, s, s);
     } else {
       ctx.strokeRect(-s / 2, -s / 2, s, s);
@@ -4357,17 +4484,17 @@ function drawBases(): void {
   ctx.save();
   ctx.translate(cx, cy + 22);
   ctx.rotate(Math.PI / 4);
-  ctx.strokeStyle = '#5c6b52';
+  ctx.strokeStyle = '#4a5570';
   ctx.strokeRect(-s / 2, -s / 2, s, s);
   ctx.restore();
 
   // Outs.
-  ctx.fillStyle = '#c4574a';
+  ctx.fillStyle = '#e84a48';
   for (let i = 0; i < 3; i++) {
     ctx.beginPath();
     ctx.arc(cx - 20 + i * 20, cy + 46, 5, 0, Math.PI * 2);
     if (i < g.outs) ctx.fill();
-    else { ctx.strokeStyle = '#3d4a38'; ctx.stroke(); }
+    else { ctx.strokeStyle = '#3a4560'; ctx.stroke(); }
   }
 }
 
@@ -4377,12 +4504,12 @@ function drawFlash(now: number): void {
   const isK = flash.includes('STRIKE') || flash.includes('MISS');
   const isHit = flash.includes('HIT') || flash.includes('IN A ROW');
   const isFoul = flash.includes('FOUL');
-  const borderColor = isHR ? '#ffd700' : isK ? '#e63946' : isHit ? '#2ec4b6' : isFoul ? '#ff9f1c' : '#d8b44a';
+  const borderColor = isHR ? '#ffd700' : isK ? '#e84a48' : isHit ? '#38d9a9' : isFoul ? '#ff9f1c' : '#f5be38';
   const textColor = isHR ? '#fff59d' : isK ? '#ffb4a2' : isHit ? '#cbf3f0' : isFoul ? '#ffe5b4' : '#fff8db';
 
   const w = canvas.width;
   ctx.save();
-  ctx.fillStyle = 'rgba(10, 15, 12, 0.90)';
+  ctx.fillStyle = 'rgba(9, 11, 18, 0.90)';
   ctx.fillRect(20, 142, w - 40, 48);
 
   ctx.strokeStyle = borderColor;
@@ -4398,6 +4525,12 @@ function drawFlash(now: number): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(flash, w / 2, 166);
+  // The banked press, said where the eyes already are. See queuedPitch.
+  if (queuedPitch) {
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillStyle = '#38d9a9';
+    ctx.fillText('NEXT PITCH QUEUED', w / 2, 200);
+  }
   ctx.restore();
 }
 
@@ -4437,7 +4570,7 @@ function render(): void {
   // penPick shipped missing from it: the pen list highlighted the wrong arm
   // all game while the GO TO THE PEN button named the right one, because the
   // button rides on penArmed, which IS listed, and the rows rode on nothing.
-  const key = [phase, game, shown, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead];
+  const key = [phase, game, shown, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead, queuedPitch];
   if (key.length === lastKey.length && key.every((v, i) => v === lastKey[i])) return;
   lastKey = key;
 
@@ -4570,6 +4703,7 @@ function renderSituation(): void {
   // Before the play until its replay is over — see `shown`. That includes
   // FINAL: a walk-off is watched before it is announced.
   if (g.over || lastGameIsStale) {
+    elSit.classList.remove('live');
     if (!season) {
       elSit.innerHTML = `<span><b>FINAL</b></span><span class="dim">press R for a new game</span>`;
       return;
@@ -4589,29 +4723,9 @@ function renderSituation(): void {
     ].join('');
     return;
   }
-  const b = currentBatter(g);
-  const role = battingSide(g) === YOU ? 'YOU BAT' : 'YOU PITCH';
-  const staff = fieldingStaff(g);
-  const cond = armCondition(staff);
-  const condColor =
-    cond === 'gassed' ? 'var(--bad)' : cond === 'tiring' ? 'var(--hot)' : 'var(--dim)';
-
-  elSit.innerHTML = [
-    `<span><b>${inningLabel(g)}</b></span>`,
-    `<span>${atBat.balls}–${atBat.strikes}</span>`,
-    `<span>${g.outs} out</span>`,
-    `<span class="dim">|</span>`,
-    `<span><b>${role}</b></span>`,
-    // The bat speed is shown because the check swing is what makes it matter:
-    // a heavy bat arrives late AND gives you longer to change your mind, and a
-    // trade you cannot see is not a trade.
-    `<span>${b.pos ? `<span class="dim">[${b.pos}]</span> ` : ''}${b.name} <span class="dim">(${b.bats}, ${batSpeedLabel(statsOf(b).power)})</span></span>`,
-    `<span class="dim">on deck ${onDeck(g).name}</span>`,
-    `<span class="dim">|</span>`,
-    `<span>${currentPitcher(g).name}` +
-      ` <span class="dim">${staff.current.pitches}p</span>` +
-      ` <span style="color:${condColor}">${cond}</span></span>`,
-  ].join('');
+  // The broadcast's bug: inning, count, outs, bags, hitter, arm. See hud.ts.
+  elSit.classList.add('live');
+  elSit.innerHTML = situationHtml(g, atBat, YOU);
 }
 
 /**
@@ -4837,15 +4951,17 @@ function renderControls(): void {
             // rewrote itself mid-flight would need the swing in that key — see
             // the warning on render() for why putting a live value in there is
             // how every button on this screen died last time.
-            'SWING — press SPACE. Press it again early to check.'
+            'Wait for the release — then SPACE to swing, again early to check.'
           : // ⚠️ THIS WAS A SINGLE ELLIPSIS, AND AN ELLIPSIS IS NOT AN ANSWER.
             // Nothing on the batting half is a button that can be greyed out —
-            // the control is the spacebar — so a press during the resolve is
-            // swallowed with no queue and nothing on the screen saying why. It
-            // reads as a dead key on a frozen game. Say what is happening
-            // instead; the press is still dropped, and now that is visibly a
-            // state rather than a fault.
-            'Watching the play — the ball is still live.';
+            // the control is the spacebar — so a press during the resolve
+            // reads as a dead key on a frozen game unless the screen says what
+            // it did. A routine beat banks it; anything bigger drops it.
+            queuedPitch
+              ? 'NEXT PITCH QUEUED — it comes when the call clears.'
+              : !replay && !isOver(atBat)
+                ? 'SPACE now queues the next pitch.'
+                : 'Watching the play — the ball is still live.';
 
     // The steal offer carries its ODDS. A gamble whose price you cannot see is
     // not a decision, it is a coin flip with extra steps.
@@ -5348,6 +5464,8 @@ function step(): void {
   }
 
   if (replay && replayNow(now) - replay.startedAt > replayLength(replay)) {
+    // Said when the picture is done with it, never before — see announce().
+    if (scene) announce(scene, `${scene.title}. ${scene.detail}`);
     replay = null;
     shown = null;
     scene = null;
@@ -5414,6 +5532,7 @@ function step(): void {
     // picture and the verdict have to be one event.
     const contact = contactAt();
     if (contact !== null ? now >= contact : now > arriveAt + 90 / flightScale()) {
+      resolvedAt = now;
       if (youBat()) resolvePitch();
       else resolveTheirSwing();
       // ⚠️ AFTER the pitch, never between at-bats. See runnersGoOnThePitch().
@@ -5425,6 +5544,26 @@ function step(): void {
     if (isOver(atBat)) finishAtBat();
     else phase = youBat() ? 'idle' : 'calling';
   }
+
+  // THE BANKED PITCH, thrown the frame the screen is clear — or let go if
+  // anything else has taken it. One press, one pitch, never two.
+  if (queuedPitch && phase !== 'resolve') {
+    queuedPitch = false;
+    if (
+      fireQueued({
+        phase,
+        youBat: youBat(),
+        auto,
+        replay: replay !== null,
+        breakUp: breakCard !== null || breakPending !== null,
+      })
+    ) {
+      deliver();
+    }
+  }
+
+  if (!replay && scene) announce(scene, `${scene.title}. ${scene.detail}`);
+  else if (phase === 'resolve' && flash) announce(`${resolvedAt}:${flash}`, flash);
 
   drawField(now);
   render();

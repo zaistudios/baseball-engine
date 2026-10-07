@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <!-- No user-scalable=no: pinch zoom is the reader's, not the game's.
+         touch-action: manipulation on the body already stops the double-tap
+         zoom that would eat a quick second press. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Basedball</title>
     <style>
       /* Canvas for the pitch, DOM for
@@ -117,7 +120,6 @@
          Matching their 5 would have left the two settling it on document order,
          which is a stacking argument nobody should have to win twice. */
       #situation {
-        row-gap: 4px;
         min-height: 65px;
         position: sticky;
         top: 0;
@@ -126,29 +128,96 @@
         box-shadow: 0 -16px 0 var(--bg), 2px 2px 0 #000;
       }
 
+      /* ---- THE SITUATION BUG. Five fixed cells in a fixed order — inning,
+         count and outs, bags, hitter, arm — so the eye learns where each one
+         lives and finds it mid-pitch without reading. See hud.ts.
+
+         ⚠️ NOTHING IN HERE WRAPS. A long name is cut with an ellipsis inside
+         its own cell rather than pushing a row onto the strip, which is the
+         35px jump the note above was written about. The heights are fixed by
+         the line count, not by the text. */
+      #situation.live {
+        display: grid;
+        grid-template-columns: auto auto auto minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-areas: "inn cnt bag bat arm";
+        gap: 6px 16px; align-items: center;
+        background: linear-gradient(180deg, #161b28 0%, var(--panel) 100%);
+        border-top-color: #33405a;
+      }
+      .sit-inning { grid-area: inn; display: flex; align-items: baseline; gap: 5px; }
+      .sit-inning b {
+        font-family: "Press Start 2P", ui-monospace, monospace;
+        font-size: 12px; color: var(--ink); font-weight: 400;
+      }
+      .sit-inning .arrow { color: var(--hot); font-size: 11px; }
+      .sit-count {
+        grid-area: cnt; display: grid;
+        grid-template-columns: auto auto auto auto auto auto;
+        gap: 2px 5px; align-items: center;
+      }
+      .sit-count .lbl { color: var(--dim); font-size: 10px; letter-spacing: 1px; }
+      .sit-count .num {
+        grid-column: 1 / -1; font-size: 15px; font-weight: 700; color: var(--ink);
+        letter-spacing: 1px; line-height: 1.1;
+      }
+      .lamps { display: inline-flex; gap: 3px; margin-right: 4px; }
+      .lamps i { width: 8px; height: 8px; border: 1px solid #39435a; background: #0e121b; }
+      .lamps.ball i.on { background: var(--good); border-color: var(--good); }
+      .lamps.strike i.on { background: var(--hot); border-color: var(--hot); }
+      .lamps.out i.on { background: var(--bad); border-color: var(--bad); }
+      .sit-bases { grid-area: bag; }
+      .bags { position: relative; display: block; width: 40px; height: 30px; }
+      .bags i {
+        position: absolute; width: 11px; height: 11px; transform: rotate(45deg);
+        border: 1px solid #4a5570; background: #0e121b;
+      }
+      .bags i.on { background: var(--hot); border-color: var(--hot); box-shadow: 0 0 6px rgba(245, 190, 56, 0.55); }
+      .bags .b2 { left: 14px; top: 1px; }
+      .bags .b3 { left: 2px; top: 14px; }
+      .bags .b1 { left: 26px; top: 14px; }
+      .sit-who {
+        display: grid; grid-template-columns: auto minmax(0, 1fr);
+        column-gap: 8px; align-items: baseline; min-width: 0;
+      }
+      .sit-who:nth-of-type(4) { grid-area: bat; }
+      .sit-who:nth-of-type(5) { grid-area: arm; }
+      .sit-who .role { font-size: 10px; letter-spacing: 1px; color: var(--dim); }
+      .sit-who .role.you { color: var(--hot); }
+      .sit-who .name, .sit-who .sub {
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+      }
+      .sit-who .name { color: var(--ink); font-weight: 600; }
+      .sit-who .sub { grid-column: 1 / -1; font-size: 11px; }
+      .cond.tiring { color: var(--hot); }
+      .cond.gassed { color: var(--bad); }
+
       /* ---- field + side column */
       .stage {
         display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
         position: relative;
       }
+      /* The screen is the canvas plus the glass in front of it. The glass is
+         a child of the same box, so it is whatever size the canvas is DRAWN at
+         — it used to be pinned to 420x340 and covered a corner of any canvas
+         the layout had stretched. */
+      .screen { position: relative; flex: 1 1 420px; max-width: 100%; min-width: 0; }
       canvas {
         image-rendering: pixelated;
         border: 2px solid #262c3c;
         background: #07090f;
         box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.8), 3px 3px 0 #000;
-        flex: 1 1 420px;
-        max-width: 100%;
+        display: block;
+        width: 100%;
         height: auto;
         cursor: pointer;
       }
-      /* Subtle CRT Scanlines over the canvas viewport */
-      .stage::before {
-        content: ""; position: absolute; left: 0; top: 0;
-        width: 420px; height: 340px; pointer-events: none; z-index: 2;
+      .screen::after {
+        content: ""; position: absolute; inset: 2px; pointer-events: none; z-index: 2;
         background: repeating-linear-gradient(
           to bottom, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 2px
         );
       }
+      canvas:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
       .side { flex: 1 1 240px; display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
 
       /* ---- controls */
@@ -223,6 +292,48 @@
       }
       button.flat:hover:not(:disabled) { border-color: var(--line); color: var(--ink); }
       button.flat:active:not(:disabled) { transform: none; box-shadow: none; }
+      /* A keyboard has to be able to see where it is. :focus-visible, so a
+         mouse click does not leave a ring on the pitch button for the rest of
+         the at-bat. #start keeps its own always-on cursor — see below. */
+      button:focus-visible, [tabindex]:focus-visible {
+        outline: 2px solid var(--hot); outline-offset: 2px;
+      }
+
+      /* Read by a screen reader, drawn nowhere. The call lives here. */
+      .sr {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap;
+      }
+
+      /* ---- NARROW. The side column already drops under the field; what has
+         to change is that the strip goes to two rows (fixed, so it still
+         never moves) and every control is a thumb's width tall. */
+      @media (max-width: 700px) {
+        body { padding: 8px; gap: 8px; }
+        .wrap { gap: 8px; }
+        #situation { min-height: 104px; }
+        #situation.live {
+          grid-template-columns: auto auto 1fr;
+          grid-template-areas: "inn cnt bag" "bat bat arm";
+          gap: 8px 12px;
+        }
+        .sit-bases { justify-self: end; }
+        #meta button { margin-left: 0 !important; }
+        #meta { gap: 6px; }
+        #log { height: 110px; }
+      }
+      @media (pointer: coarse) {
+        button { min-height: 44px; }
+      }
+
+      /* Nothing blinks, nothing slides. The canvas animates the ball game
+         itself — that is the game, not decoration — but the furniture is
+         still. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation: none !important; transition: none !important;
+        }
+      }
 
       /* ---- log */
       #log { height: 150px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px; }
@@ -894,11 +1005,16 @@
 
       <div id="banner"></div>
 
+      <div id="call" class="sr" role="status" aria-live="polite"></div>
+
       <div class="stage">
-        <canvas id="field" width="420" height="340"></canvas>
+        <div class="screen">
+          <canvas id="field" width="420" height="340" role="img"
+            aria-label="The field. Click, tap or press SPACE for the pitch, then to swing or let go."></canvas>
+        </div>
         <div class="side">
           <div class="panel" id="controls"></div>
-          <div class="panel" id="log"></div>
+          <div class="panel" id="log" aria-label="Play by play"></div>
           <div class="panel book" id="book"></div>
         </div>
       </div>
