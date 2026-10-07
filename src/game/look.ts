@@ -537,6 +537,7 @@ export function safeLook(look: Look, build: Build): Look {
     wear: Math.max(0, Math.min(1, Number(look.wear) || 0)),
     ...(look.accessory !== undefined ? { accessory: fit(look.accessory, accList.length) } : {}),
     ...(look.stance !== undefined ? { stance: fit(look.stance, STANCE_NAMES.length) } : {}),
+    ...(look.delivery !== undefined ? { delivery: fit(look.delivery, DELIVERY_STYLE_NAMES.length) } : {}),
   };
 }
 
@@ -1776,20 +1777,44 @@ export const DELIVERY_STYLES = {
 } satisfies Record<string, readonly ArmPose[]>;
 
 export type DeliveryStyle = keyof typeof DELIVERY_STYLES;
+/**
+ * ⚠️ THE ORDER IS THE SAVE FORMAT. `Look.delivery` stores an index into this
+ * list, so a new style goes on the END — inserting one would re-teach every
+ * edited arm in every saved league a different motion.
+ */
 export const DELIVERY_STYLE_NAMES = Object.keys(DELIVERY_STYLES) as DeliveryStyle[];
 
+/** The same list in the words the editor shows. */
+export const DELIVERY_LABELS: Record<DeliveryStyle, string> = {
+  overhand: 'overhand',
+  threeQuarter: 'three-quarter',
+  sidearm: 'sidearm',
+  highKick: 'high kick',
+  slideStep: 'slide step',
+};
+
 /**
- * WHICH WAY THIS MAN THROWS — rolled once off his name, so it is random across
- * the league and fixed for him: the same arm comes out of the same motion
- * every start, in every save, in every imported league.
+ * WHICH WAY THIS MAN THROWS — the one picked in the editor, or else rolled once
+ * off his name, so it is random across the league and fixed for him: the same
+ * arm comes out of the same motion every start, in every save, in every
+ * imported league.
  *
  * ⚠️ HASHED, NEVER DRAWN FROM THE GAME'S RNG. Presentation must not consume
  * the seeded stream (see firstPitchHour in main.ts); a look that moved a roll
  * would change every result after it. Salted so it does not move in step with
  * the face rollLook() gives him off the same name.
+ *
+ * ⚠️ A STORED LOOK WITHOUT A DELIVERY STILL GETS THE HASH. Every arm edited
+ * before this field existed carries a look with no `delivery`, and he must
+ * keep throwing the way he always has.
  */
-export const deliveryStyleOf = (arm: { id?: string; name: string }): DeliveryStyle =>
-  DELIVERY_STYLE_NAMES[seedFromString(`${arm.id ?? arm.name}#delivery`) % DELIVERY_STYLE_NAMES.length]!;
+export const deliveryStyleOf = (arm: { id?: string; name: string; look?: Look }): DeliveryStyle => {
+  const picked = arm.look?.delivery;
+  if (typeof picked === 'number' && Number.isFinite(picked)) {
+    return DELIVERY_STYLE_NAMES[Math.max(0, Math.min(DELIVERY_STYLE_NAMES.length - 1, Math.floor(picked)))]!;
+  }
+  return DELIVERY_STYLE_NAMES[seedFromString(`${arm.id ?? arm.name}#delivery`) % DELIVERY_STYLE_NAMES.length]!;
+};
 
 /**
  * The pitcher `sinceMs` after the bar started, for a delivery of this tempo.

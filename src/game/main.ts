@@ -3525,6 +3525,13 @@ const venueNow = (): Venue => {
   return venueCache.venue;
 };
 
+/**
+ * THE EDITOR'S DELIVERY PREVIEW — the neutral tempo the computer's windup
+ * uses, then a beat at rest so each throw reads as one throw.
+ */
+const PREVIEW_TEMPO = deliveryOf();
+const PREVIEW_LOOP_MS = PREVIEW_TEMPO.sweepMs + 600;
+
 /** Built once — the canvas never changes size. See drawField(). */
 let vignette: CanvasGradient | null = null;
 const edgeShade = (): CanvasGradient => {
@@ -7626,6 +7633,27 @@ function pregame(): void {
    * per-preview state. There are at most a handful open at once, because only
    * the open man has a form under him.
    */
+  /**
+   * THE ARM PREVIEWS' OWN LOOP. The frame loop does not run under this screen,
+   * so a delivery in the editor needs its own clock. It repaints only while an
+   * arm's preview canvas is actually on the page and stops itself the frame
+   * there is none — closing the man, the club or the editor ends it.
+   */
+  let armSpin = 0;
+  const stillPreview = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const spinArms = (): void => {
+    if (armSpin || stillPreview) return;
+    const tick = (): void => {
+      armSpin = 0;
+      const live =
+        editing !== null &&
+        grid.isConnected &&
+        grid.querySelector('canvas.edlook[data-look-group="rotation"], canvas.edlook[data-look-group="bullpen"]');
+      if (live) paintLookPreviews();
+    };
+    armSpin = requestAnimationFrame(tick);
+  };
+
   const paintLookPreviews = (): void => {
     if (editing === null || editClub === null) return;
     const club = editing[editClub]!;
@@ -7656,8 +7684,19 @@ function pregame(): void {
       const rig = (BATTER_Y - PLATE_Y) - barrelOf(REST_POSE).y;
       const k = Math.min(1, (el2.height - 8) / rig);
       const feet = el2.height - 4;
+      const look = lookOf(who, club, group);
+      // AN ARM THROWS, OVER AND OVER, in the delivery picked in the select
+      // beside him — the select is only worth having if you can watch what it
+      // picked. Reduced motion gets the release frame, held.
+      const pose = arm
+        ? armPoseAt(
+            stillPreview ? PREVIEW_TEMPO.releaseAtMs : performance.now() % PREVIEW_LOOP_MS,
+            PREVIEW_TEMPO,
+            deliveryStyleOf({ name: who.name, look }),
+          )
+        : null;
       drawFigure(c2, {
-        look: lookOf(who, club, group),
+        look,
         uniform: kit,
         build: buildOf(who, club, group),
         x: el2.width / 2,
@@ -7668,7 +7707,17 @@ function pregame(): void {
         // and previewing him in a batting stance would be showing somebody a
         // picture the game never draws.
         stance: arm ? 'pitch' : 'bat',
+        ...(pose
+          ? {
+              turn: pose.turn,
+              armBack: pose.armBack,
+              armFront: pose.armFront,
+              legFront: pose.legFront,
+              legBack: pose.legBack,
+            }
+          : {}),
       });
+      if (arm) spinArms();
       // The same bat the field draws, hung off a plate this panel does not
       // have: the batter stands PLATE_X - BATTER_X to the side of it and
       // BATTER_Y - PLATE_Y below it, so the offsets come off the at-bat
@@ -8059,7 +8108,7 @@ function pregame(): void {
             `<canvas class="edlook" width="120" height="150" ` +
             `data-look-group="${g.key}" data-look-index="${i}"></canvas>` +
             rows(
-              lookFields(build),
+              lookFields(build, g.of),
               lookOf(who as unknown as Player, club, g.key) as unknown as Record<string, unknown>,
               `data-ed="look" data-group="${g.key}" data-index="${i}"`,
             ) +
@@ -8564,7 +8613,7 @@ function pregame(): void {
        * The form was already computing the same answer with buildOf(); this was
        * the one place that still asked the record directly.
        */
-      const f = lookFields(buildOf(who, club, group)).find((x) => x.key === key);
+      const f = lookFields(buildOf(who, club, group), groupOf(group).of).find((x) => x.key === key);
       if (f) {
         editing = replaceClub(
           editing,

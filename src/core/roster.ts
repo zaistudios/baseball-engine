@@ -125,4 +125,10 @@ export interface Look {
   accessory?: number;
   /** Batting stance index (0: standard, 1: crouch, 2: upright, 3: open). */
   stance?: number;
+  /**
+   * Pitching delivery index into DELIVERY_STYLE_NAMES in game/look.ts
+   * (0 overhand, 1 three-quarter, 2 sidearm, 3 high kick, 4 slide step).
+   * Left off, an arm's delivery is hashed from his id — see deliveryStyleOf().
+   */
+  delivery?: number;
 }

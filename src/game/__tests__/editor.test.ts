@@ -42,8 +42,10 @@ import {
 } from '../editor.ts';
 import { checkLeague } from '../league.ts';
 import {
+  DELIVERY_STYLE_NAMES,
   PART_KEYS,
   clubBuild,
+  deliveryStyleOf,
   lookForArm,
   partNames,
   partsFor,
@@ -506,9 +508,12 @@ describe('an arm can be dressed', () => {
     const l = league();
     const club = l[0]!;
     const arm = club.rotation[0]!;
-    expect(lookOf(arm, club, 'rotation')).toEqual(
-      safeLook(lookForArm(arm, club), buildOf(arm, club, 'rotation')),
-    );
+    // ...plus the delivery he has been throwing, which the form has to show
+    // for the same reason. See the pitching-delivery block below.
+    expect(lookOf(arm, club, 'rotation')).toEqual({
+      ...safeLook(lookForArm(arm, club), buildOf(arm, club, 'rotation')),
+      delivery: DELIVERY_STYLE_NAMES.indexOf(deliveryStyleOf(arm)),
+    });
   });
 
   /**
@@ -609,5 +614,65 @@ describe('every man in the league has a part vocabulary', () => {
         }
       }
     }
+  });
+});
+
+describe('the pitching delivery', () => {
+  const SIDEARM = DELIVERY_STYLE_NAMES.indexOf('sidearm');
+
+  it('is offered to an arm and the batting stance to a hitter, never the other way', () => {
+    const arm = lookFields('human', 'arm').map((f) => f.key);
+    const hitter = lookFields('human').map((f) => f.key);
+    expect(arm).toContain('delivery');
+    expect(arm).not.toContain('stance');
+    expect(hitter).toContain('stance');
+    expect(hitter).not.toContain('delivery');
+    const f = lookFields('human', 'arm').find((x) => x.key === 'delivery')!;
+    expect(f.choices).toEqual(['overhand', 'three-quarter', 'sidearm', 'high kick', 'slide step']);
+  });
+
+  it('shows the delivery an untouched arm actually throws', () => {
+    const l = league();
+    const club = l[0]!;
+    const arm = club.rotation[0]!;
+    expect(arm.look?.delivery).toBeUndefined();
+    const shown = lookOf(arm, club, 'rotation').delivery!;
+    expect(DELIVERY_STYLE_NAMES[shown]).toBe(deliveryStyleOf(arm));
+  });
+
+  it('is what the game draws him with once it is picked, and it saves', () => {
+    let l = league();
+    l = replaceClub(l, 0, withLookField(l[0]!, 'rotation', 0, 'delivery', SIDEARM)) as Team[];
+    expect(deliveryStyleOf(l[0]!.rotation[0]!)).toBe('sidearm');
+    // The rest of his face is the one he already had.
+    const before = lookOf(league()[0]!.rotation[0]!, league()[0]!, 'rotation');
+    expect({ ...l[0]!.rotation[0]!.look, delivery: undefined }).toEqual({ ...before, delivery: undefined });
+    stillLoads(l);
+    // And it survives the trip through JSON the save and the export make.
+    const back = JSON.parse(JSON.stringify(l)) as Team[];
+    expect(deliveryStyleOf(back[0]!.rotation[0]!)).toBe('sidearm');
+  });
+
+  it('editing anything else does not move it', () => {
+    let l = league();
+    const was = deliveryStyleOf(l[0]!.bullpen[0]!);
+    l = replaceClub(l, 0, withLookField(l[0]!, 'bullpen', 0, 'number', 7)) as Team[];
+    expect(deliveryStyleOf(l[0]!.bullpen[0]!)).toBe(was);
+  });
+
+  it('is clamped at the draw and refused only when it is not a number', () => {
+    expect(safeLook({ ...lookForArm(league()[0]!.rotation[0]!, league()[0]!), delivery: 99 }, 'human').delivery)
+      .toBe(DELIVERY_STYLE_NAMES.length - 1);
+    const l = league();
+    const arm = l[0]!.rotation[0]!;
+    (l[0]!.rotation as unknown as object[])[0] = { ...arm, look: { ...lookOf(arm, l[0]!, 'rotation'), delivery: -1 } };
+    expect(said(l)).toContain('look delivery');
+  });
+
+  it('is rolled by RANDOMIZE on an arm, and not put on a hitter', () => {
+    const roll = () => 0.5;
+    const l = league();
+    expect(withRandomLook(l[0]!, 'rotation', 0, roll).rotation[0]!.look?.delivery).toBe(2);
+    expect(withRandomLook(l[0]!, 'lineup', 0, roll).lineup[0]!.look?.delivery).toBeUndefined();
   });
 });

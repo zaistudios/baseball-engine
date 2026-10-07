@@ -37,6 +37,9 @@ import { ALL_PITCH_TYPES } from '../core/hitTables.ts';
 import {
   PART_KEYS,
   STANCE_NAMES,
+  DELIVERY_LABELS,
+  DELIVERY_STYLE_NAMES,
+  deliveryStyleOf,
   accessoryNames,
   clubBuild,
   lookFor,
@@ -251,7 +254,23 @@ export const UNIFORM_FIELDS: readonly Field[] = [
  * breaks — he is simply a different-looking man, which is the honest result of
  * turning a person into a machine.
  */
-export function lookFields(build: Build): readonly Field[] {
+/**
+ * ⚠️ `of` DECIDES THE LAST STANCE FIELD. A hitter is drawn in his batting
+ * stance and an arm in his delivery, and never the other way round — offering
+ * a pitcher a batting stance would be a control that changes nothing on any
+ * screen in the game. Defaults to the hitter, which is what every caller from
+ * before deliveries existed meant.
+ */
+export function lookFields(build: Build, of: 'hitter' | 'arm' = 'hitter'): readonly Field[] {
+  const stance: Field =
+    of === 'arm'
+      ? {
+          key: 'delivery',
+          label: 'Pitching Delivery',
+          kind: 'part',
+          choices: DELIVERY_STYLE_NAMES.map((s) => DELIVERY_LABELS[s]),
+        }
+      : { key: 'stance', label: 'Batting Stance', kind: 'part', choices: STANCE_NAMES };
   return [
     ...PART_KEYS.map(
       (k): Field => ({
@@ -267,12 +286,7 @@ export function lookFields(build: Build): readonly Field[] {
       kind: 'part',
       choices: accessoryNames(build),
     },
-    {
-      key: 'stance',
-      label: 'Batting Stance',
-      kind: 'part',
-      choices: STANCE_NAMES,
-    },
+    stance,
     { key: 'number', label: 'Number', kind: 'number', min: 0, max: 99, step: 1 },
     { key: 'wear', label: 'Dirt / rust', kind: 'number', min: 0, max: 1, step: 0.05 },
   ];
@@ -387,11 +401,20 @@ export function buildOf(who: Player | Pitcher, club: Team, group: Group): Build 
  * safeLook() then clamps to a form full of zeroes. That is the exact failure
  * the note above says this function exists to prevent, one record type over.
  */
-export const lookOf = (who: Player | Pitcher, club: Team, group: Group): Look =>
-  safeLook(
-    groupOf(group).of === 'arm' ? lookForArm(who as Pitcher, club) : lookFor(who as Player),
+export const lookOf = (who: Player | Pitcher, club: Team, group: Group): Look => {
+  const arm = groupOf(group).of === 'arm';
+  const look = arm ? lookForArm(who as Pitcher, club) : lookFor(who as Player);
+  // ⚠️ AN ARM SHOWS THE DELIVERY HE ACTUALLY THROWS. Left off, it is hashed
+  // from his name — and a select with no value shows its first option, so the
+  // form would say "overhand" over a man who has been throwing sidearm all
+  // year, and the first edit to anything else would write that lie down.
+  return safeLook(
+    arm && look.delivery === undefined
+      ? { ...look, delivery: DELIVERY_STYLE_NAMES.indexOf(deliveryStyleOf(who as Pitcher)) }
+      : look,
     buildOf(who, club, group),
   );
+};
 
 // ------------------------------------------------------------ the setters
 
@@ -545,6 +568,8 @@ export function withRandomLook(
       wear: roll(),
       accessory: pick(accs.length),
       stance: pick(STANCE_NAMES.length),
+      // Rolled last, so every field above draws what it always did.
+      ...(groupOf(group).of === 'arm' ? { delivery: pick(DELIVERY_STYLE_NAMES.length) } : {}),
     },
   };
   return put(club, group, list);

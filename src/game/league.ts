@@ -232,7 +232,7 @@ function checkLook(raw: unknown, where: string, r: Report): void {
   for (const k of ['frame', 'head', 'crest', 'tone', 'number', 'wear']) {
     if (!isRating(l[k])) r.add(where, `look ${k} must be a number, zero or above.`);
   }
-  for (const k of ['accessory', 'stance']) {
+  for (const k of ['accessory', 'stance', 'delivery']) {
     if (l[k] !== undefined && !isRating(l[k])) {
       r.add(where, `look ${k} must be a number, zero or above, or left off entirely.`);
     }
