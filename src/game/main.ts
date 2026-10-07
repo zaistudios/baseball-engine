@@ -304,6 +304,7 @@ import {
   type ArtPart,
   clubBuild,
   armPoseAt,
+  deliveryStyleOf,
   drawBat,
   drawFigure,
   runCycle,
@@ -3836,7 +3837,8 @@ function drawArm(now: number): void {
   // one frame, every pitch. `deliveryAt` keeps running after release, and
   // armPoseAt() parks him at rest once the recovery is done — which is the
   // same pose the set is, so the pitch before last cannot leave him crooked.
-  const pose = armPoseAt(now - deliveryAt, armTempo);
+  // His own motion — one of five, his for good. See deliveryStyleOf().
+  const pose = armPoseAt(now - deliveryAt, armTempo, deliveryStyleOf(arm));
 
   drawFigure(ctx, {
     look: lookForArm(arm, club),

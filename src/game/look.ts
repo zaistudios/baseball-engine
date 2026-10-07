@@ -1721,6 +1721,77 @@ export const ARM_POSES: readonly ArmPose[] = [
 export const ARM_REST: ArmPose = ARM_POSES[0]!;
 
 /**
+ * FIVE WAYS TO THROW A BASEBALL, and every arm in the league uses one of them.
+ *
+ * ⚠️ THE CLOCK IS SHARED, ONLY THE SHAPE IS NOT. Every table starts at the set
+ * (t 0, all zeros — ARM_REST), lets go at t 1 under the name 'release', and
+ * is back at rest by t 2. armPoseAt() maps t onto the delivery's own tempo, so
+ * the release lands on releaseAtMs whichever way he throws: the meter, the
+ * release grade and the windup timing cannot tell a sidearmer from anybody
+ * else. Only what you see changes.
+ *
+ * ⚠️ THE STYLE BELONGS TO THE MAN, NEVER TO THE PITCH. A sidearmer's curveball
+ * comes out of the same motion as his fastball, or the motion is a tell.
+ *
+ * Angles are limb rotations: 0 hangs straight down, a falling armBack carries
+ * the throwing arm up the far side and over the top (see ARM_POSES for why it
+ * must keep falling), and a negative legFront is the knee coming up.
+ */
+export const DELIVERY_STYLES = {
+  /** Over the top. The original, unchanged. */
+  overhand: ARM_POSES,
+  /** A lower slot: the arm comes through earlier and wider, more shoulder in it. */
+  threeQuarter: [
+    ARM_REST,
+    { name: 'lift',    t: 0.55, turn: -0.2,  armBack: -1.8,  armFront: 0.5,   legFront: -0.4,  legBack: 0.06 },
+    { name: 'release', t: 1,    turn: -0.36, armBack: -3.5,  armFront: -0.45, legFront: 0.36,  legBack: -0.12 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+  ],
+  /**
+   * Out to the side and never over the top. The one table whose arm comes
+   * BACK the way it went: it swings out level, slings through with the whole
+   * body turned into it, and drops home to 0 rather than round to −2π.
+   */
+  sidearm: [
+    ARM_REST,
+    { name: 'lift',    t: 0.55, turn: -0.28, armBack: -1.35, armFront: 0.6,   legFront: -0.35, legBack: 0.08 },
+    { name: 'release', t: 1,    turn: -0.45, armBack: -1.75, armFront: -0.55, legFront: 0.42,  legBack: -0.15 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: 0,     armFront: 0,     legFront: 0,     legBack: 0 },
+  ],
+  /** The knee all the way up first, then everything at once. */
+  highKick: [
+    ARM_REST,
+    { name: 'kick',    t: 0.42, turn: -0.08, armBack: -0.9,  armFront: 0.5,   legFront: -1.45, legBack: 0.1 },
+    { name: 'lift',    t: 0.72, turn: -0.2,  armBack: -2.5,  armFront: 0.3,   legFront: -0.6,  legBack: 0.06 },
+    { name: 'release', t: 1,    turn: -0.24, armBack: -4.3,  armFront: -0.4,  legFront: 0.45,  legBack: -0.12 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+  ],
+  /** Barely a leg lift — quick to the plate, the motion of a man holding a runner. */
+  slideStep: [
+    ARM_REST,
+    { name: 'lift',    t: 0.55, turn: -0.12, armBack: -2.3,  armFront: 0.2,   legFront: -0.12, legBack: 0.03 },
+    { name: 'release', t: 1,    turn: -0.18, armBack: -4.3,  armFront: -0.3,  legFront: 0.25,  legBack: -0.06 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+  ],
+} satisfies Record<string, readonly ArmPose[]>;
+
+export type DeliveryStyle = keyof typeof DELIVERY_STYLES;
+export const DELIVERY_STYLE_NAMES = Object.keys(DELIVERY_STYLES) as DeliveryStyle[];
+
+/**
+ * WHICH WAY THIS MAN THROWS — rolled once off his name, so it is random across
+ * the league and fixed for him: the same arm comes out of the same motion
+ * every start, in every save, in every imported league.
+ *
+ * ⚠️ HASHED, NEVER DRAWN FROM THE GAME'S RNG. Presentation must not consume
+ * the seeded stream (see firstPitchHour in main.ts); a look that moved a roll
+ * would change every result after it. Salted so it does not move in step with
+ * the face rollLook() gives him off the same name.
+ */
+export const deliveryStyleOf = (arm: { id?: string; name: string }): DeliveryStyle =>
+  DELIVERY_STYLE_NAMES[seedFromString(`${arm.id ?? arm.name}#delivery`) % DELIVERY_STYLE_NAMES.length]!;
+
+/**
  * The pitcher `sinceMs` after the bar started, for a delivery of this tempo.
  *
  * Before the press and after the recovery he is at rest — which is the same
@@ -1729,9 +1800,10 @@ export const ARM_REST: ArmPose = ARM_POSES[0]!;
 export function armPoseAt(
   sinceMs: number,
   d: { sweepMs: number; releaseAtMs: number },
+  style: DeliveryStyle = 'overhand',
 ): ArmPose {
   const recoverMs = Math.max(1, d.sweepMs - d.releaseAtMs);
-  const seg = segmentAt(ARM_POSES, sinceMs, (t) =>
+  const seg = segmentAt(DELIVERY_STYLES[style], sinceMs, (t) =>
     t <= 1 ? t * d.releaseAtMs : d.releaseAtMs + (t - 1) * recoverMs,
   );
   if (!seg) return ARM_REST;

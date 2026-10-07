@@ -25,6 +25,9 @@ import {
   ARM_POSES,
   ARM_REST,
   armPoseAt,
+  DELIVERY_STYLES,
+  DELIVERY_STYLE_NAMES,
+  deliveryStyleOf,
   batLine,
   clubBuild,
   drawFigure,
@@ -791,6 +794,57 @@ describe('joints, and the two pose tables that drive them', () => {
         expect(v).toBeLessThanOrEqual(prev + 1e-9);
         prev = v;
       }
+    });
+
+    describe('the five deliveries', () => {
+      const styles = DELIVERY_STYLE_NAMES;
+
+      it('are five, and overhand is the original table', () => {
+        expect(styles).toHaveLength(5);
+        expect(DELIVERY_STYLES.overhand).toBe(ARM_POSES);
+      });
+
+      it('all start at rest, release on the beat, and come back to rest', () => {
+        for (const s of styles) {
+          expect(armPoseAt(0, TEMPO, s), s).toEqual(ARM_REST);
+          expect(armPoseAt(99999, TEMPO, s), s).toEqual(ARM_REST);
+          // The release lands on releaseAtMs whatever the motion — grading
+          // and the windup timing never see the style.
+          expect(armPoseAt(TEMPO.releaseAtMs, TEMPO, s).name, s).toBe('release');
+          const end = armPoseAt(TEMPO.sweepMs, TEMPO, s);
+          expect(end.turn, s).toBeCloseTo(0, 10);
+          expect(end.legFront, s).toBeCloseTo(0, 10);
+          expect(Math.abs(end.armBack % (Math.PI * 2)), s).toBeCloseTo(0, 10);
+        }
+      });
+
+      it('look different from each other at the top of the motion', () => {
+        const seen = new Set(
+          styles.map((s) => {
+            const p = armPoseAt(TEMPO.releaseAtMs * 0.5, TEMPO, s);
+            return `${p.armBack.toFixed(2)}/${p.legFront.toFixed(2)}`;
+          }),
+        );
+        expect(seen.size).toBe(5);
+      });
+
+      it('never carry an over-the-top arm back through the bottom', () => {
+        for (const s of styles.filter((x) => x !== 'sidearm')) {
+          const backs = DELIVERY_STYLES[s].map((p) => p.armBack);
+          for (let i = 1; i < backs.length; i++) expect(backs[i]!, s).toBeLessThan(backs[i - 1]!);
+        }
+      });
+
+      it('belong to the man, fixed for him and spread across a staff', () => {
+        const arm = { name: 'Whitey Pastore' };
+        expect(deliveryStyleOf(arm)).toBe(deliveryStyleOf({ ...arm }));
+        // An id wins over the name, as it does for his look.
+        expect(deliveryStyleOf({ id: 'x1', name: 'A' })).toBe(deliveryStyleOf({ id: 'x1', name: 'B' }));
+        const spread = new Set(
+          Array.from({ length: 60 }, (_, i) => deliveryStyleOf({ name: `Arm ${i}` })),
+        );
+        expect(spread.size).toBe(5);
+      });
     });
 
     it('scales with the pitch: a slower delivery reaches the same pose later', () => {
