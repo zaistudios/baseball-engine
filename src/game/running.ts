@@ -7,20 +7,31 @@
  * half: who is allowed to go, whether the computer sends him, and what it does
  * to the game state when he goes.
  *
- * The scope line from core/baserunning.ts still holds and is worth repeating,
- * because this is exactly where it would erode: no hit-and-run, no leads, no
- * pickoffs, no delayed steals, no squeeze, no slide taxonomy. **Send the
- * runner, or don't.** One decision.
+ * The scope line lives in core/baserunning.ts: the steal, the lead and the
+ * pickoff are in; hit-and-run, squeeze, delayed steals and slides are not.
  *
- * What IS new here is that the catcher matters. Stealing is a race against a
- * throw, and there is finally somebody making the throw — see defense.ts.
+ * The catcher matters. Stealing is a race against a throw, and there is
+ * finally somebody making the throw — see defense.ts.
+ *
+ * ⚠️ THE DIE DECIDES, THE CLOCK DRAWS. stealClock() and pickoffClock() turn a
+ * result that was already rolled into arrival times built from the real
+ * runnerMs() and throwArrivalMs(), with the margin set by how close the roll
+ * was. The odds — and so every number scripts/balance.ts and scripts/field.ts
+ * were tuned on — did not move when the picture got clocks.
  */
 
-import { attemptSteal, stealChance } from '../core/baserunning.ts';
+import {
+  attemptPickoff,
+  attemptSteal,
+  LEADS,
+  stealChance,
+  type Lead,
+} from '../core/baserunning.ts';
 import { moveRunner, removeRunner, type Bases, type Runner } from '../core/inning.ts';
 import type { Rng } from '../core/rng.ts';
 import { fatigue } from './bullpen.ts';
 import { catcherArm, gloveOf, type Alignment } from './defense.ts';
+import { feetXY, runnerMs, runToFirstMs, throwArrivalMs } from './plot.ts';
 import {
   creditRuns,
   recordOut,
@@ -62,7 +73,103 @@ export const chanceFor = (
   _g: GameState,
   op: StealOpportunity,
   alignment: Alignment,
-): number => stealChance(op.runner.speed, op.to, catcherArm(alignment));
+  lead: Lead = 'normal',
+): number => stealChance(op.runner.speed, op.to, catcherArm(alignment), lead);
+
+// ------------------------------------------------------------- the clocks
+
+/**
+ * THE STEAL'S TIMELINE, in replay ms after the cut. Bag numbers are
+ * runnerPoint()'s (1 first, 2 second, 3 third).
+ *
+ * The runner sits on his lead while the pitcher comes set (SET_MS), breaks
+ * with the pitch, and his leg is the real runnerMs() less the lead. The pitch
+ * is in the mitt at catchMs; the throw's flight is the real throwArrivalMs()
+ * from the plate. Only the catcher's pop — catch to release — bends, and it
+ * bends by the die's margin, so a coin-flip at third looks like one and a
+ * walk-in at second looks like that.
+ */
+export interface StealClock {
+  /** He goes. */
+  breakMs: number;
+  /** Pitch out of the pitcher's hand. */
+  pitchMs: number;
+  /** Pitch in the catcher's glove. */
+  catchMs: number;
+  /** Ball out of the catcher's hand. */
+  releaseMs: number;
+  /** Ball at the bag. */
+  throwMs: number;
+  /** Runner at the bag. */
+  runnerMs: number;
+  /** His lead, as a fraction of the leg. */
+  lead: number;
+}
+
+/** Pitcher set, runner on his lead, before anything moves. */
+export const SET_MS = 500;
+/** The pitch, mound to mitt, as the replay draws it. */
+export const PITCH_MS = 450;
+/** Pitcher's first move to the runner's first step. */
+export const JUMP_MS = 150;
+/** The quickest catch-and-release a catcher has. */
+export const MIN_POP_MS = 120;
+/** Narrowest a call is drawn, and how much a sure thing widens it. */
+export const MIN_GAP_MS = 60;
+export const GAP_SPAN_MS = 500;
+
+/** How far apart the two arrivals are drawn: wider the further the die landed from the line. */
+export const playGap = (chance: number, roll: number): number =>
+  MIN_GAP_MS + Math.abs(chance - roll) * GAP_SPAN_MS;
+
+const HOME = { x: 0, y: 0 };
+const MOUND = feetXY(60.5, 0);
+
+export function stealClock(
+  speed: number,
+  from: number,
+  to: number,
+  arm: number,
+  lead: Lead,
+  safe: boolean,
+  gap: number,
+): StealClock {
+  const ft = LEADS[lead].ft;
+  const leg = runnerMs(speed, from, to) * (1 - ft);
+  const catchMs = SET_MS + PITCH_MS;
+  const flight = throwArrivalMs(HOME, to, arm);
+  let breakMs = SET_MS + JUMP_MS;
+  let arrive = breakMs + leg;
+  const throwMs = Math.max(safe ? arrive + gap : arrive - gap, catchMs + MIN_POP_MS + flight);
+  // The quickest throw the catcher has still beat a burner by less than the
+  // call needs — so the runner got a bad jump, and the picture says so.
+  if (!safe && throwMs > arrive - gap) {
+    arrive = throwMs + gap;
+    breakMs = arrive - leg;
+  }
+  return { breakMs, pitchMs: SET_MS, catchMs, releaseMs: throwMs - flight, throwMs, runnerMs: arrive, lead: ft };
+}
+
+/**
+ * THE PICKOFF'S TIMELINE. The throw leaves the mound at SET_MS and flies the
+ * real throwArrivalMs(); the runner's dive back is his lead at standing-start
+ * pace, timed to land the die's margin either side of the ball.
+ */
+export interface PickoffClock {
+  releaseMs: number;
+  throwMs: number;
+  /** He starts back. Earlier than the release means he read the move. */
+  backMs: number;
+  runnerMs: number;
+  lead: number;
+}
+
+export function pickoffClock(speed: number, bag: number, lead: Lead, out: boolean, gap: number): PickoffClock {
+  const ft = LEADS[lead].ft;
+  const throwMs = SET_MS + throwArrivalMs(MOUND, bag, 1);
+  const arrive = out ? throwMs + gap : throwMs - gap;
+  return { releaseMs: SET_MS, throwMs, backMs: arrive - runToFirstMs(speed) * ft, runnerMs: arrive, lead: ft };
+}
 
 export interface StealOutcome {
   game: GameState;
@@ -70,6 +177,8 @@ export interface StealOutcome {
   runner: Runner;
   to: number;
   chance: number;
+  /** The play's arrival times, for the replay. */
+  clock: StealClock;
 }
 
 /**
@@ -83,29 +192,73 @@ export function sendRunner(
   g: GameState,
   alignment: Alignment,
   rng: Rng,
+  lead: Lead = 'normal',
 ): StealOutcome | null {
   const op = stealOpportunity(g);
   if (!op || g.over) return null;
 
-  const { safe, chance } = attemptSteal(op.runner.speed, op.to, rng, catcherArm(alignment));
-
-  if (safe) {
-    return {
-      game: withBases(g, moveRunner(g.bases, op.from)),
-      safe: true,
-      runner: op.runner,
-      to: op.to,
-      chance,
-    };
-  }
+  const arm = catcherArm(alignment);
+  const { safe, chance, roll } = attemptSteal(op.runner.speed, op.to, rng, arm, lead);
+  const clock = stealClock(op.runner.speed, op.from + 1, op.to + 1, arm, lead, safe, playGap(chance, roll));
 
   return {
-    game: recordOut(g, removeRunner(g.bases, op.from)),
-    safe: false,
+    game: safe
+      ? withBases(g, moveRunner(g.bases, op.from))
+      : recordOut(g, removeRunner(g.bases, op.from)),
+    safe,
     runner: op.runner,
     to: op.to,
     chance,
+    clock,
   };
+}
+
+// ------------------------------------------------------------- the pickoff
+
+export interface PickoffOutcome {
+  game: GameState;
+  out: boolean;
+  runner: Runner;
+  /** 0-indexed base he was leading off. */
+  from: number;
+  chance: number;
+  clock: PickoffClock;
+}
+
+/**
+ * Throw over to the man who could go — the same runner stealOpportunity()
+ * names, since a man who is not a threat to run is not worth a throw.
+ * Picked off is an out and the runner is gone; otherwise nothing changes.
+ */
+export function sendThrow(
+  g: GameState,
+  alignment: Alignment,
+  rng: Rng,
+  lead: Lead = 'normal',
+): PickoffOutcome | null {
+  const op = stealOpportunity(g);
+  if (!op || g.over) return null;
+  const { out, chance, roll } = attemptPickoff(op.runner.speed, lead, rng, catcherArm(alignment));
+  return {
+    game: out ? recordOut(g, removeRunner(g.bases, op.from)) : g,
+    out,
+    runner: op.runner,
+    from: op.from,
+    chance,
+    clock: pickoffClock(op.runner.speed, op.from + 1, lead, out, playGap(chance, roll)),
+  };
+}
+
+/**
+ * How often the computer throws over, once per plate appearance, by the lead
+ * it is looking at. A normal lead draws the odd look; a big one draws throws.
+ */
+export const THROW_OVER_RATE: Record<Lead, number> = { short: 0.04, normal: 0.12, big: 0.6 };
+
+/** Does the computer on the mound throw over? Only at a runner who could go. */
+export function aiShouldThrowOver(g: GameState, rng: Rng, lead: Lead = 'normal'): boolean {
+  if (!stealOpportunity(g) || g.over) return false;
+  return rng.next() < THROW_OVER_RATE[lead];
 }
 
 
@@ -240,6 +393,8 @@ export function aiShouldSend(
    * the version of this that reads as the game cheating.
    */
   running = 1,
+  /** A runner the pitcher has just thrown over on is on a short lead and less likely to go. */
+  lead: Lead = 'normal',
 ): boolean {
   const op = stealOpportunity(g);
   if (!op) return false;
@@ -248,7 +403,7 @@ export function aiShouldSend(
   // test can ask the pure odds question without the gate in the way.
   if (rng && rng.next() >= Math.min(1, ATTEMPT_RATE * running)) return false;
 
-  const chance = chanceFor(g, op, alignment);
+  const chance = chanceFor(g, op, alignment, lead);
   const us = stateOf(g, battingSide(g)).runs;
   const them = stateOf(g, fieldingSide(g)).runs;
   const behind = them - us;

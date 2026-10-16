@@ -52,7 +52,17 @@ import type { ForceBag } from '../core/fielding.ts';
 
 import { isHit } from '../core/hitTables.ts';
 import { BASES_GAINED, forcedRunners, isDeepFly, isSacrificeFly, type Bases } from '../core/inning.ts';
-import { aiShouldSend, sendRunner, rollWildPitch, type WildPitch } from './running.ts';
+import {
+  aiShouldSend,
+  aiShouldThrowOver,
+  sendRunner,
+  sendThrow,
+  rollWildPitch,
+  type PickoffOutcome,
+  type StealOutcome,
+  type WildPitch,
+} from './running.ts';
+import type { Lead } from '../core/baserunning.ts';
 import { withPlacement, beatenOut, type CatchHow } from './placement.ts';
 import { pickShift } from './shift.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
@@ -529,11 +539,29 @@ export function rollLoose(g: GameState, rng: Rng): { game: GameState; wild: Wild
  * Only one attempt per trip through the loop — a runner who steals second does
  * not immediately try third off the same decision.
  */
-export function runTheBases(g: GameState, rng: Rng): GameState {
-  if (g.over) return g;
+export function runTheBases(g: GameState, rng: Rng, lead: Lead = 'normal'): GameState {
+  return aiSteal(g, rng, lead)?.game ?? g;
+}
+
+/**
+ * runTheBases() with the whole outcome kept — main.ts draws the steal from its
+ * clock. One function under both, so the live game and the sim run at one rate.
+ */
+export function aiSteal(g: GameState, rng: Rng, lead: Lead = 'normal'): StealOutcome | null {
+  if (g.over) return null;
   const defence = fieldingAlignment(g);
-  if (!aiShouldSend(g, defence, rng, battingKnob(g, 'running'))) return g;
-  return sendRunner(g, defence, rng)?.game ?? g;
+  if (!aiShouldSend(g, defence, rng, battingKnob(g, 'running'), lead)) return null;
+  return sendRunner(g, defence, rng, lead);
+}
+
+/**
+ * The computer on the mound throwing over, once per plate appearance. Null
+ * when he did not. The same call in the sim and on your batting half, so the
+ * pickoff rate scripts/balance.ts reads is the one you play against.
+ */
+export function throwOver(g: GameState, rng: Rng, lead: Lead = 'normal'): PickoffOutcome | null {
+  if (!aiShouldThrowOver(g, rng, lead)) return null;
+  return sendThrow(g, fieldingAlignment(g), rng, lead);
 }
 
 export interface SimResult {
@@ -544,6 +572,8 @@ export interface SimResult {
   halves: number;
   /** Balls booted, both sides. */
   errors: number;
+  /** Runners picked off, both sides. */
+  pickoffs: number;
   /** Balls that got away from the catcher, both sides. */
   wilds: number;
   /** Plate appearances where the bunt was on, both sides. */
@@ -644,6 +674,7 @@ export function simulateGame(
   };
   let errors = 0;
   let wilds = 0;
+  let pickoffs = 0;
   let bunts = 0;
   let foulOuts = 0;
   let forceOuts = 0;
@@ -674,7 +705,14 @@ export function simulateGame(
     // ...and to send a runner. Between batters only, which is a simplification
     // — real steals happen mid-count — but it keeps the running game out of
     // the at-bat loop, where it would have to interleave with the pitch clock.
-    g = runTheBases(g, rng);
+    // The pitcher throws over first, and a man he has thrown over on gets a
+    // shorter lead to steal from — the same order the live game plays it in.
+    const pick = throwOver(g, rng);
+    if (pick) {
+      g = pick.game;
+      if (pick.out) pickoffs++;
+    }
+    g = runTheBases(g, rng, pick ? 'short' : 'normal');
     const loose = rollLoose(g, rng);
     g = loose.game;
     if (loose.wild) wilds++;
@@ -724,7 +762,7 @@ export function simulateGame(
   }
 
   return {
-    game: g, pitches, halves, outcomes, errors, wilds, bunts, foulOuts, forceOuts, leadForces,
+    game: g, pitches, halves, outcomes, errors, wilds, pickoffs, bunts, foulOuts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
     stretchSafe, stretchOut, homeRuns, hitMix, reached, airBalls, extraBases, outSends: outSendRows,
   };

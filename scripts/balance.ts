@@ -16,7 +16,7 @@ const PAIRS = LEAGUE.flatMap((h) => LEAGUE.filter((a) => a !== h).map((a) => [h,
 
 const N = Number(process.argv[2] ?? 500);
 let homeW = 0, awayW = 0, runs = 0, pitches = 0, extras = 0, walkoffs = 0, unfinished = 0;
-let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
+let hits = 0, walks = 0, ks = 0, pas = 0, errs = 0, wp = 0, pk = 0, sacs = 0, forces = 0, leads = 0, strSafe = 0, strOut = 0;
 const mix = { single: 0, double: 0, triple: 0, home_run: 0 };
 const stood = [0, 0, 0, 0];
 let dps = 0, leadDps = 0, tps = 0, dOff = 0, sf = 0, sfOut = 0, hrs = 0, inPlay = 0;
@@ -31,7 +31,7 @@ for (let i = 0; i < N; i++) {
   // of a plate appearance should be read off the arms a season actually sends
   // out, not off thirty aces.
   const {
-    game, pitches: p, outcomes, errors, wilds, bunts, forceOuts, leadForces,
+    game, pitches: p, outcomes, errors, wilds, pickoffs, bunts, forceOuts, leadForces,
     doublePlays, leadDoublePlays, triplePlays, doubledOff, sacFlies, sacFlyOuts,
     stretchSafe, stretchOut, homeRuns, hitMix, reached, airBalls, extraBases, outSends,
   } = simulateGame(
@@ -49,6 +49,7 @@ for (let i = 0; i < N; i++) {
   ks += outcomes.strikeout;
   errs += errors;
   wp += wilds;
+  pk += pickoffs;
   sacs += bunts;
   forces += forceOuts;
   leads += leadForces;
@@ -85,6 +86,7 @@ console.log(`K per team       ${(ks / played / 2).toFixed(2)}   (MLB ~8.6)`);
 console.log(`K rate           ${((ks / pas) * 100).toFixed(1)}%  (MLB ~22%)`);
 console.log(`errors per team  ${(errs / played / 2).toFixed(2)}   (MLB ~0.55)`);
 console.log(`wild pitches     ${(wp / played / 2).toFixed(2)}   (MLB ~0.46)`);
+console.log(`pickoffs         ${(pk / played / 2).toFixed(2)}   (MLB ~0.03; LEADS / THROW_OVER_RATE)`);
 console.log(`bunts per team   ${(sacs / played / 2).toFixed(2)}   (MLB ~0.25)`);
 console.log(`force outs/team   ${(forces / played / 2).toFixed(2)}   (feel ~1; FORCE_AT_SECOND)`);
 console.log(`  ...at 3rd/plate ${(leads / played / 2).toFixed(2)}   (${((leads / Math.max(1, forces)) * 100).toFixed(0)}% of them; LEAD_FORCE)`);

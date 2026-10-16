@@ -46,6 +46,24 @@ import {
 import { SPRITE_SPECS } from './sprites.ts';
 import { LINER_BREAK, type AirClock, type GroundClock } from './defense.ts';
 import type { AirCatch, CutOff, Pickup } from './placement.ts';
+import type { PickoffClock, StealClock } from './running.ts';
+
+/** A stolen base: bags in runnerPoint()'s counting, and the engine's clock. */
+export interface StealPlay {
+  from: number;
+  to: number;
+  safe: boolean;
+  speed: number;
+  clock: StealClock;
+}
+
+/** A throw-over to the bag he is leading off. */
+export interface PickoffPlay {
+  bag: number;
+  out: boolean;
+  speed: number;
+  clock: PickoffClock;
+}
 import type { Player } from '../core/roster.ts';
 
 /**
@@ -423,7 +441,12 @@ export interface Replay {
    * from and to are bag numbers in runnerPoint()'s counting — 1 first, 2
    * second, 3 third — so the runner, the throw and the call read one set.
    */
-  steal?: { from: number; to: number; safe: boolean; speed: number };
+  steal?: StealPlay;
+  /**
+   * A THROW-OVER, drawn instead of a batted ball. `bag` is the one he is
+   * leading off, in the same counting as `steal`.
+   */
+  pickoff?: PickoffPlay;
   /**
    * Which of the replay's sounds have already played.
    *
@@ -456,7 +479,8 @@ export function newReplay(o: {
   /** The engine's runner clocks on a clean single or double. See Replay.hitClock. */
   hitClock?: HitClock;
   batterTo?: number;
-  steal?: { from: number; to: number; safe: boolean; speed: number };
+  steal?: StealPlay;
+  pickoff?: PickoffPlay;
   chaserNum?: number;
   /** Who cut a ground ball off. See Replay.cutOff. */
   cutOff?: CutOff;
@@ -505,6 +529,7 @@ export function newReplay(o: {
     ...(o.hitClock === undefined ? {} : { hitClock: o.hitClock }),
     ...(o.batterTo === undefined ? {} : { batterTo: o.batterTo }),
     ...(o.steal === undefined ? {} : { steal: o.steal }),
+    ...(o.pickoff === undefined ? {} : { pickoff: o.pickoff }),
     ...(o.chaserNum === undefined ? {} : { chaserNum: o.chaserNum }),
     ...(o.cutOff === undefined ? {} : { cutOff: o.cutOff }),
     ...(o.clock === undefined ? {} : { clock: o.clock }),
@@ -722,19 +747,17 @@ export const isFoul = (r: Replay): boolean =>
  * 0.6 hitter at 1900 + 460 = 2360ms.
  */
 /**
- * HOW LONG A STOLEN BASE IS ON SCREEN.
+ * HOW LONG A STOLEN BASE OR A THROW-OVER IS ON SCREEN: until the later of the
+ * man and the ball has got there, then the call.
  *
- * ⚠️ SHORTER THAN A BALL IN PLAY AND LONGER THAN A FOUL. It is a real play with
- * a call at the end of it, so it earns more than the 220ms a foul gets; it also
- * happens between pitches with the next hitter waiting, so it cannot have the
- * two full seconds a batted ball takes. The throw lands at THROW_MS and the
- * call sits under it for the rest.
+ * ⚠️ IT WAS A FLAT 1500ms, and Zane's word for it was "too fast". Every steal
+ * took the same beat whatever happened in it, so a burner walking into second
+ * and a coin-flip at third read identically. The length is now the play's own
+ * clock — see running.ts:stealClock() — and a close one runs longer.
  */
-export const STEAL_MS = 1500;
-export const STEAL_THROW_MS = 900;
-
 export const replayLength = (r: Replay): number => {
-  if (r.steal) return REPLAY_CUT_MS + STEAL_MS;
+  if (r.steal) return REPLAY_CUT_MS + Math.max(r.steal.clock.runnerMs, r.steal.clock.throwMs) + REPLAY_CALL_MS;
+  if (r.pickoff) return REPLAY_CUT_MS + Math.max(r.pickoff.clock.runnerMs, r.pickoff.clock.throwMs) + REPLAY_CALL_MS;
   // A foul that did not end the at-bat has no race to wait on and no call to
   // hold — see FOUL_HOLD_MS. The caught one falls through to the normal beat,
   // because it is an out and an out is worth a moment.
@@ -998,12 +1021,50 @@ export function drawOverhead(
   }
   ctx.restore();
 
-  // The infield dirt, as a skin around the diamond rather than a square —
-  // which is what it looks like from above.
+  // The infield dirt: 95-foot radius dirt arc behind the diamond
   ctx.fillStyle = opts.dirt;
   ctx.beginPath();
   ctx.arc(cam.centre.x, cam.centre.y, cam.baseR * 1.62, 0, Math.PI * 2);
   ctx.fill();
+
+  // Infield grass diamond inside the base paths:
+  // Offset inward from the base lines so the dirt base paths remain visible.
+  const pathW = 4.5 * cam.pxPerFt;
+  const inR = cam.baseR - pathW * 1.4;
+  ctx.fillStyle = opts.field;
+  ctx.beginPath();
+  ctx.moveTo(cam.centre.x, cam.centre.y + inR);
+  ctx.lineTo(cam.centre.x + inR, cam.centre.y);
+  ctx.lineTo(cam.centre.x, cam.centre.y - inR);
+  ctx.lineTo(cam.centre.x - inR, cam.centre.y);
+  ctx.closePath();
+  ctx.fill();
+
+  // Pitcher's mound circle cutout (18-foot diameter dirt mound centered on the rubber)
+  const moundR = 9 * cam.pxPerFt;
+  ctx.fillStyle = opts.dirt;
+  ctx.beginPath();
+  ctx.arc(cam.centre.x, cam.centre.y, moundR, 0, Math.PI * 2);
+  ctx.fill();
+  // White pitcher's rubber plate
+  ctx.fillStyle = 'rgba(240, 244, 248, 0.9)';
+  ctx.fillRect(cam.centre.x - 2.5 * cam.pxPerFt, cam.centre.y - 0.5 * cam.pxPerFt, 5 * cam.pxPerFt, 1.2 * cam.pxPerFt);
+
+  // Home plate dirt circle cutout
+  const homeDirtR = 13 * cam.pxPerFt;
+  ctx.fillStyle = opts.dirt;
+  ctx.beginPath();
+  ctx.arc(cam.home.x, cam.home.y, homeDirtR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Base sliding cutouts around 1st, 2nd, and 3rd
+  const basePitR = 8 * cam.pxPerFt;
+  for (let b = 0; b < 3; b++) {
+    const bp = basePoint(b, cam.centre.x, cam.centre.y, cam.baseR);
+    ctx.beginPath();
+    ctx.arc(bp.x, bp.y, basePitR, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Foul lines and the wall.
   ctx.strokeStyle = 'rgba(216,216,192,0.4)';
@@ -1164,6 +1225,11 @@ export function drawOverhead(
   // its own short block and returns.
   if (r.steal) {
     drawSteal(ctx, cam, now, r, r.steal, opts);
+    ctx.restore();
+    return;
+  }
+  if (r.pickoff) {
+    drawPickoff(ctx, cam, now, r, r.pickoff, opts);
     ctx.restore();
     return;
   }
@@ -1338,8 +1404,72 @@ function drawRunnerDot(
   drawMan(ctx, opts, p.x, p.y, { side: 'batting', seed: 'runner', dim, moved });
 }
 
+/** 0 before `from`, 1 after `to`, linear between. */
+const span = (t: number, from: number, to: number): number =>
+  Math.max(0, Math.min(1, (t - from) / Math.max(1, to - from)));
+
+/** The nine at their posts, with `cover` a fraction `k` of the way to the bag. */
+function drawCover(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  r: Replay,
+  opts: OverheadOpts,
+  bag: { x: number; y: number },
+  cover: number,
+  k: number,
+): void {
+  for (const f of r.fielders) {
+    const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
+    const takes = f.num === cover;
+    const to = takes ? besideBag(cam, bag) : post;
+    const kk = takes ? k : 0;
+    const p = { x: post.x + (to.x - post.x) * kk, y: post.y + (to.y - post.y) * kk };
+    drawMan(ctx, opts, p.x, p.y, {
+      side: 'fielding',
+      seed: `F${f.num}`,
+      ...(f.man ? { man: f.man } : {}),
+      num: f.num,
+      dim: !takes && f.num !== 1 && f.num !== 2,
+      moved: Math.hypot(p.x - post.x, p.y - post.y),
+    });
+  }
+}
+
+/** A ball in flight between two points, with the dashed line it travels. */
+function drawThrown(
+  ctx: CanvasRenderingContext2D,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  k: number,
+  line = true,
+): void {
+  if (line) {
+    ctx.strokeStyle = 'rgba(244,244,232,0.22)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.fillStyle = '#f4f4e8';
+  ctx.beginPath();
+  ctx.arc(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawCall(ctx: CanvasRenderingContext2D, bag: { x: number; y: number }, safe: boolean, left: boolean): void {
+  ctx.font = 'bold 15px ui-monospace, Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = safe ? '#6fbf73' : '#ff8c66';
+  ctx.fillText(safe ? 'SAFE' : 'OUT', bag.x + (left ? -24 : 22), bag.y - 16);
+}
+
 /**
- * THE STOLEN BASE — the runner, the catcher's throw, and a tag at the end.
+ * THE STOLEN BASE — the lead, the pitch, the jump, the catcher's throw and a
+ * tag at the end, every one of them on the engine's clock (Replay.steal.clock).
  *
  * ⚠️ THE THROW COMES FROM HOME, not from wherever a batted ball finished, and
  * that is the whole shape of the play: the catcher is the fielder, the bag is
@@ -1352,75 +1482,78 @@ function drawSteal(
   cam: Cam,
   now: number,
   r: Replay,
-  steal: NonNullable<Replay['steal']>,
+  steal: StealPlay,
   opts: OverheadOpts,
 ): void {
   const t = now - r.startedAt - REPLAY_CUT_MS;
+  const c = steal.clock;
   const bag = bagAt(cam, steal.to - 1);
 
-  // The nine at their posts, with the man taking the throw coming to the bag.
-  // The shortstop covers second on a steal and the third baseman covers third —
-  // which is where they already are, and the only positioning a dot can say.
-  const cover = steal.to === 3 ? 5 : 6;
-  for (const f of r.fielders) {
-    const post = overheadPoint(f.distFt, f.dirDeg, cam.home, cam.pxPerFt);
-    const takes = f.num === cover;
-    const to = takes ? besideBag(cam, bag) : post;
-    const k = takes ? Math.min(1, Math.max(0, t / STEAL_THROW_MS)) : 0;
-    const p = { x: post.x + (to.x - post.x) * k, y: post.y + (to.y - post.y) * k };
-    drawMan(ctx, opts, p.x, p.y, {
-      side: 'fielding',
-      seed: `F${f.num}`,
-      ...(f.man ? { man: f.man } : {}),
-      num: f.num,
-      dim: !takes,
-      moved: Math.hypot(p.x - post.x, p.y - post.y),
-    });
-  }
+  // The shortstop covers second on a steal and the third baseman covers third,
+  // getting there as the ball leaves the catcher's hand.
+  drawCover(ctx, cam, r, opts, bag, steal.to === 3 ? 5 : 6, span(t, c.breakMs, c.releaseMs));
 
-  // The runner. He is off at the pitch, so his clock starts at zero, and he
-  // stops dim on the bag he did not get.
-  const runMs = runnerMs(steal.speed, steal.from, steal.to);
-  const k = Math.min(1, t / runMs);
-  drawRunnerDot(ctx, opts, cam, steal.from, steal.to, k, !steal.safe && t > runMs);
+  // The runner: on his lead, then gone with the pitch. Dim on the bag he did
+  // not get, once the tag is down.
+  const k = c.lead + (1 - c.lead) * span(t, c.breakMs, c.runnerMs);
+  drawRunnerDot(ctx, opts, cam, steal.from, steal.to, k, !steal.safe && t > c.throwMs);
 
-  // The catcher's throw, from the plate to the bag.
-  if (t > 120) {
-    const k2 = Math.min(1, (t - 120) / (STEAL_THROW_MS - 120));
-    ctx.strokeStyle = 'rgba(244,244,232,0.22)';
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(cam.home.x, cam.home.y);
-    ctx.lineTo(bag.x, bag.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#f4f4e8';
-    ctx.beginPath();
-    ctx.arc(cam.home.x + (bag.x - cam.home.x) * k2, cam.home.y + (bag.y - cam.home.y) * k2, 3.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // The pitch, mound to mitt — the thing he is running on.
+  const mound = overheadPoint(60.5, 0, cam.home, cam.pxPerFt);
+  if (t > c.pitchMs && t < c.catchMs) drawThrown(ctx, mound, cam.home, span(t, c.pitchMs, c.catchMs), false);
+  // The catcher's throw, from the plate to the bag. The ball sits in his mitt
+  // between the catch and the release; that pause is the pop the die bent.
+  if (t >= c.catchMs) drawThrown(ctx, cam.home, bag, span(t, c.releaseMs, c.throwMs));
 
   // The call, once both the man and the ball have got there.
-  if (t > Math.max(runMs, STEAL_THROW_MS)) {
-    ctx.font = 'bold 15px ui-monospace, Menlo, Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = steal.safe ? '#6fbf73' : '#ff8c66';
-    ctx.fillText(steal.safe ? 'SAFE' : 'OUT', bag.x + (steal.to === 3 ? -24 : 22), bag.y - 16);
-  }
+  const callAt = Math.max(c.runnerMs, c.throwMs);
+  if (t > callAt) drawCall(ctx, bag, steal.safe, steal.to === 3);
   // ⚠️ THROUGH cue(), NOT A BARE CALL. The draw runs every frame, so a sound
   // fired straight from here plays sixty times a second for the rest of the
   // play — and the keyed set is also what makes it survive the clock stopping
   // behind a menu. See cuePlaySounds().
   if (opts.sfx) {
     const sfx = opts.sfx;
-    cue(r, 'mitt', STEAL_THROW_MS, t, () => sfx('mitt'));
-    cue(r, 'call', Math.max(runMs, STEAL_THROW_MS), t, () =>
-      sfx(steal.safe ? 'onBase' : 'out'),
-    );
+    cue(r, 'pitch', c.catchMs, t, () => sfx('mitt'));
+    cue(r, 'mitt', c.throwMs, t, () => sfx('mitt'));
+    cue(r, 'call', callAt, t, () => sfx(steal.safe ? 'onBase' : 'out'));
   }
 }
+
+/**
+ * THE THROW-OVER — the pitcher off the rubber to the bag, and the runner
+ * diving back from his lead. Same pieces as the steal, pointed the other way.
+ */
+function drawPickoff(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  now: number,
+  r: Replay,
+  pick: PickoffPlay,
+  opts: OverheadOpts,
+): void {
+  const t = now - r.startedAt - REPLAY_CUT_MS;
+  const c = pick.clock;
+  const bag = bagAt(cam, pick.bag - 1);
+
+  // The first baseman holds the runner on; at second the shortstop sneaks in.
+  drawCover(ctx, cam, r, opts, bag, pick.bag === 1 ? 3 : 6, span(t, 0, c.releaseMs));
+
+  const k = c.lead * (1 - span(t, c.backMs, c.runnerMs));
+  drawRunnerDot(ctx, opts, cam, pick.bag, pick.bag + 1, k, pick.out && t > c.throwMs);
+
+  const mound = overheadPoint(60.5, 0, cam.home, cam.pxPerFt);
+  drawThrown(ctx, mound, bag, span(t, c.releaseMs, c.throwMs));
+
+  const callAt = Math.max(c.runnerMs, c.throwMs);
+  if (t > callAt) drawCall(ctx, bag, !pick.out, pick.bag === 3);
+  if (opts.sfx) {
+    const sfx = opts.sfx;
+    cue(r, 'mitt', c.throwMs, t, () => sfx('mitt'));
+    cue(r, 'call', callAt, t, () => sfx(pick.out ? 'out' : 'onBase'));
+  }
+}
+
 
 /**
  * The lead: off the bag and back on it, for a runner who is going nowhere.

@@ -38,7 +38,8 @@ offline.
 |---|---|
 | <kbd>Space</kbd> | Swing |
 | <kbd>B</kbd> | Square to bunt |
-| <kbd>S</kbd> | Send the runner |
+| <kbd>S</kbd> | Send the runner on the pitch (again to hold him) |
+| <kbd>L</kbd> | Take a big lead: better jump, riskier throw-over |
 | <kbd>H</kbd> | Pinch-hit (<kbd>,</kbd> <kbd>.</kbd> to choose) |
 
 | On the mound | |
@@ -47,6 +48,7 @@ offline.
 | <kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> / <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / <kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> | Pick the spot (laid out like the zone) |
 | <kbd>Space</kbd> | Start the delivery, then release |
 | <kbd>V</kbd> | Change the defensive shift |
+| <kbd>O</kbd> | Throw over to the runner (two per batter) |
 | <kbd>B</kbd> | Go to the bullpen (<kbd>,</kbd> <kbd>.</kbd> to choose) |
 
 | Anywhere | |

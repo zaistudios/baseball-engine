@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { attemptSteal, stealChance, STEAL_BASE_RATE } from '../baserunning.ts';
+import { attemptPickoff, attemptSteal, pickoffChance, stealChance, STEAL_BASE_RATE } from '../baserunning.ts';
 import { makeRng } from '../rng.ts';
 import {
   moveRunner,
@@ -101,5 +101,23 @@ describe('runners reach base as themselves', () => {
     }
     // And they are not all the same, or the stat would be decoration.
     expect(new Set(POOL.map((p) => p.speed)).size).toBeGreaterThan(4);
+  });
+});
+
+describe('the lead and the pickoff', () => {
+  it('a big lead steals better and gets picked off more', () => {
+    expect(stealChance(1, 1, 1, 'big')).toBeGreaterThan(stealChance(1, 1, 1, 'normal'));
+    expect(stealChance(1, 1, 1, 'short')).toBeLessThan(stealChance(1, 1, 1, 'normal'));
+    expect(pickoffChance(1, 'big')).toBeGreaterThan(pickoffChance(1, 'normal'));
+    expect(pickoffChance(1, 'normal')).toBeGreaterThan(pickoffChance(1, 'short'));
+  });
+
+  it('a normal lead is rarely picked off', () => {
+    expect(pickoffChance(1, 'normal')).toBeLessThan(0.05);
+  });
+
+  it('replays identically from the same seed', () => {
+    const go = () => attemptPickoff(1, 'big', makeRng(7));
+    expect(go()).toEqual(go());
   });
 });

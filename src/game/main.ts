@@ -183,7 +183,7 @@ import {
   type Season,
 } from './franchise.ts';
 import { armCondition, fatigue, hasRelief, openedBy, ZONE_FATIGUE_PENALTY } from './bullpen.ts';
-import { autoCaller, manageBench, manageBullpen, rollLoose, runTheBases } from './sim.ts';
+import { aiSteal, autoCaller, manageBench, manageBullpen, rollLoose, throwOver } from './sim.ts';
 import {
   ARM_FIELDS,
   ARSENAL_FIELDS,
@@ -217,7 +217,7 @@ import {
   type Field,
   type Group,
 } from './editor.ts';
-import { fieldBall, reachOf, manned } from './defense.ts';
+import { catcherArm, fieldBall, reachOf, manned } from './defense.ts';
 import { SHIFTS, SHIFT_WORDS, SHIFT_BLURB, SHIFT_ON, fieldersFor, pickShift, pullScore, type Shift } from './shift.ts';
 import { withPlacement, beatenOut, place, scorecard, throwNotation, BAG_WORD } from './placement.ts';
 import { FOUL_BOOST, HOME_EDGE } from './tuning.ts';
@@ -237,7 +237,17 @@ import { formOf, formLabel, inForm } from './form.ts';
 import { BRACKET, OFFENCE, PARITY, SERIES, STREAK, cleanRules, roundsIn } from './rules.ts';
 import { restedStamina } from './rotation.ts';
 import type { StarterPick } from './game.ts';
-import { aiShouldSend, sendRunner, stealOpportunity, chanceFor } from './running.ts';
+import {
+  aiShouldSend,
+  sendRunner,
+  sendThrow,
+  stealClock,
+  stealOpportunity,
+  chanceFor,
+  type PickoffOutcome,
+  type StealOutcome,
+} from './running.ts';
+import { pickoffChance, type Lead } from '../core/baserunning.ts';
 import {
   MIN_SAMPLES,
   PITCH_SPEEDS,
@@ -1220,6 +1230,8 @@ function windUp(): number {
 /** Throw the next pitch TO you. The computer is on the mound. */
 function deliver(): void {
   if (game.over) return;
+  // He may look over at your runner before he throws you anything.
+  if (theyThrowOver()) return;
   const sit: Situation = {
     previous,
     firstBaseOpen: game.bases[0] === null,
@@ -1317,13 +1329,6 @@ function swing(): void {
 }
 
 /**
- * Send the runner. Legal only between pitches while YOU are batting.
- *
- * ponytail: between pitches, not mid-flight. A steal that resolves while a
- * pitch is in the air needs the two to be interleaved on one clock, and the
- * whole running game is one decision — see running.ts.
- */
-/**
  * CUT TO THE FIELD ON A STOLEN BASE.
  *
  * ⚠️ THE ONE PLAY IN THE GAME THAT RESOLVED WITH NOTHING TO WATCH. A steal was
@@ -1336,9 +1341,10 @@ function swing(): void {
  * looks like — the mistake the foul replay made before showFoul() was shared.
  *
  * The bag numbering is runnerPoint()'s: 1 first, 2 second, 3 third. sendRunner
- * counts its own to from zero, so it is one less.
+ * counts its own to from zero, so it is one less. The clock is the engine's —
+ * see running.ts:stealClock() — so the picture is not guessing.
  */
-function showSteal(to: number, safe: boolean, speed: number, before: GameState): void {
+function showSteal(out: StealOutcome, before: GameState): void {
   showScene(null);
   playReplay(newReplay({
     now: performance.now(),
@@ -1348,50 +1354,121 @@ function showSteal(to: number, safe: boolean, speed: number, before: GameState):
     exitVelocity: 0,
     launchAngle: 0,
     direction: 0,
-    speed,
-    safe,
-    steal: { from: to, to: to + 1, safe, speed },
+    speed: out.runner.speed,
+    safe: out.safe,
+    steal: { from: out.to, to: out.to + 1, safe: out.safe, speed: out.runner.speed, clock: out.clock },
   }), before);
-}
-
-function steal(): void {
-  if (phase !== 'idle' || !youBat() || game.over) return;
-  const op = stealOpportunity(game);
-  if (!op) return;
-
-  const defence = fieldingAlignment(game);
-  const odds = Math.round(chanceFor(game, op, defence) * 100);
-  const out = sendRunner(game, defence, rng);
-  if (!out) return;
-
-  const before = game;
-  game = out.game;
-  const bag = out.to === 1 ? 'second' : 'third';
-  say(
-    out.safe
-      ? `${out.runner.name} steals ${bag}! (${odds}%)`
-      : `${out.runner.name} caught stealing ${bag}. (${odds}%)`,
-    out.safe ? 'big' : 'out',
-  );
-  showSteal(out.to, out.safe, out.runner.speed, before);
   flash = '';
   flashUntil = performance.now() + replayLength(replay!) / speed();
+}
 
-  // Caught stealing can be the third out, which ends the half — and may end
-  // the game. Route through the same finish path the at-bat uses.
-  if (game.over) {
-    finalize();
-    return;
-  }
-  if (!out.safe && game.outs === 0) {
-    // The half rolled over: reset the count and hand the ball over.
-    atBat = newAtBat();
-    bunting = false;
-    penArmed = false;
-    previous = [];
-    phase = youBat() ? 'idle' : 'calling';
-  }
+/** ...and on a throw-over. Same cut, the ball going the other way. */
+function showPickoff(out: PickoffOutcome, before: GameState): void {
+  showScene(null);
+  playReplay(newReplay({
+    now: performance.now(),
+    outcome: 'ground_out',
+    exitVelocity: 0,
+    launchAngle: 0,
+    direction: 0,
+    speed: out.runner.speed,
+    safe: !out.out,
+    pickoff: { bag: out.from + 1, out: out.out, speed: out.runner.speed, clock: out.clock },
+  }), before);
+  say(
+    out.out ? `${out.runner.name} picked off!` : `Throw over — ${out.runner.name} gets back.`,
+    out.out ? 'out' : 'half',
+  );
+  flash = '';
+  flashUntil = performance.now() + replayLength(replay!) / speed();
+  // A runner he has thrown over on is a runner who shortens up.
+  thrownOver = true;
+}
+
+/**
+ * THE RUNNING GAME'S STATE FOR THIS PLATE APPEARANCE.
+ *
+ * `going`: you have sent him, and he breaks on the next pitch. `lead`: how far
+ * off he is — yours to set while you bat. `thrownOver`: the pitcher has thrown
+ * over this at-bat, which shortens the lead on your mound half and spends one
+ * of the two throw-overs (`throwOvers`) the rules give you.
+ */
+let going = false;
+let lead: Lead = 'normal';
+let thrownOver = false;
+let throwOvers = 0;
+/** The computer's once-per-plate-appearance look at your runner. */
+let throwOverRolled = false;
+
+/** Two throw-overs a batter, then the pitcher has to come home — the 2023 rule. */
+const MAX_THROW_OVERS = 2;
+
+function resetRunning(): void {
+  going = false;
+  lead = 'normal';
+  thrownOver = false;
+  throwOvers = 0;
+  throwOverRolled = false;
+}
+
+/**
+ * SEND HIM, OR HOLD HIM. While you bat, between pitches or with the pitch in
+ * the air — the runner breaks on THIS pitch, and the steal resolves when it is
+ * in the mitt (see runnersGoOnThePitch()). A second press calls him back.
+ *
+ * ⚠️ IT USED TO RESOLVE ON THE PRESS, between pitches, with no pitch for him to
+ * run on. Now there is always a ball in the air when he goes, on your half
+ * exactly as on theirs.
+ */
+function steal(): void {
+  if (!youBat() || game.over || !stealOpportunity(game)) return;
+  if (phase !== 'idle' && phase !== 'windup') return;
+  // Once the bat is coming through it is too late to change his mind.
+  if (phase === 'windup' && swingStartedAt !== null && !going) return;
+  going = !going;
+  say(going ? 'Runner going on the pitch.' : 'Runner held.', 'half');
   render();
+}
+
+/** A bigger lead: a better jump, and a pitcher who notices. */
+function toggleLead(): void {
+  if (!youBat() || game.over || !stealOpportunity(game) || phase !== 'idle') return;
+  lead = lead === 'big' ? 'normal' : 'big';
+  render();
+}
+
+/** Throw over, while you are on the mound. Two a batter. */
+function pickoff(): void {
+  if (youBat() || game.over || phase !== 'calling' || throwOvers >= MAX_THROW_OVERS) return;
+  if (!stealOpportunity(game)) return;
+  const outsBefore = game.outs;
+  const out = sendThrow(game, fieldingAlignment(game), rng);
+  if (!out) return;
+  throwOvers++;
+  const before = game;
+  game = out.game;
+  showPickoff(out, before);
+  phase = 'resolve';
+  settleBases(outsBefore);
+}
+
+/**
+ * The computer on the mound looks over at your runner, once a plate
+ * appearance, before the first pitch. True when he threw instead of pitching.
+ * The same throwOver() the sim calls, at the lead you chose.
+ */
+function theyThrowOver(): boolean {
+  if (throwOverRolled) return false;
+  throwOverRolled = true;
+  const outsBefore = game.outs;
+  const out = throwOver(game, rng, lead);
+  if (!out) return false;
+  const before = game;
+  game = out.game;
+  showPickoff(out, before);
+  phase = 'resolve';
+  settleBases(outsBefore);
+  return true;
 }
 
 /**
@@ -1416,6 +1493,10 @@ function steal(): void {
  * play. There is a ball in the air when the runner goes, and the flash says so
  * over the pitch that caused it.
  *
+ * YOUR RUNNER is not a roll: he goes on whichever pitch you sent him on, and
+ * only a pitch that leaves the at-bat going — not a foul (he goes back), not a
+ * ball in play, not ball four or strike three.
+ *
  * ⚠️ THE HEADLESS SIM IS UNTOUCHED. sim.ts keeps its own call sites and the
  * same per-at-bat odds; nothing about how often either event happens has moved,
  * only where in the at-bat it is asked. scripts/balance.ts is unaffected by
@@ -1425,11 +1506,39 @@ function steal(): void {
 let looseRolled = false;
 
 function runnersGoOnThePitch(): void {
-  // A ball in play is not a pitch anybody steals on, and the at-bat is over.
-  if (game.over || looseRolled || atBat.result?.kind === 'in_play') return;
-  looseRolled = true;
-
+  if (game.over) return;
   const outsBefore = game.outs;
+
+  if (going) {
+    going = false;
+    const foul = atBat.lastSwing?.outcome === 'foul';
+    if (youBat() && !isOver(atBat) && !foul) {
+      const defence = fieldingAlignment(game);
+      const before = game;
+      const out = sendRunner(game, defence, rng, lead);
+      if (out) {
+        game = out.game;
+        const bag = out.to === 1 ? 'second' : 'third';
+        const odds = Math.round(out.chance * 100);
+        say(
+          out.safe
+            ? `${out.runner.name} steals ${bag}! (${odds}%)`
+            : `${out.runner.name} caught stealing ${bag}. (${odds}%)`,
+          out.safe ? 'big' : 'out',
+        );
+        showSteal(out, before);
+        lead = 'normal';
+      }
+    } else if (foul) {
+      say('Foul — the runner goes back.', 'half');
+    }
+    settleBases(outsBefore);
+    return;
+  }
+
+  // A ball in play is not a pitch anybody steals on, and the at-bat is over.
+  if (looseRolled || atBat.result?.kind === 'in_play') return;
+  looseRolled = true;
 
   // One gets away from the catcher. It can happen in EITHER half — you are
   // behind the plate for one of them and at it for the other, and a backstop
@@ -1452,36 +1561,42 @@ function runnersGoOnThePitch(): void {
     flashUntil = pauseFor(1500);
   }
 
-  // ...and THEY run on you while you are the one on the mound. Your own
-  // running game is the STEAL button and stays where it is — see steal().
+  // ...and THEY run on you while you are the one on the mound — off a shorter
+  // lead if you have thrown over on him. Same aiSteal() the sim calls.
   if (!game.over && !youBat()) {
-    const op = stealOpportunity(game);
     const before = game;
-    game = runTheBases(game, rng);
-    if (op && game.bases !== before.bases) {
-      const caught = game.outs > outsBefore;
+    const out = aiSteal(game, rng, thrownOver ? 'short' : 'normal');
+    if (out) {
+      game = out.game;
       say(
-        caught ? `${op.runner.name} caught stealing.` : `${op.runner.name} steals.`,
-        caught ? 'out' : 'big',
+        out.safe ? `${out.runner.name} steals.` : `${out.runner.name} caught stealing.`,
+        out.safe ? 'big' : 'out',
       );
-      showSteal(op.to, !caught, op.runner.speed, before);
-      flash = '';
-      flashUntil = performance.now() + replayLength(replay!) / speed();
+      showSteal(out, before);
     }
   }
 
+  settleBases(outsBefore);
+}
+
+/**
+ * A runner moved or was put out with the at-bat still going. Finish the game
+ * if that was the end of it, and if it was the third out, hand the half over.
+ *
+ * ⚠️ CAUGHT STEALING OR PICKED OFF CAN BE THE THIRD OUT, and it lands
+ * MID-AT-BAT. The half rolls over underneath a count that is still 2-1, so the
+ * count has to go with it, or the next hitter walks up already behind.
+ */
+function settleBases(outsBefore: number): void {
   if (game.over) {
     finalize();
     return;
   }
-  // ⚠️ CAUGHT STEALING CAN BE THE THIRD OUT, and it lands MID-AT-BAT now. The
-  // half rolls over underneath a count that is still 2-1, so the count has to
-  // go with it — the same reset steal() does on your half, and without it the
-  // next hitter walks up already behind.
   if (game.outs === 0 && outsBefore > 0) {
     atBat = newAtBat();
     // A fresh hitter, so a fresh roll — finishAtBat() never ran on this one.
     looseRolled = false;
+    resetRunning();
     bunting = false;
     penArmed = false;
     previous = [];
@@ -2509,6 +2624,7 @@ function completePlay(
   // The next man gets his own roll for the ball getting away and for the man
   // on first going. See runnersGoOnThePitch().
   looseRolled = false;
+  resetRunning();
   // THE MOMENT THE NEXT MAN WALKS INTO, queued rather than shown — the replay
   // of the play that just ended is still on the screen, and two cards at once
   // is neither of them. The frame loop promotes it when the replay cuts away.
@@ -2943,6 +3059,7 @@ function press(key: string): void {
         render();
       }
     } else if (key === 's') steal();
+    else if (key === 'l') toggleLead();
     else if (key === 'b') toggleBunt();
     else if (key === 'h') pinchHitNow();
     // The pen's two arrow keys, pointed at the bench while you are hitting —
@@ -2991,6 +3108,7 @@ function press(key: string): void {
   }
   if (key === 'b') { relieve(); return; }
   if (key === 'v') { cycleShift(); return; }
+  if (key === 'o') { pickoff(); return; }
   // Move the selection inside the pen. Two keys nothing else uses, next to
   // each other, and only meaningful while you are the one on the mound.
   if (key === ',') { cyclePen(-1); return; }
@@ -3046,7 +3164,7 @@ addEventListener('keydown', (e) => {
     // did nothing at all. Exactly the dead key the note above describes, found
     // the only way it ever is: by somebody pressing it. 'p' is the pitch speed.
     // 'escape' is the pause, forwarded here for exactly the reason above it.
-    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', ',', '.', 'escape'].includes(k) ||
+    [' ', 'enter', 'q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c', 'r', 'b', 'g', 'h', 'k', 't', 'f', 'n', 'p', 'v', 'l', 'o', ',', '.', 'escape'].includes(k) ||
     /^[1-9]$/.test(k)
   ) {
     e.preventDefault();
@@ -3286,9 +3404,12 @@ if (import.meta.env.DEV) {
    * that was never in doubt.
    */
   /** A stolen base, drawn. `to` is 1 for second and 2 for third. */
-  (window as unknown as Record<string, unknown>)['__steal'] = (to = 1, safe = false) => {
-    showSteal(to, safe, 1.1, game);
-    return { lengthMs: replayLength(replay!) };
+  (window as unknown as Record<string, unknown>)['__steal'] = (to = 1, safe = false, gap = 200) => {
+    const runner = { name: 'Debug', speed: 1.1 };
+    const arm = catcherArm(fieldingAlignment(game));
+    const clock = stealClock(runner.speed, to, to + 1, arm, lead, safe, gap);
+    showSteal({ game, safe, runner, to, chance: 0.7, clock }, game);
+    return { lengthMs: replayLength(replay!), clock };
   };
 
   (window as unknown as Record<string, unknown>)['__throw'] = () => {
@@ -4579,7 +4700,7 @@ function render(): void {
   // penPick shipped missing from it: the pen list highlighted the wrong arm
   // all game while the GO TO THE PEN button named the right one, because the
   // button rides on penArmed, which IS listed, and the rows rode on nothing.
-  const key = [phase, game, shown, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead, queuedPitch];
+  const key = [phase, game, shown, atBat, callType, callSpot, auto, speedIdx, lastGrade, season, bunting, penArmed, penPick, benchArmed, benchPick, streak, settings, chart, releaseGrade, lastGameIsStale, swingRead, queuedPitch, going, lead, throwOvers];
   if (key.length === lastKey.length && key.every((v, i) => v === lastKey[i])) return;
   lastKey = key;
 
@@ -4977,13 +5098,19 @@ function renderControls(): void {
     const op = stealOpportunity(game);
     let stealBtn = '';
     if (op) {
-      const odds = Math.round(chanceFor(game, op, fieldingAlignment(game)) * 100);
+      const defence = fieldingAlignment(game);
+      const odds = Math.round(chanceFor(game, op, defence, lead) * 100);
+      const risk = Math.round(pickoffChance(op.runner.speed, lead, catcherArm(defence)) * 100);
       const bag = op.to === 1 ? 'second' : 'third';
-      const enabled = phase === 'idle';
+      const enabled = phase === 'idle' || (phase === 'windup' && (going || swingStartedAt === null));
       stealBtn =
-        `<button style="margin-top:8px;width:100%;text-align:center" data-steal="1"${enabled ? '' : ' disabled'}>` +
-        `SEND ${op.runner.name.toUpperCase()} — ${odds}% <kbd>S</kbd><br>` +
-        `<kbd>stealing ${bag} · caught costs an out</kbd></button>`;
+        `<button style="margin-top:8px;width:100%;text-align:center" data-steal="1"` +
+        `${enabled ? '' : ' disabled'} class="${going ? 'on' : ''}">` +
+        `${going ? `${op.runner.name.toUpperCase()} GOING — HOLD HIM` : `SEND ${op.runner.name.toUpperCase()}`} — ${odds}% <kbd>S</kbd><br>` +
+        `<kbd>${going ? 'breaks on this pitch' : `stealing ${bag} on the pitch · caught costs an out`}</kbd></button>` +
+        `<button style="margin-top:8px;width:100%;text-align:center" data-lead="1"` +
+        `${phase === 'idle' ? '' : ' disabled'} class="${lead === 'big' ? 'on' : ''}">` +
+        `${lead === 'big' ? 'BIG LEAD' : 'LEAD'} — picked off ${risk}% if he throws over <kbd>L</kbd></button>`;
     }
 
     // The bunt carries HIS rating on the button, for the same reason the steal
@@ -5047,6 +5174,8 @@ function renderControls(): void {
 
     const stealEl = elControls.querySelector<HTMLButtonElement>('[data-steal]');
     if (stealEl) stealEl.onclick = () => steal();
+    const leadEl = elControls.querySelector<HTMLButtonElement>('[data-lead]');
+    if (leadEl) leadEl.onclick = () => toggleLead();
     const buntEl = elControls.querySelector<HTMLButtonElement>('[data-bunt]');
     if (buntEl) buntEl.onclick = () => toggleBunt();
     bindBench();
@@ -5189,6 +5318,15 @@ function renderControls(): void {
     `<div class="dim" style="font-size:10px;margin-top:2px">${advice} <span class="dim">(pull ${pull})</span></div>` +
     `</div>`;
 
+  // ---- THE THROW-OVER. Only with a man who could run, and only twice a batter.
+  const held = stealOpportunity(game);
+  const pickBtn = held
+    ? `<button style="margin-top:8px;width:100%;text-align:center" data-pickoff="1"` +
+      `${phase === 'calling' && throwOvers < MAX_THROW_OVERS ? '' : ' disabled'}>` +
+      `THROW OVER TO ${held.from === 0 ? 'FIRST' : 'SECOND'} <kbd>O</kbd><br>` +
+      `<kbd>${MAX_THROW_OVERS - throwOvers} left this batter · a held runner steals less</kbd></button>`
+    : '';
+
   elControls.innerHTML =
     `<div style="margin-bottom:6px" class="dim">pitch</div><div class="keys">${pitches}</div>` +
     `<div style="margin:8px 0 6px" class="dim">spot</div><div class="zone">${spots}</div>` +
@@ -5202,6 +5340,7 @@ function renderControls(): void {
           ? 'ON ITS WAY…'
           : '…') +
     '</button>' +
+    pickBtn +
     chartPanel() +
     defPanel +
     penPanel;
@@ -5226,6 +5365,8 @@ function renderControls(): void {
   });
   const penBtnEl = elControls.querySelector<HTMLButtonElement>('[data-pen]');
   if (penBtnEl) penBtnEl.onclick = () => relieve();
+  const pickEl = elControls.querySelector<HTMLButtonElement>('[data-pickoff]');
+  if (pickEl) pickEl.onclick = () => pickoff();
   // ⚠️ ONE BUTTON, TWO PRESSES, ROUTED BY THE PHASE — the same button the
   // keyboard's SPACE is, and it has to be: a mouse player who could start the
   // arm but not let go of it would be handed a wild pitch every time.
@@ -7169,6 +7310,8 @@ function kickOff(
   swingRead = null;
   autoSwingAt = null;
   chart = [];
+  looseRolled = false;
+  resetRunning();
   releaseGrade = null;
 
   const mine = you === 'home' ? home : away;
