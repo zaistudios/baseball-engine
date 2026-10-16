@@ -314,6 +314,7 @@ import {
   type ArtPart,
   clubBuild,
   armPoseAt,
+  ARM_REST,
   deliveryStyleOf,
   drawBat,
   drawFigure,
@@ -3966,7 +3967,17 @@ function drawArm(now: number): void {
   // armPoseAt() parks him at rest once the recovery is done — which is the
   // same pose the set is, so the pitch before last cannot leave him crooked.
   // His own motion — one of five, his for good. See deliveryStyleOf().
-  const pose = armPoseAt(now - deliveryAt, armTempo, deliveryStyleOf(arm));
+  // The release grade shapes the recovery — a wild one spins him off the
+  // mound. Only after release; the graded frame is the table's own.
+  const pose = armPoseAt(now - deliveryAt, armTempo, deliveryStyleOf(arm), releaseGrade);
+
+  /**
+   * ⚠️ HE IS NOT A STATUE BETWEEN PITCHES. A slow weight shift off the same
+   * kind of sine the batter breathes on — and, like the batter's, it STOPS DEAD
+   * the moment the delivery starts. armPoseAt() hands back ARM_REST itself (the
+   * same object) only when he is at rest, so identity is the test, not a phase.
+   */
+  const idle = pose === ARM_REST ? Math.sin(now / 1200) : 0;
 
   drawFigure(ctx, {
     look: lookForArm(arm, club),
@@ -3978,11 +3989,11 @@ function drawArm(now: number): void {
     y: ARM_XY.y,
     h: ARM_XY.h,
     stance: 'pitch',
-    turn: pose.turn,
-    armBack: pose.armBack,
-    armFront: pose.armFront,
-    legFront: pose.legFront,
-    legBack: pose.legBack,
+    turn: pose.turn + idle * 0.03,
+    armBack: pose.armBack + idle * 0.04,
+    armFront: pose.armFront - idle * 0.05,
+    legFront: pose.legFront + idle * 0.04,
+    legBack: pose.legBack - idle * 0.03,
   });
 }
 
@@ -4027,9 +4038,28 @@ function drawHitter(now: number): void {
       ? -1
       : checkedAt === null
         ? now - swingStartedAt
-        : (checkedAt - swingStartedAt) * Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS);
+        : // Squared: quick off the line, slowing into the shoulder — hauled
+          // back, not rewound at tape speed.
+          (checkedAt - swingStartedAt) * Math.max(0, 1 - (now - checkedAt) / CHECK_PULL_MS) ** 2;
   const swinging = isSwinging(since, swingTravel);
   const pose = swinging ? poseAt(since, swingTravel) : REST_POSE;
+
+  /**
+   * ⚠️ THE BODY LEADS, THE BAT FOLLOWS — and only the body. Hips open a beat
+   * ahead of the barrel (the body turn is read HIP_LEAD_MS further along the
+   * same table), and the front foot toe-taps through the load and plants by the
+   * coil, so the timing of the press shows in his feet before the bat arrives.
+   * The bat itself is still drawn off `pose`, the graded one — none of this
+   * can move the barrel.
+   */
+  const HIP_LEAD_MS = 18;
+  const hips = swinging ? poseAt(since + HIP_LEAD_MS, swingTravel).turn : 0;
+  const st = swinging ? pose.t : 0;
+  // Knee up through the load, down by the coil.
+  const stride = st < 0.7 ? -0.3 * Math.sin((Math.PI * st) / 0.7) : 0;
+  // Back leg pivots open from the coil, holds through the finish, settles.
+  const pivot =
+    st < 0.7 ? 0 : st <= 1 ? (st - 0.7) / 0.3 : Math.max(0, Math.min(1, (2 - st) / 0.5));
   const arm = currentPitcher(game);
   const lefty = man.bats === 'L' || (man.bats === 'S' && arm.throws === 'R');
 
@@ -4073,10 +4103,10 @@ function drawHitter(now: number): void {
     y: BATTER_Y,
     h: BATTER_H,
     stance: 'bat',
-    turn: lefty ? -pose.turn : pose.turn,
+    turn: lefty ? -hips : hips,
     flip: lefty,
-    legFront: breath * 0.05,
-    legBack: breath * -0.05,
+    legFront: breath * 0.05 + stride,
+    legBack: breath * -0.05 - pivot * 0.28,
   });
 
   // ⚠️ THE BAT IS DRAWN HERE, OVER HIM, AND OFF THE POSE THE ENGINE GRADES.

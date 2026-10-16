@@ -847,6 +847,16 @@ describe('joints, and the two pose tables that drive them', () => {
       });
     });
 
+
+    it('wears the release grade only in the recovery — release and rest untouched', () => {
+      for (const s of DELIVERY_STYLE_NAMES) {
+        expect(armPoseAt(TEMPO.releaseAtMs, TEMPO, s, 'wild'), s).toEqual(armPoseAt(TEMPO.releaseAtMs, TEMPO, s));
+        expect(armPoseAt(99999, TEMPO, s, 'wild'), s).toEqual(ARM_REST);
+        const mid = (TEMPO.releaseAtMs + TEMPO.sweepMs) / 2;
+        expect(armPoseAt(mid, TEMPO, s, 'wild').turn, s).toBeLessThan(armPoseAt(mid, TEMPO, s, 'perfect').turn);
+        expect(armPoseAt(mid, TEMPO, s, 'perfect'), s).toEqual(armPoseAt(mid, TEMPO, s));
+      }
+    });
     it('scales with the pitch: a slower delivery reaches the same pose later', () => {
       const slow = { sweepMs: 1110, releaseAtMs: 710 };
       expect(armPoseAt(710, slow).name).toBe('release');

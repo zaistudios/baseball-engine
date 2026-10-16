@@ -235,7 +235,7 @@ describe('the swing is continuous — keyframes, not slides', () => {
     // trip forward through the plate — the bat swinging out and coming back.
     // The short way is 90 degrees backwards, which is the real motion.
     const load = BAT_POSES[0]!;
-    const coil = BAT_POSES[1]!;
+    const coil = BAT_POSES.find((p) => p.name === 'coil')!;
     const mid = poseAt((poseTimeMs(load.t) + poseTimeMs(coil.t)) / 2);
     // Going the long way would put the mid-point near 35 degrees, out over the
     // plate. The short way puts it back past -145.

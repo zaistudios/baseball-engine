@@ -41,6 +41,7 @@
  */
 import type { Build, Look, Player } from '../core/roster.ts';
 import type { Pitcher } from '../core/pitcher.ts';
+import type { ReleaseGrade } from '../core/delivery.ts';
 import { makeRng, seedFromString } from '../core/rng.ts';
 import { slug, tinted } from './art.ts';
 import type { Team } from './teams.ts';
@@ -1712,11 +1713,24 @@ export interface ArmPose {
   legBack: number;
 }
 
+/*
+ * ⚠️ RHYTHM IS KEYFRAME SPACING, SAME AS THE BAT — 2026-10-16. Four poses
+ * lerped at one speed read as a mannequin. The table now has the beats a throw
+ * has: a ROCK back onto the rubber, the knee up to its peak and HELD there
+ * (lift → hold barely moves, which is the pause), then the arm covering more
+ * than two radians in the last third (the acceleration), a FOLLOW where the
+ * body keeps turning past release and the back leg comes through, and a SETTLE
+ * that drifts a hair past square before he is back on the set.
+ */
 export const ARM_POSES: readonly ArmPose[] = [
   { name: 'set',     t: 0,    turn: 0,     armBack: 0,      armFront: 0,     legFront: 0,     legBack: 0 },
-  { name: 'lift',    t: 0.55, turn: -0.17, armBack: -2.1,   armFront: 0.35,  legFront: -0.45, legBack: 0.06 },
+  { name: 'rock',    t: 0.15, turn: 0.05,  armBack: -0.2,   armFront: 0.15,  legFront: -0.12, legBack: 0.03 },
+  { name: 'lift',    t: 0.48, turn: -0.14, armBack: -1.5,   armFront: 0.4,   legFront: -0.8,  legBack: 0.07 },
+  { name: 'hold',    t: 0.66, turn: -0.16, armBack: -2.0,   armFront: 0.38,  legFront: -0.74, legBack: 0.07 },
   { name: 'release', t: 1,    turn: -0.22, armBack: -4.3,   armFront: -0.35, legFront: 0.38,  legBack: -0.1 },
-  { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,   legBack: 0 },
+  { name: 'follow',  t: 1.25, turn: -0.34, armBack: -5.4,   armFront: -0.1,  legFront: 0.42,  legBack: -0.38 },
+  { name: 'settle',  t: 1.65, turn: 0.04,  armBack: -6.05,  armFront: 0.05,  legFront: 0.08,  legBack: -0.08 },
+  { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0, legBack: 0 },
 ];
 
 export const ARM_REST: ArmPose = ARM_POSES[0]!;
@@ -1739,40 +1753,58 @@ export const ARM_REST: ArmPose = ARM_POSES[0]!;
  * must keep falling), and a negative legFront is the knee coming up.
  */
 export const DELIVERY_STYLES = {
-  /** Over the top. The original, unchanged. */
+  /** Over the top: a big knee, a pause at the peak, and the arm dropping down through release. */
   overhand: ARM_POSES,
   /** A lower slot: the arm comes through earlier and wider, more shoulder in it. */
   threeQuarter: [
     ARM_REST,
-    { name: 'lift',    t: 0.55, turn: -0.2,  armBack: -1.8,  armFront: 0.5,   legFront: -0.4,  legBack: 0.06 },
+    { name: 'rock',    t: 0.15, turn: 0.04,  armBack: -0.2,  armFront: 0.2,   legFront: -0.1,  legBack: 0.03 },
+    { name: 'lift',    t: 0.5,  turn: -0.2,  armBack: -1.4,  armFront: 0.5,   legFront: -0.6,  legBack: 0.06 },
+    { name: 'hold',    t: 0.64, turn: -0.22, armBack: -1.85, armFront: 0.48,  legFront: -0.55, legBack: 0.06 },
     { name: 'release', t: 1,    turn: -0.36, armBack: -3.5,  armFront: -0.45, legFront: 0.36,  legBack: -0.12 },
-    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+    { name: 'follow',  t: 1.28, turn: -0.46, armBack: -4.9,  armFront: -0.15, legFront: 0.4,   legBack: -0.32 },
+    { name: 'settle',  t: 1.65, turn: 0.03,  armBack: -5.95, armFront: 0.05,  legFront: 0.06,  legBack: -0.06 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0, legBack: 0 },
   ],
   /**
    * Out to the side and never over the top. The one table whose arm comes
    * BACK the way it went: it swings out level, slings through with the whole
-   * body turned into it, and drops home to 0 rather than round to −2π.
+   * body turned into it, and drops home to 0 rather than round to −2π. The
+   * sling is the follow: the body spins on round and the arm whips back across.
    */
   sidearm: [
     ARM_REST,
+    { name: 'rock',    t: 0.15, turn: 0.06,  armBack: -0.15, armFront: 0.2,   legFront: -0.1,  legBack: 0.03 },
     { name: 'lift',    t: 0.55, turn: -0.28, armBack: -1.35, armFront: 0.6,   legFront: -0.35, legBack: 0.08 },
     { name: 'release', t: 1,    turn: -0.45, armBack: -1.75, armFront: -0.55, legFront: 0.42,  legBack: -0.15 },
+    { name: 'follow',  t: 1.3,  turn: -0.62, armBack: -1.2,  armFront: -0.2,  legFront: 0.45,  legBack: -0.45 },
+    { name: 'settle',  t: 1.7,  turn: 0.05,  armBack: -0.15, armFront: 0.05,  legFront: 0.06,  legBack: -0.06 },
     { name: 'recover', t: 2,    turn: 0,     armBack: 0,     armFront: 0,     legFront: 0,     legBack: 0 },
   ],
-  /** The knee all the way up first, then everything at once. */
+  /** The knee all the way up first, HELD at the balance point, then everything at once. */
   highKick: [
     ARM_REST,
-    { name: 'kick',    t: 0.42, turn: -0.08, armBack: -0.9,  armFront: 0.5,   legFront: -1.45, legBack: 0.1 },
-    { name: 'lift',    t: 0.72, turn: -0.2,  armBack: -2.5,  armFront: 0.3,   legFront: -0.6,  legBack: 0.06 },
+    { name: 'rock',    t: 0.12, turn: 0.05,  armBack: -0.25, armFront: 0.2,   legFront: -0.2,  legBack: 0.04 },
+    { name: 'kick',    t: 0.38, turn: -0.08, armBack: -0.9,  armFront: 0.5,   legFront: -1.45, legBack: 0.1 },
+    { name: 'hold',    t: 0.62, turn: -0.1,  armBack: -1.2,  armFront: 0.48,  legFront: -1.38, legBack: 0.1 },
+    { name: 'lift',    t: 0.8,  turn: -0.2,  armBack: -2.5,  armFront: 0.3,   legFront: -0.5,  legBack: 0.06 },
     { name: 'release', t: 1,    turn: -0.24, armBack: -4.3,  armFront: -0.4,  legFront: 0.45,  legBack: -0.12 },
-    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+    { name: 'follow',  t: 1.25, turn: -0.38, armBack: -5.4,  armFront: -0.1,  legFront: 0.5,   legBack: -0.42 },
+    { name: 'settle',  t: 1.65, turn: 0.05,  armBack: -6.05, armFront: 0.05,  legFront: 0.08,  legBack: -0.08 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0, legBack: 0 },
   ],
-  /** Barely a leg lift — quick to the plate, the motion of a man holding a runner. */
+  /**
+   * Barely a leg lift — quick to the plate, the motion of a man holding a
+   * runner. NO rock and NO hold: the one table that never pauses, and a short,
+   * quick follow. That unbroken rush is the read.
+   */
   slideStep: [
     ARM_REST,
-    { name: 'lift',    t: 0.55, turn: -0.12, armBack: -2.3,  armFront: 0.2,   legFront: -0.12, legBack: 0.03 },
+    { name: 'lift',    t: 0.4,  turn: -0.12, armBack: -1.9,  armFront: 0.2,   legFront: -0.15, legBack: 0.03 },
     { name: 'release', t: 1,    turn: -0.18, armBack: -4.3,  armFront: -0.3,  legFront: 0.25,  legBack: -0.06 },
-    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0,  legBack: 0 },
+    { name: 'follow',  t: 1.18, turn: -0.28, armBack: -5.3,  armFront: -0.05, legFront: 0.3,   legBack: -0.3 },
+    { name: 'settle',  t: 1.5,  turn: 0.03,  armBack: -6.1,  armFront: 0.03,  legFront: 0.04,  legBack: -0.04 },
+    { name: 'recover', t: 2,    turn: 0,     armBack: -Math.PI * 2, armFront: 0, legFront: 0, legBack: 0 },
   ],
 } satisfies Record<string, readonly ArmPose[]>;
 
@@ -1822,10 +1854,24 @@ export const deliveryStyleOf = (arm: { id?: string; name: string; look?: Look })
  * Before the press and after the recovery he is at rest — which is the same
  * pose at both ends, so nothing has to know which side of the pitch it is on.
  */
+/**
+ * THE RELEASE GRADE, WORN BY THE BODY. Added on top of the table through the
+ * recovery only — weighted by a hump that is 0 at release and 0 back at the
+ * set — so the release frame is exactly the authored one and he still ends on
+ * ARM_REST. Wild: the glove arm flies out and he spins off the mound. Early
+ * and late: a smaller stumble each way. Perfect and good: the table, clean.
+ */
+const GRADE_BODY: Partial<Record<ReleaseGrade, Partial<Record<'turn' | 'armBack' | 'armFront' | 'legFront' | 'legBack', number>>>> = {
+  wild: { turn: -0.32, armFront: 0.7, legFront: 0.15, legBack: -0.3 },
+  early: { turn: -0.14, armFront: 0.3 },
+  late: { turn: 0.1, armBack: 0.35, legBack: -0.15 },
+};
+
 export function armPoseAt(
   sinceMs: number,
   d: { sweepMs: number; releaseAtMs: number },
   style: DeliveryStyle = 'overhand',
+  grade?: ReleaseGrade | null,
 ): ArmPose {
   const recoverMs = Math.max(1, d.sweepMs - d.releaseAtMs);
   const seg = segmentAt(DELIVERY_STYLES[style], sinceMs, (t) =>
@@ -1834,16 +1880,20 @@ export function armPoseAt(
   if (!seg) return ARM_REST;
   const { a, b, k } = seg;
   const at = (x: number, y: number): number => x + (y - x) * k;
+  const t = at(a.t, b.t);
+  const body = grade ? GRADE_BODY[grade] : undefined;
+  const hump = body && t > 1 ? Math.sin(Math.PI * Math.min(1, t - 1)) : 0;
+  const off = (j: 'turn' | 'armBack' | 'armFront' | 'legFront' | 'legBack'): number => (body?.[j] ?? 0) * hump;
   return {
     name: k < 0.5 ? a.name : b.name,
-    t: at(a.t, b.t),
-    turn: at(a.turn, b.turn),
+    t,
+    turn: at(a.turn, b.turn) + off('turn'),
     // Plain lerps, every one: these are joints, and a joint has no short way
     // round to take. The arm's full revolution is deliberate and a shortest-arc
     // blend would be exactly what undoes it.
-    armBack: at(a.armBack, b.armBack),
-    armFront: at(a.armFront, b.armFront),
-    legFront: at(a.legFront, b.legFront),
-    legBack: at(a.legBack, b.legBack),
+    armBack: at(a.armBack, b.armBack) + off('armBack'),
+    armFront: at(a.armFront, b.armFront) + off('armFront'),
+    legFront: at(a.legFront, b.legFront) + off('legFront'),
+    legBack: at(a.legBack, b.legBack) + off('legBack'),
   };
 }

@@ -90,8 +90,16 @@ export function batSpeedLabel(power: number): string {
   return 'average bat';
 }
 
-/** Barrel decelerating past the ball. Cosmetic; grading is over at contact. */
-export const FOLLOW_THROUGH_MS = 220;
+/**
+ * Barrel decelerating past the ball and SETTLING BACK to the shoulder.
+ * Cosmetic; grading is over at contact.
+ *
+ * ⚠️ 220 → 320 ON 2026-10-16, AND THE SWING DID NOT GET SLOWER. The extra
+ * 100ms is the settle — finish back to rest — which used to be a one-frame
+ * snap the moment isSwinging() went false. Through and finish land within a
+ * few ms of where they always did; see BAT_POSES.
+ */
+export const FOLLOW_THROUGH_MS = 320;
 
 /**
  * ⚠️ FAULTS 6 AND 7, AND WHY THE MODEL CHANGED. 2026-08-16.
@@ -205,7 +213,7 @@ export interface BatPose {
 const deg = (d: number): number => (d * Math.PI) / 180;
 
 /**
- * THE SWING. Five keyframes, and the whole animation.
+ * THE SWING. Seven keyframes, and the whole animation.
  *
  * ⚠️ THE HANDS ARE IN FRONT OF HIM, and that is a correction. They used to sit
  * at hx −84, which is the batter's own BACK edge — his body runs −96 to −70 —
@@ -232,17 +240,25 @@ const deg = (d: number): number => (d * Math.PI) / 180;
  * behind the hitter. What changed is that the HANDS never are, and the bat is
  * always drawn OVER the body rather than under it, so nothing is hidden.
  *
- * TIMING IS THE ACCELERATION. The gap from load to coil is 0.70 of the swing
+ * TIMING IS THE ACCELERATION. The gap from load to coil (through the hitch) is 0.70 of the swing
  * and coil to contact is 0.30, so the bat covers most of its arc in the last
  * third and is moving fastest through the ball. That is what the old t² curve
  * bought, expressed as keyframe spacing instead of as an easing function.
  */
 export const BAT_POSES: readonly BatPose[] = [
   { name: 'load',    t: 0,    hx: -64, hy: -70, angle: deg(-100), len: 66, turn: 0 },
+  // THE HITCH — hands dip and drift back, barrel tips toward the catcher, the
+  // body winds a touch the wrong way. It is what makes the load LOAD instead
+  // of the bat gliding at one speed from the shoulder into the coil.
+  { name: 'hitch',   t: 0.3,  hx: -68, hy: -64, angle: deg(-114), len: 64, turn: deg(-4) },
   { name: 'coil',    t: 0.7,  hx: -66, hy: -62, angle: deg(170),  len: 58, turn: deg(3) },
   { name: 'contact', t: 1,    hx: -58, hy: -56, angle: deg(8),    len: 62, turn: deg(14) },
-  { name: 'through', t: 1.25, hx: -48, hy: -54, angle: deg(2),    len: 92, turn: deg(20) },
-  { name: 'finish',  t: 1.7,  hx: -56, hy: -60, angle: deg(-120), len: 64, turn: deg(24) },
+  { name: 'through', t: 1.17, hx: -48, hy: -54, angle: deg(2),    len: 92, turn: deg(20) },
+  { name: 'finish',  t: 1.5,  hx: -56, hy: -60, angle: deg(-120), len: 64, turn: deg(24) },
+  // THE SETTLE — back to the load, drawn, rather than snapped to the frame
+  // isSwinging() goes false. Same numbers as 'load', so the last frame of the
+  // swing and the first frame at rest are the same picture.
+  { name: 'settle',  t: 2,    hx: -64, hy: -70, angle: deg(-100), len: 66, turn: 0 },
 ];
 
 /** The pose at rest, between pitches. */
@@ -403,5 +419,9 @@ export function canCheck(sinceMs: number, travel = SWING_TRAVEL_MS): boolean {
   return sinceMs >= 0 && sinceMs < travel * CHECK_WINDOW;
 }
 
-/** How long the barrel takes to retreat once it is checked. Cosmetic. */
-export const CHECK_PULL_MS = 90;
+/**
+ * How long the barrel takes to retreat once it is checked. Cosmetic.
+ * main.ts eases it out — fast off the line, slowing into the shoulder — so it
+ * reads as a bat being hauled back rather than a tape rewinding.
+ */
+export const CHECK_PULL_MS = 130;
