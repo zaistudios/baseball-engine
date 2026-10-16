@@ -926,9 +926,16 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
         box(-w * 0.46, torsoTop + torsoH * 0.15, Math.max(1, h * 0.018), torsoH * 0.7, u.trim);
         box(w * 0.44, torsoTop + torsoH * 0.15, Math.max(1, h * 0.018), torsoH * 0.7, u.trim);
       } else {
-        // classic v-neck collar
+        // classic v-neck collar, placket seam and uniform buttons
         box(-w * 0.15, torsoTop + torsoH * 0.02, w * 0.3, Math.max(1, h * 0.015), u.trim);
+        box(-w * 0.02, torsoTop + torsoH * 0.08, Math.max(1, w * 0.04), torsoH * 0.82, 'rgba(0,0,0,0.15)');
+        for (let i = 0; i < 3; i++) {
+          box(-w * 0.03, torsoTop + torsoH * (0.22 + i * 0.22), Math.max(2, w * 0.06), Math.max(2, w * 0.06), '#f1f5f9');
+        }
       }
+      // Baseball uniform belt and buckle at waistline
+      box(-w * 0.46, hem - Math.max(2, h * 0.035), w * 0.92, Math.max(2, h * 0.035), '#1a1d1c');
+      box(-w * 0.08, hem - Math.max(2.5, h * 0.04), w * 0.16, Math.max(2.5, h * 0.04), '#d8b44a');
     }
   }
 
@@ -1076,10 +1083,34 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
 
   // ---- the mitt. A crouched man with nothing in his hand is a man squatting.
   if (crouch) {
-    ctx.fillStyle = '#5a3a1c';
+    const mx = w * 0.52;
+    const my = torsoTop + torsoH * 0.5;
+    const mr = h * 0.15;
+    // Outer leather mitt pocket (deep oiled leather tone)
+    ctx.fillStyle = '#4a2f18';
     ctx.beginPath();
-    ctx.arc(w * 0.52, torsoTop + torsoH * 0.5, h * 0.15, 0, Math.PI * 2);
+    ctx.ellipse(mx, my, mr * 1.05, mr * 0.92, -0.15, 0, Math.PI * 2);
     ctx.fill();
+    // Inner pocket indent (dark shadow where ball strikes)
+    ctx.fillStyle = '#2d1a0d';
+    ctx.beginPath();
+    ctx.ellipse(mx - mr * 0.1, my, mr * 0.65, mr * 0.55, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    // Heavy thumb roll & outer roll border
+    ctx.strokeStyle = '#6b4526';
+    ctx.lineWidth = Math.max(1.2, h * 0.018);
+    ctx.beginPath();
+    ctx.arc(mx, my, mr * 0.95, -Math.PI * 0.4, Math.PI * 0.6);
+    ctx.stroke();
+    // Cross-webbing rawhide laces connecting thumb and fingers
+    ctx.strokeStyle = '#c89b3c';
+    ctx.lineWidth = Math.max(1, h * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(mx + mr * 0.2, my - mr * 0.8);
+    ctx.lineTo(mx + mr * 0.7, my - mr * 0.3);
+    ctx.moveTo(mx + mr * 0.4, my - mr * 0.7);
+    ctx.lineTo(mx + mr * 0.9, my - mr * 0.2);
+    ctx.stroke();
   }
 
   // ---- NO BAT IS DRAWN HERE, and that is the whole of job 1.
@@ -1282,13 +1313,25 @@ export function drawFigure(ctx: CanvasRenderingContext2D, o: FigureOpts): void {
  */
 function drawFace(ctx: CanvasRenderingContext2D, headY: number, headR: number): void {
   if (headR < 5) return;
-  ctx.fillStyle = 'rgba(28,22,18,0.82)';
+  // Ear at rear of head
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(-headR * 0.35, headY + headR * 0.12, Math.max(1, headR * 0.22), headR * 0.36);
+  // Brow ridge shadow
+  ctx.fillStyle = 'rgba(28,22,18,0.7)';
+  ctx.fillRect(headR * 0.25, headY + headR * 0.05, headR * 0.35, Math.max(1, headR * 0.1));
+  // Resolute eye pupil
+  ctx.fillStyle = 'rgba(28,22,18,0.88)';
   ctx.beginPath();
   // Well forward of centre. At 0.38 it sat near the middle of the head and read
   // as a nostril; an eye in profile belongs close to the front of the face, and
   // 0.45 is as far as `narrow` (rx 0.76r) will take it and still be on the head.
   ctx.arc(headR * 0.45, headY + headR * 0.18, Math.max(1, headR * 0.18), 0, Math.PI * 2);
   ctx.fill();
+  // Eye catchlight
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(headR * 0.52, headY + headR * 0.14, Math.max(1, headR * 0.08), Math.max(1, headR * 0.08));
+  // Mouth line
+  ctx.fillStyle = 'rgba(28,22,18,0.7)';
   ctx.fillRect(headR * 0.26, headY + headR * 0.56, headR * 0.44, Math.max(1, headR * 0.12));
 }
 
@@ -1312,8 +1355,18 @@ function drawCrest(
     ctx.beginPath();
     ctx.arc(0, headY, r * 1.06, Math.PI, 0);
     ctx.fill();
+    // Squatchee top button
+    ctx.fillStyle = u.trim;
+    ctx.fillRect(-Math.max(1, r * 0.1), headY - r * 1.15, Math.max(1, r * 0.2), Math.max(1, r * 0.14));
     // The brim, pointing where he is facing.
+    ctx.fillStyle = fill;
     ctx.fillRect(0, headY - r * 0.22, r * 1.7, r * 0.34);
+    // Underside brim shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(0, headY + r * 0.02, r * 1.6, Math.max(1, r * 0.1));
+    // Brim tip contrast edge
+    ctx.fillStyle = u.trim;
+    ctx.fillRect(r * 1.55, headY - r * 0.22, Math.max(1, r * 0.15), r * 0.34);
   };
 
   // ⚠️ THE THIN DIMENSIONS ARE FLOORED AT A PIXEL. An antenna is 0.18r wide,
@@ -1472,6 +1525,12 @@ function drawCrest(
       cap(u.primary);
       ctx.fillStyle = u.trim;
       ctx.fillRect(-r * 1.06, headY - r * 0.14, r * 2.12, px(r * 0.16));
+      ctx.fillStyle = u.primary;
+      ctx.fillRect(-r * 0.25, headY, r * 0.55, r * 0.68);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-r * 0.05, headY + r * 0.25, px(r * 0.18), px(r * 0.18));
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillRect(-r * 0.6, headY - r * 0.95, r * 1.2, px(r * 0.14));
       break;
     case 5: // high fade
       ctx.fillStyle = hair;

@@ -21,9 +21,9 @@ describe('Vault Spec starter pixel art', () => {
     expect(bin.charCodeAt(3)).toBe(0x47); // 'G'
   });
 
-  it('provides 12 handcrafted parts that all match real art slots', () => {
+  it('provides 34 handcrafted parts that all match real art slots', () => {
     const parts = createVaultSpecParts();
-    expect(parts.length).toBe(12);
+    expect(parts.length).toBe(34);
     const validSlots = new Set(artSlots().map((s) => s.id));
     for (const p of parts) {
       expect(validSlots.has(p.id), `${p.id} must be a known slot`).toBe(true);
@@ -35,7 +35,7 @@ describe('Vault Spec starter pixel art', () => {
   it('exports a valid .bbpack JSON bundle', () => {
     const json = exportVaultSpecPackJson();
     const parsed = JSON.parse(json) as Record<string, string>;
-    expect(Object.keys(parsed).length).toBe(12);
+    expect(Object.keys(parsed).length).toBe(34);
     for (const [id, url] of Object.entries(parsed)) {
       expect(id).toMatch(/^(human|augmented|machine)\/(head|crest|frame)\/\d+$/);
       expect(url.startsWith('data:image/png;base64,')).toBe(true);

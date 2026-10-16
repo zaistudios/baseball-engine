@@ -513,6 +513,549 @@ export function drawScannerJaw(): Pad {
   return p;
 }
 
+/** 16x16 Human Head: Classic Ballplayer Head (human/head/0) */
+export function drawClassicBallplayerHead(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 9, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 10, 1);
+  line(p, 3, 10, 5, 13, 1);
+  line(p, 5, 13, 9, 13, 1);
+  line(p, 9, 13, 11, 10, 1);
+  line(p, 11, 10, 12, 7, 1);
+  line(p, 12, 7, 10, 4, 1);
+  line(p, 10, 4, 9, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 8, 4, 10, 4, 1);
+  paint(p, 9, 5, 1);
+  paint(p, 10, 5, 3);
+  paint(p, 11, 7, 1);
+  line(p, 8, 9, 10, 9, 1);
+  line(p, 5, 6, 5, 8, 1);
+  paint(p, 4, 7, 3);
+  paint(p, 7, 5, 3);
+  paint(p, 8, 7, 3);
+  return p;
+}
+
+/** 16x16 Human Head: Square Jaw Veteran Head (human/head/1) */
+export function drawSquareJawHead(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 10, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 11, 1);
+  line(p, 3, 11, 5, 13, 1);
+  line(p, 5, 13, 10, 13, 1);
+  line(p, 10, 13, 12, 11, 1);
+  line(p, 12, 11, 12, 8, 1);
+  line(p, 12, 8, 13, 7, 1);
+  line(p, 13, 7, 10, 4, 1);
+  line(p, 10, 4, 10, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 8, 4, 11, 4, 1);
+  paint(p, 9, 6, 1);
+  paint(p, 10, 6, 3);
+  line(p, 9, 10, 11, 10, 1);
+  line(p, 4, 7, 4, 9, 1);
+  paint(p, 5, 8, 1);
+  line(p, 6, 12, 9, 12, 3);
+  return p;
+}
+
+/** 16x16 Human Head: Heavy Brow Head (human/head/5) */
+export function drawHeavyBrowHead(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 10, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 11, 1);
+  line(p, 3, 11, 5, 13, 1);
+  line(p, 5, 13, 10, 13, 1);
+  line(p, 10, 13, 12, 10, 1);
+  line(p, 12, 10, 13, 7, 1);
+  line(p, 13, 7, 11, 4, 1);
+  line(p, 11, 4, 10, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 7, 4, 11, 4, 1);
+  line(p, 8, 5, 11, 5, 1);
+  paint(p, 9, 6, 1);
+  paint(p, 10, 6, 3);
+  for (const [sx, sy] of [[7, 10], [9, 11], [10, 11], [8, 12], [6, 11], [11, 12]] as const) {
+    paint(p, sx, sy, 1);
+  }
+  line(p, 4, 7, 4, 9, 1);
+  paint(p, 8, 8, 3);
+  return p;
+}
+
+/** 16x16 Human Crest: Batting Helmet (human/crest/4) */
+export function drawBattingHelmet(): Pad {
+  const p = padFor('crest');
+  line(p, 3, 11, 2, 7, 1);
+  line(p, 2, 7, 5, 3, 1);
+  line(p, 5, 3, 11, 3, 1);
+  line(p, 11, 3, 14, 6, 1);
+  line(p, 11, 10, 15, 8, 1);
+  line(p, 14, 6, 15, 8, 1);
+  line(p, 11, 10, 8, 10, 1);
+  line(p, 8, 10, 8, 14, 1);
+  line(p, 8, 14, 4, 14, 1);
+  line(p, 4, 14, 3, 11, 1);
+  fill(p, 7, 7, 2);
+  line(p, 6, 4, 11, 4, 3);
+  paint(p, 12, 5, 3);
+  paint(p, 6, 12, 1);
+  line(p, 11, 9, 14, 8, 1);
+  return p;
+}
+
+/** 16x16 Human Crest: Backward Cap (human/crest/7) */
+export function drawBackwardCap(): Pad {
+  const p = padFor('crest');
+  line(p, 4, 11, 4, 7, 1);
+  line(p, 4, 7, 7, 4, 1);
+  line(p, 7, 4, 11, 4, 1);
+  line(p, 11, 4, 13, 7, 1);
+  line(p, 13, 7, 13, 11, 1);
+  line(p, 4, 11, 13, 11, 1);
+  fill(p, 8, 7, 2);
+  line(p, 4, 11, 0, 10, 1);
+  line(p, 0, 10, 1, 9, 1);
+  line(p, 1, 9, 4, 10, 1);
+  fill(p, 2, 10, 2);
+  paint(p, 9, 3, 3);
+  line(p, 10, 9, 12, 9, 1);
+  paint(p, 11, 10, 3);
+  line(p, 9, 4, 9, 9, 1);
+  return p;
+}
+
+/** 16x16 Human Crest: Stirrup Flap Helmet (human/crest/9) */
+export function drawStirrupFlapHelmet(): Pad {
+  const p = padFor('crest');
+  line(p, 3, 11, 2, 7, 1);
+  line(p, 2, 7, 5, 3, 1);
+  line(p, 5, 3, 11, 3, 1);
+  line(p, 11, 3, 14, 6, 1);
+  line(p, 11, 9, 15, 8, 1);
+  line(p, 14, 6, 15, 8, 1);
+  line(p, 3, 11, 4, 14, 1);
+  line(p, 4, 14, 7, 15, 1);
+  line(p, 7, 15, 11, 15, 1);
+  line(p, 11, 15, 12, 12, 1);
+  line(p, 12, 12, 11, 9, 1);
+  fill(p, 7, 7, 2);
+  line(p, 6, 4, 11, 4, 3);
+  paint(p, 12, 5, 3);
+  paint(p, 9, 12, 1);
+  paint(p, 9, 13, 3);
+  line(p, 6, 14, 10, 14, 3);
+  return p;
+}
+
+/** 32x32 Human Frame: Average Home Jersey (human/frame/1) */
+export function drawAverageJersey(): Pad {
+  const p = padFor('frame');
+  line(p, 10, 4, 21, 4, 1);
+  line(p, 10, 4, 5, 9, 1);
+  line(p, 5, 9, 7, 13, 1);
+  line(p, 7, 13, 9, 12, 1);
+  line(p, 9, 12, 8, 27, 1);
+  line(p, 8, 27, 23, 27, 1);
+  line(p, 23, 27, 22, 12, 1);
+  line(p, 22, 12, 24, 13, 1);
+  line(p, 24, 13, 26, 9, 1);
+  line(p, 26, 9, 21, 4, 1);
+  fill(p, 15, 15, 2);
+  line(p, 12, 4, 15, 8, 1);
+  line(p, 19, 4, 16, 8, 1);
+  for (let y = 8; y <= 24; y++) {
+    paint(p, 15, y, 1);
+    paint(p, 16, y, 1);
+  }
+  for (const by of [10, 14, 18, 22]) {
+    paint(p, 15, by, 3);
+  }
+  line(p, 6, 11, 8, 12, 3);
+  line(p, 23, 12, 25, 11, 3);
+  line(p, 8, 25, 23, 25, 1);
+  line(p, 8, 27, 23, 27, 1);
+  line(p, 14, 25, 17, 25, 3);
+  line(p, 14, 27, 17, 27, 3);
+  paint(p, 14, 26, 3);
+  paint(p, 17, 26, 3);
+  return p;
+}
+
+/** 16x16 Augmented Head: Cyborg Round Head (augmented/head/0) */
+export function drawCyborgRoundHead(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 10, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 11, 1);
+  line(p, 3, 11, 5, 13, 1);
+  line(p, 5, 13, 10, 13, 1);
+  line(p, 10, 13, 12, 10, 1);
+  line(p, 12, 10, 12, 6, 1);
+  line(p, 12, 6, 10, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 4, 4, 8, 4, 1);
+  line(p, 4, 8, 8, 8, 1);
+  line(p, 8, 4, 8, 8, 1);
+  fill(p, 6, 6, 1);
+  paint(p, 5, 5, 3);
+  paint(p, 5, 7, 3);
+  paint(p, 9, 6, 1);
+  paint(p, 10, 6, 3);
+  paint(p, 11, 6, 1);
+  line(p, 7, 11, 10, 11, 1);
+  return p;
+}
+
+/** 16x16 Augmented Head: Augmented Ocular (augmented/head/4) */
+export function drawAugmentedOcular(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 10, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 11, 1);
+  line(p, 3, 11, 5, 13, 1);
+  line(p, 5, 13, 9, 13, 1);
+  line(p, 9, 13, 11, 11, 1);
+  line(p, 11, 11, 11, 5, 1);
+  line(p, 11, 5, 10, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 8, 4, 10, 4, 1);
+  line(p, 8, 10, 10, 10, 1);
+  line(p, 7, 5, 7, 9, 1);
+  line(p, 11, 5, 11, 9, 1);
+  fill(p, 9, 7, 1);
+  paint(p, 9, 6, 3);
+  paint(p, 9, 7, 3);
+  paint(p, 8, 7, 3);
+  paint(p, 10, 7, 3);
+  line(p, 4, 7, 6, 7, 3);
+  return p;
+}
+
+/** 16x16 Augmented Head: Bionic Optic (augmented/head/6) */
+export function drawBionicOptic(): Pad {
+  const p = padFor('head');
+  line(p, 5, 2, 10, 2, 1);
+  line(p, 5, 2, 3, 5, 1);
+  line(p, 3, 5, 3, 11, 1);
+  line(p, 3, 11, 5, 13, 1);
+  line(p, 5, 13, 9, 13, 1);
+  line(p, 9, 13, 11, 11, 1);
+  line(p, 11, 11, 11, 5, 1);
+  line(p, 11, 5, 10, 2, 1);
+  fill(p, 7, 7, 2);
+  line(p, 7, 5, 11, 5, 1);
+  line(p, 7, 9, 11, 9, 1);
+  line(p, 7, 5, 7, 9, 1);
+  line(p, 11, 5, 11, 9, 1);
+  fill(p, 9, 7, 1);
+  paint(p, 9, 7, 3);
+  paint(p, 10, 7, 3);
+  line(p, 6, 10, 10, 10, 3);
+  line(p, 6, 11, 10, 11, 1);
+  return p;
+}
+
+/** 16x16 Augmented Crest: Half-Visor (augmented/crest/0) */
+export function drawHalfVisor(): Pad {
+  const p = padFor('crest');
+  line(p, 4, 8, 4, 12, 1);
+  paint(p, 5, 10, 3);
+  line(p, 4, 8, 12, 7, 1);
+  line(p, 12, 7, 14, 8, 1);
+  line(p, 14, 8, 13, 11, 1);
+  line(p, 13, 11, 5, 11, 1);
+  fill(p, 8, 9, 2);
+  line(p, 6, 9, 12, 9, 3);
+  paint(p, 13, 9, 3);
+  return p;
+}
+
+/** 16x16 Augmented Crest: Full-Visor (augmented/crest/4) */
+export function drawFullVisor(): Pad {
+  const p = padFor('crest');
+  line(p, 3, 11, 2, 7, 1);
+  line(p, 2, 7, 5, 4, 1);
+  line(p, 5, 4, 11, 4, 1);
+  line(p, 11, 4, 14, 7, 1);
+  line(p, 14, 7, 15, 11, 1);
+  line(p, 15, 11, 10, 13, 1);
+  line(p, 10, 13, 3, 11, 1);
+  fill(p, 7, 8, 2);
+  line(p, 5, 8, 14, 8, 1);
+  line(p, 6, 9, 14, 9, 3);
+  line(p, 5, 10, 13, 10, 1);
+  line(p, 7, 5, 10, 5, 3);
+  return p;
+}
+
+/** 16x16 Augmented Crest: Sensory Brow (augmented/crest/8) */
+export function drawSensoryBrow(): Pad {
+  const p = padFor('crest');
+  line(p, 3, 7, 13, 7, 1);
+  line(p, 3, 7, 3, 10, 1);
+  line(p, 3, 10, 14, 10, 1);
+  line(p, 14, 10, 14, 7, 1);
+  fill(p, 7, 8, 2);
+  paint(p, 5, 8, 3);
+  paint(p, 5, 9, 1);
+  paint(p, 7, 8, 1);
+  paint(p, 7, 9, 3);
+  paint(p, 9, 8, 3);
+  paint(p, 9, 9, 1);
+  paint(p, 11, 8, 1);
+  paint(p, 11, 9, 3);
+  line(p, 4, 6, 12, 6, 3);
+  return p;
+}
+
+/** 32x32 Augmented Frame: Pneumatic Spine (augmented/frame/7) */
+export function drawPneumaticSpine(): Pad {
+  const p = padFor('frame');
+  line(p, 10, 4, 21, 4, 1);
+  line(p, 10, 4, 5, 9, 1);
+  line(p, 5, 9, 7, 13, 1);
+  line(p, 7, 13, 9, 12, 1);
+  line(p, 9, 12, 8, 28, 1);
+  line(p, 8, 28, 23, 28, 1);
+  line(p, 23, 28, 22, 12, 1);
+  line(p, 22, 12, 24, 13, 1);
+  line(p, 24, 13, 26, 9, 1);
+  line(p, 26, 9, 21, 4, 1);
+  fill(p, 15, 15, 2);
+  line(p, 9, 8, 9, 26, 1);
+  line(p, 11, 8, 11, 26, 1);
+  for (let y = 8; y <= 26; y++) paint(p, 10, y, 3);
+  for (const ry of [10, 15, 20, 24]) {
+    line(p, 8, ry, 12, ry, 1);
+    paint(p, 12, ry, 3);
+  }
+  line(p, 12, 12, 20, 16, 3);
+  line(p, 12, 18, 21, 22, 3);
+  line(p, 12, 13, 20, 17, 1);
+  line(p, 12, 19, 21, 23, 1);
+  return p;
+}
+
+/** 32x32 Augmented Frame: Carbon Chassis (augmented/frame/8) */
+export function drawCarbonChassis(): Pad {
+  const p = padFor('frame');
+  line(p, 10, 4, 21, 4, 1);
+  line(p, 10, 4, 5, 9, 1);
+  line(p, 5, 9, 7, 13, 1);
+  line(p, 7, 13, 9, 12, 1);
+  line(p, 9, 12, 8, 28, 1);
+  line(p, 8, 28, 23, 28, 1);
+  line(p, 23, 28, 22, 12, 1);
+  line(p, 22, 12, 24, 13, 1);
+  line(p, 24, 13, 26, 9, 1);
+  line(p, 26, 9, 21, 4, 1);
+  fill(p, 15, 15, 2);
+  line(p, 8, 11, 23, 11, 1);
+  line(p, 8, 17, 23, 17, 1);
+  line(p, 8, 23, 23, 23, 1);
+  line(p, 9, 12, 22, 12, 3);
+  line(p, 9, 18, 22, 18, 3);
+  line(p, 9, 24, 22, 24, 3);
+  for (let y = 6; y <= 26; y++) {
+    paint(p, 15, y, 1);
+    paint(p, 16, y, 3);
+  }
+  return p;
+}
+
+/** 16x16 Machine Head: Single Lens Turret (machine/head/1) */
+export function drawSingleLensTurret(): Pad {
+  const p = padFor('head');
+  for (let x = 3; x <= 12; x++) {
+    paint(p, x, 3, 1);
+    paint(p, x, 12, 1);
+  }
+  for (let y = 3; y <= 12; y++) {
+    paint(p, 3, y, 1);
+    paint(p, 12, y, 1);
+  }
+  fill(p, 7, 7, 2);
+  line(p, 6, 5, 9, 5, 1);
+  line(p, 6, 10, 9, 10, 1);
+  line(p, 5, 6, 5, 9, 1);
+  line(p, 10, 6, 10, 9, 1);
+  fill(p, 7, 7, 1);
+  paint(p, 7, 7, 3);
+  paint(p, 8, 7, 3);
+  paint(p, 7, 8, 3);
+  paint(p, 4, 4, 3);
+  paint(p, 11, 4, 3);
+  paint(p, 4, 11, 3);
+  paint(p, 11, 11, 3);
+  return p;
+}
+
+/** 16x16 Machine Head: Sensor Cluster Turret (machine/head/5) */
+export function drawSensorClusterTurret(): Pad {
+  const p = padFor('head');
+  line(p, 4, 3, 11, 3, 1);
+  line(p, 4, 3, 2, 7, 1);
+  line(p, 2, 7, 2, 11, 1);
+  line(p, 2, 11, 5, 13, 1);
+  line(p, 5, 13, 11, 13, 1);
+  line(p, 11, 13, 13, 10, 1);
+  line(p, 13, 10, 13, 5, 1);
+  line(p, 13, 5, 11, 3, 1);
+  fill(p, 7, 7, 2);
+  line(p, 8, 5, 11, 5, 1);
+  line(p, 8, 8, 11, 8, 1);
+  line(p, 7, 6, 7, 7, 1);
+  line(p, 12, 6, 12, 7, 1);
+  fill(p, 9, 6, 1);
+  paint(p, 9, 6, 3);
+  paint(p, 10, 6, 3);
+  paint(p, 4, 5, 1);
+  paint(p, 5, 5, 3);
+  paint(p, 4, 6, 3);
+  paint(p, 5, 6, 1);
+  paint(p, 5, 9, 1);
+  paint(p, 6, 9, 3);
+  paint(p, 5, 10, 3);
+  paint(p, 6, 10, 1);
+  return p;
+}
+
+/** 16x16 Machine Crest: Exhaust Array (machine/crest/6) */
+export function drawExhaustArray(): Pad {
+  const p = padFor('crest');
+  line(p, 2, 14, 13, 14, 1);
+  line(p, 3, 13, 12, 13, 2);
+  const pipes = [3, 6, 9, 12];
+  for (const px of pipes) {
+    line(p, px, 12, px, 6, 1);
+    line(p, px + 1, 12, px + 1, 6, 2);
+    paint(p, px, 5, 1);
+    paint(p, px + 1, 5, 3);
+    paint(p, px, 4, 3);
+    paint(p, px + 1, 3, 3);
+  }
+  return p;
+}
+
+/** 32x32 Machine Frame: Foundry Unit Chassis (machine/frame/3) */
+export function drawFoundryUnitChassis(): Pad {
+  const p = padFor('frame');
+  line(p, 8, 4, 23, 4, 1);
+  line(p, 8, 4, 4, 8, 1);
+  line(p, 4, 8, 4, 25, 1);
+  line(p, 4, 25, 7, 28, 1);
+  line(p, 7, 28, 24, 28, 1);
+  line(p, 24, 28, 27, 25, 1);
+  line(p, 27, 25, 27, 8, 1);
+  line(p, 27, 8, 23, 4, 1);
+  fill(p, 15, 15, 2);
+  line(p, 6, 6, 25, 6, 1);
+  line(p, 6, 26, 25, 26, 1);
+  for (const vx of [10, 15, 20]) {
+    line(p, vx - 1, 9, vx - 1, 23, 1);
+    line(p, vx + 1, 9, vx + 1, 23, 1);
+    for (let y = 9; y <= 23; y++) {
+      paint(p, vx, y, 3);
+    }
+    for (const gy of [11, 15, 19]) {
+      paint(p, vx - 1, gy, 1);
+      paint(p, vx, gy, 1);
+      paint(p, vx + 1, gy, 1);
+    }
+  }
+  return p;
+}
+
+/** 32x32 Machine Frame: Titan Chassis (machine/frame/5) */
+export function drawTitanChassis(): Pad {
+  const p = padFor('frame');
+  line(p, 7, 4, 24, 4, 1);
+  line(p, 7, 4, 3, 8, 1);
+  line(p, 3, 8, 3, 25, 1);
+  line(p, 3, 25, 7, 28, 1);
+  line(p, 7, 28, 24, 28, 1);
+  line(p, 24, 28, 28, 25, 1);
+  line(p, 28, 25, 28, 8, 1);
+  line(p, 28, 8, 24, 4, 1);
+  fill(p, 15, 15, 2);
+  line(p, 5, 10, 26, 10, 1);
+  line(p, 5, 19, 26, 19, 1);
+  for (let i = 0; i < 4; i++) {
+    const x = 7 + i * 5;
+    line(p, x, 12, x + 3, 17, 3);
+    line(p, x + 1, 12, x + 4, 17, 1);
+  }
+  line(p, 11, 21, 20, 21, 1);
+  line(p, 11, 23, 20, 23, 1);
+  line(p, 11, 25, 20, 25, 1);
+  return p;
+}
+
+/** 32x32 Machine Frame: Tracked Base (machine/frame/7) */
+export function drawTrackedBase(): Pad {
+  const p = padFor('frame');
+  line(p, 8, 4, 23, 4, 1);
+  line(p, 8, 4, 5, 8, 1);
+  line(p, 5, 8, 5, 18, 1);
+  line(p, 26, 8, 26, 18, 1);
+  line(p, 26, 8, 23, 4, 1);
+  line(p, 5, 18, 26, 18, 1);
+  fill(p, 15, 12, 2);
+  for (let y = 7; y <= 15; y += 2) {
+    line(p, 8, y, 23, y, 1);
+  }
+  line(p, 4, 19, 27, 19, 1);
+  line(p, 4, 19, 3, 23, 1);
+  line(p, 3, 23, 4, 28, 1);
+  line(p, 4, 28, 27, 28, 1);
+  line(p, 27, 28, 28, 23, 1);
+  line(p, 28, 23, 27, 19, 1);
+  fill(p, 15, 23, 1);
+  for (const wx of [6, 12, 18, 24]) {
+    line(p, wx - 1, 22, wx + 1, 22, 3);
+    line(p, wx - 1, 24, wx + 1, 24, 3);
+    paint(p, wx, 23, 2);
+  }
+  return p;
+}
+
+/** 32x32 Machine Frame: Monowheel Gyro (machine/frame/8) */
+export function drawMonowheelGyro(): Pad {
+  const p = padFor('frame');
+  line(p, 9, 4, 22, 4, 1);
+  line(p, 9, 4, 6, 8, 1);
+  line(p, 6, 8, 6, 16, 1);
+  line(p, 25, 8, 25, 16, 1);
+  line(p, 25, 8, 22, 4, 1);
+  line(p, 6, 16, 25, 16, 1);
+  fill(p, 15, 10, 2);
+  line(p, 11, 7, 20, 7, 1);
+  line(p, 11, 12, 20, 12, 1);
+  line(p, 11, 7, 11, 12, 1);
+  line(p, 20, 7, 20, 12, 1);
+  fill(p, 15, 9, 3);
+  line(p, 8, 16, 8, 27, 1);
+  line(p, 9, 16, 9, 27, 3);
+  line(p, 22, 16, 22, 27, 3);
+  line(p, 23, 16, 23, 27, 1);
+  for (let deg = 0; deg < 16; deg++) {
+    const th = (deg / 16) * Math.PI * 2;
+    const gx = Math.round(15.5 + Math.cos(th) * 5.5);
+    const gy = Math.round(22.5 + Math.sin(th) * 5.5);
+    paint(p, gx, gy, 1);
+  }
+  paint(p, 15, 22, 3);
+  paint(p, 16, 22, 3);
+  paint(p, 15, 23, 3);
+  paint(p, 16, 23, 3);
+  return p;
+}
+
 // ----------------------------------------------------------- The Starter Pack
 
 export interface VaultPackEntry {
@@ -521,21 +1064,48 @@ export interface VaultPackEntry {
   dataUrl: string;
 }
 
-/** The complete collection of 12 handcrafted starter parts for the Vault spec. */
+/** The complete collection of 34 handcrafted starter parts for the Vault spec. */
 export function createVaultSpecParts(): VaultPackEntry[] {
   const list: { id: string; pad: Pad }[] = [
+    // Machine build
     { id: 'machine/head/4', pad: drawCrtMonitorFace() },
+    { id: 'machine/head/0', pad: drawOpticSlit() },
+    { id: 'machine/head/1', pad: drawSingleLensTurret() },
+    { id: 'machine/head/5', pad: drawSensorClusterTurret() },
     { id: 'machine/crest/7', pad: drawWarningSiren() },
     { id: 'machine/crest/1', pad: drawVentStack() },
-    { id: 'machine/head/0', pad: drawOpticSlit() },
+    { id: 'machine/crest/6', pad: drawExhaustArray() },
     { id: 'machine/frame/6', pad: drawSteamBoiler() },
-    { id: 'human/crest/8', pad: drawPineTarHelmet() },
+    { id: 'machine/frame/3', pad: drawFoundryUnitChassis() },
+    { id: 'machine/frame/5', pad: drawTitanChassis() },
+    { id: 'machine/frame/7', pad: drawTrackedBase() },
+    { id: 'machine/frame/8', pad: drawMonowheelGyro() },
+
+    // Human build
+    { id: 'human/head/0', pad: drawClassicBallplayerHead() },
+    { id: 'human/head/1', pad: drawSquareJawHead() },
+    { id: 'human/head/5', pad: drawHeavyBrowHead() },
     { id: 'human/crest/1', pad: drawClassicCap() },
-    { id: 'human/frame/9', pad: drawPinstripeClassic() },
+    { id: 'human/crest/4', pad: drawBattingHelmet() },
+    { id: 'human/crest/7', pad: drawBackwardCap() },
+    { id: 'human/crest/8', pad: drawPineTarHelmet() },
+    { id: 'human/crest/9', pad: drawStirrupFlapHelmet() },
+    { id: 'human/frame/1', pad: drawAverageJersey() },
     { id: 'human/frame/8', pad: drawWoolVeteran() },
-    { id: 'augmented/head/5', pad: drawMonocleHud() },
-    { id: 'augmented/crest/7', pad: drawNeuralUplink() },
+    { id: 'human/frame/9', pad: drawPinstripeClassic() },
+
+    // Augmented build
+    { id: 'augmented/head/0', pad: drawCyborgRoundHead() },
     { id: 'augmented/head/3', pad: drawScannerJaw() },
+    { id: 'augmented/head/4', pad: drawAugmentedOcular() },
+    { id: 'augmented/head/5', pad: drawMonocleHud() },
+    { id: 'augmented/head/6', pad: drawBionicOptic() },
+    { id: 'augmented/crest/0', pad: drawHalfVisor() },
+    { id: 'augmented/crest/4', pad: drawFullVisor() },
+    { id: 'augmented/crest/7', pad: drawNeuralUplink() },
+    { id: 'augmented/crest/8', pad: drawSensoryBrow() },
+    { id: 'augmented/frame/7', pad: drawPneumaticSpine() },
+    { id: 'augmented/frame/8', pad: drawCarbonChassis() },
   ];
 
   return list.map((item) => ({

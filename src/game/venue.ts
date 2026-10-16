@@ -354,12 +354,21 @@ export function drawVenue(
   };
   clay(210, 68, 76, 26, l.dirt);
   clay(210, 66, 60, 18, l.dirtLight);
+  c.strokeStyle = 'rgba(0,0,0,0.15)';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.ellipse(210, 67, 44, 12, 0, 0, Math.PI);
+  c.stroke();
   c.fillStyle = '#1e140d';
   c.fillRect(202, 58, 16, 4);
   c.fillStyle = '#e5e8e0';
   c.fillRect(202, 57, 16, 3);
   clay(210, 262, 74, 30, l.dirt);
   clay(210, 260, 58, 22, l.dirtLight);
+  c.strokeStyle = 'rgba(0,0,0,0.12)';
+  c.beginPath();
+  c.ellipse(210, 261, 46, 16, 0, 0, Math.PI);
+  c.stroke();
 
   c.strokeStyle = 'rgba(224, 232, 220, 0.4)';
   c.lineWidth = 1;
